@@ -218,6 +218,21 @@ export default function Evaluation() {
       setSelectedExperiments((data.experiments ?? []).map((e: any) => e.experiment_id))
       setScope(data.scope)
       if (data.region_id) setRegionId(data.region_id)
+      // refresh the compatibility panel for the restored selection instead of
+      // leaving stale/undefined values from a previous configuration
+      const experimentIds = (data.experiments ?? []).map((e: any) => e.experiment_id)
+      const compatibilityPayload = {
+        dataset_id: data.dataset_id,
+        scope: data.scope,
+        region_id: data.region_id ?? undefined,
+        experiment_ids: experimentIds,
+        test_selection: 'full',
+        horizon_step: 1,
+      }
+      api
+        .post<any>(ENDPOINTS.evaluationValidate, compatibilityPayload)
+        .then(setCompatibility)
+        .catch(() => setCompatibility(null))
       messageApi.success(`已打开 ${evaluationId}`)
     } catch (err) {
       messageApi.error(String(err))

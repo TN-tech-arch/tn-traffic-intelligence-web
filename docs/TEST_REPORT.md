@@ -113,7 +113,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\test_install.ps1
 | 启动安装版 | Worker + API 启动成功，`/api/health` 返回 `version 3.1.0, db_ok=true` |
 | 安装版数据基线 | `sources=3 series_regions=459 gis_regions=473 no_data=14` |
 | 安装版 UI | `GET /` HTTP 200 |
-| 卸载 | 静默卸载后目标目录清空（早期版本残留 `bootstrap_data.py` 已修复为写入 `%TEMP%` 并加入 `[UninstallDelete]`） |
+| 卸载 | 静默卸载后目标目录清空（早期版本残留的 `bootstrap_data.py` 已修复为写入 `%TEMP%` 并在 `[UninstallDelete]` 中兜底） |
+
+最终交付的安装包由冻结源码重新构建，并在 `packaging/install-test` 目标目录完成一遍完整的
+安装 → 启动 → 数据基线校验 → 卸载验证（`data/logs/install_test.log` 最后一行：
+`INSTALL / RUN / UNINSTALL VERIFICATION PASSED`）。
 
 ## 6. 性能实测（CPU，无 GPU）
 
