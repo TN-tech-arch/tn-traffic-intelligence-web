@@ -1,0 +1,6 @@
+torch
+prophet
+transformers
+accelerate
+chronos-forecasting
+huggingface_hub

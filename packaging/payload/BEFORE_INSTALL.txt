@@ -1,0 +1,23 @@
+﻿TianNuo Traffic Intelligence 3.1 - 安装说明
+================================================
+
+本安装包会安装：
+  1. 便携版 Python 3.12 运行时与全部依赖（离线可用，约 1.4 GB 安装后占用）
+  2. 后端服务（FastAPI + 真实算法 Worker）
+  3. 前端生产构建（静态资源由后端直接提供）
+  4. 六个原始数据文件（Milano / Trentino / ZTE）
+
+安装完成后会自动：
+  * 初始化 SQLite 数据库并校验数据指纹与区域映射
+  * 生成开始菜单与桌面快捷方式，可一键启动、停止、卸载
+
+预训练大模型权重：
+  * Chronos (amazon/chronos-bolt-tiny, Apache-2.0) 约 35 MB
+  * TimesFM (google/timesfm-2.5-200m-pytorch, Apache-2.0) 约 800 MB
+  如安装时未勾选下载，可在应用内「Training → Preflight / 模型预检」中按需下载，
+  或先设置环境变量 HF_ENDPOINT（默认使用官方镜像 https://hf-mirror.com）。
+
+系统要求：Windows 10/11 x64，建议 8 GB 以上内存（本机 16 GB 实测），
+无独立显卡也可以运行全部 12 种算法（大模型为零样本 CPU 推理，速度较慢）。
+
+卸载：开始菜单 → 卸载 TN Traffic Intelligence，会同时删除运行时与数据目录。

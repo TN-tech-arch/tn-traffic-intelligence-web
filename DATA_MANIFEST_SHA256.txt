@@ -1,0 +1,8 @@
+# SHA256 原始数据清单（PROJECT_SPEC v3.1）：这些文件不应被修改
+
+001ca22429c6fb2362a10cb2d8806fe1dd1ee32aa09f5de0de9fb29612fc04af  milano_traffic_nid.csv  (14,597,187 bytes)
+141559d8730dd4d58a503fc59a796a88ceb9f8d8bca5eac8fc7db99bacb2de60  milano.geojson  (1,090,792 bytes)
+7522881673ce4ce1765bfa9c39feafc1b2ec54655d1834ea73c41462a612083f  trentino_traffic_nid.csv  (36,814,681 bytes)
+8dfae12fc87cf1940c129c5632729dad672e76a4068c8cbe0cc24220f1a7d4d3  trento.geojson  (927,287 bytes)
+deb776acfaccad2f5d3caad9a0dfee8436cf622d3e50cb87415a54391b144a61  zte_4g_down.region.csv  (5,757,121 bytes)
+07676c541649ffede384003525c47587274252e7de15f05a6a5461899653136f  zte_4g_down.traffic.geojson  (1,408,893 bytes)

@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+
+# Runtime data (raw sources are intentionally tracked; everything derived is not)
+data/processed/
+data/artifacts/
+data/logs/
+data/screenshots/
+data/tn_traffic.db*
+
+# Model weights (multi-GB, never commit)
+models_cache/
+
+# Packaging build artefacts
+packaging/dist/
+packaging/dist-stage/
+packaging/install-test/
+packaging/wheels/
+packaging/runtime/*.zip
+packaging/*.exe
+
+# Local logs
+pip-*.log
+api.log
+api.err.log

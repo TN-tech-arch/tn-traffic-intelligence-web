@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-multipart
+numpy
+pandas
+scipy
+scikit-learn
+statsmodels
+joblib
+httpx
+pytest
+pyarrow
+psutil
