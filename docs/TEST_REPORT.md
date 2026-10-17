@@ -196,3 +196,15 @@ node tests\ui_check.mjs                             # 35/35，其他模块未回
 
 * `data/screenshots/12-m1-insights.png`：日期范围、三张图与三个 Insights 卡片（真实数值）。
 * `data/screenshots/13-m1-insights-full.png`：整页长截图，包含 ACF 置信带与展开区域。
+
+### 9.4 最后一轮检查与修复（2026-10-17）
+
+| 问题 | 修复 | 验证 |
+|---|---|---|
+| 分析范围 11-02 起，但 GIS 截面仍显示 11-01 | 滑块定义域改为 `[range.start_index, range.end_index-1]`；范围变化时自动夹紧；时间序列先解析范围再请求截面，保证地图时间落在范围内 | `check_m1_fixes.mjs` 1a–1d：min=144、value=144、末端显示 2013-11-15 |
+| Max Lag 输入框显示 0 但实际为 1008 | 新增 Auto 开关：Auto 显示实际生效值与换算时长；切手动时用当前生效值预填；手动超上限前后端返回 `LAG_TOO_LARGE`，1 返回 `LAG_TOO_SMALL` | 2a–2e：自动 1109 步（7.7 天）、手动预填 1109、200 生效、5000 报错、可切回 Auto |
+| 14 天窗口把周周期当作已确认 | 区分 candidate / confirmed：确认需 ≥3 个完整重复 + 该滞后配对 ≥2×Lag + 峰值 ≥0.4；并要求真正的局部极值与 Peak 后 10% 余量 | 3a/3b：日周期确认（14 次重复、1872 对）；周周期仅“候选（2 次重复）” |
+| 切换 Auto 后不再自动重算 | 自动重算等待校验落定，并把 `valid` 加入依赖；旧远端错误不会永久吞掉重算 | 2e 后实际发出 `acf_max_lag=0` 请求并回到自动值 |
+
+回归：`pytest 110 passed`、`ui_check.mjs 35/35`、`check_m1_fixes.mjs 12/12`。
+截图：`data/screenshots/14-m1-final-fixes.png`。

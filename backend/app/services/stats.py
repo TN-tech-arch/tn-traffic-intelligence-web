@@ -67,10 +67,15 @@ def describe(values: np.ndarray, timestamps: np.ndarray | None = None) -> dict[s
 def _auto_max_lag(points: int, interval_minutes: int) -> int:
     day_lag = max(1, 1440 // max(1, interval_minutes))
     week_lag = max(1, 10080 // max(1, interval_minutes))
+
+    def padded(lag: int) -> int:
+        # leave room after the candidate lag so its local peak can be verified
+        return lag + max(2, int(round(lag * 0.10)))
+
     if points >= 2 * week_lag:
-        candidate = week_lag
+        candidate = padded(week_lag)
     elif points >= 2 * day_lag:
-        candidate = day_lag
+        candidate = padded(day_lag)
     else:
         candidate = max(2, min(points - 2, points // 4))
     return int(min(max(2, candidate), 5000, max(2, points - 2)))
@@ -174,12 +179,22 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     max_lag_requested = int(payload.get("acf_max_lag") or 0)
     auto_lag = _auto_max_lag(resolved.points, interval)
     max_lag = auto_lag if max_lag_requested <= 0 else max_lag_requested
-    max_lag = int(min(max(2, max_lag), max(2, resolved.points - 2), 5000))
-    if max_lag_requested > 0 and max_lag_requested > resolved.points - 2:
-        warnings.append(
-            f"Max Lag={max_lag_requested} 超过可支持的范围（有效点 {resolved.points} 个，最多 {max(2, resolved.points - 2)}），"
-            f"已按 {max_lag} 计算。"
+    if max_lag_requested > 0 and max_lag_requested > max(2, resolved.points - 2):
+        raise RequestRejected(
+            [
+                {
+                    "path": "m1.acf_max_lag",
+                    "code": "LAG_TOO_LARGE",
+                    "severity": "error",
+                    "message": f"Max Lag={max_lag_requested} 超过当前序列可支持的范围"
+                               f"（{resolved.points} 个时间点，最多 {max(2, resolved.points - 2)}）。",
+                    "suggestion": f"请把 Max Lag 设为 2–{max(2, resolved.points - 2)}，或改用 Auto 自动模式。",
+                    "received_value": max_lag_requested,
+                }
+            ],
+            message="ACF Max Lag 超出可用范围",
         )
+    max_lag = int(min(max(2, max_lag), max(2, resolved.points - 2), 5000))
 
     requested_primary = payload.get("insight_region_id")
     primary_index = data.region_ids.index(requested_primary) if requested_primary in data.region_ids else 0
@@ -222,6 +237,10 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
         "region_id": primary_region,
         "max_lag": max_lag,
         "auto_max_lag": auto_lag,
+        "requested_max_lag": max_lag_requested,
+        "mode": "auto" if max_lag_requested <= 0 else "manual",
+        "effective_max_lag": max_lag,
+        "max_lag_label": insight_engine.duration_label(max_lag * interval),
         "interval_minutes": interval,
         "lag_seconds": interval * 60,
         "periodicity": periodicity,

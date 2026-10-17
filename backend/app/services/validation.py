@@ -685,11 +685,15 @@ def validate_m1(values: dict[str, Any], *, available_regions: list[str] | None =
                     "无法检查 24 小时日周期。",
                     f"如需检查日周期，请将 Max Lag 设为至少 {day_lag}（24 小时）。", max_lag))
             if isinstance(max_lag, int) and max_lag > max(2, resolved.points - 2):
-                issues.append(warning(
-                    "m1.acf_max_lag", "LAG_CLAMPED",
-                    f"Max Lag={max_lag} 超过当前序列可支持的范围（{resolved.points} 个点），"
-                    "计算时会被截断。",
-                    f"请将 Max Lag 设为不超过 {max(2, resolved.points - 2)}。", max_lag))
+                issues.append(error(
+                    "m1.acf_max_lag", "LAG_TOO_LARGE",
+                    f"Max Lag={max_lag} 超过当前序列可支持的范围"
+                    f"（{resolved.points} 个时间点，最多 {max(2, resolved.points - 2)}）。",
+                    f"请将 Max Lag 设为 2–{max(2, resolved.points - 2)}，或使用 Auto（0）。", max_lag))
+            if isinstance(max_lag, int) and 0 < max_lag < 2:
+                issues.append(error(
+                    "m1.acf_max_lag", "LAG_TOO_SMALL",
+                    "手动 Max Lag 至少需要 2。", "请输入 ≥2 的整数，或使用 Auto（0）。", max_lag))
             if resolved.points and resolved.span_seconds < 86400:
                 issues.append(warning(
                     "m1.time_end", "SHORT_RANGE",

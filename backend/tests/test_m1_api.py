@@ -83,18 +83,27 @@ def test_out_of_bounds_dates_are_rejected():
     assert any(i["code"] == "OUT_OF_BOUNDS" for i in response.json()["issues"])
 
 
-def test_huge_analysis_is_never_silently_faked():
-    """A Max Lag larger than the series is clamped and reported, not rejected."""
-    data = client.post("/api/analysis/temporal", json=base_payload(acf_max_lag=5000)).json()
-    assert data["acf"]["max_lag"] <= data["range"]["points"] - 2
-    assert any("Max Lag" in line for line in data["warnings"])
+def test_manual_max_lag_beyond_the_series_is_rejected():
+    """Manual Max Lag beyond n-2 is an error (Auto is expressed as 0)."""
+    response = client.post("/api/analysis/temporal", json=base_payload(acf_max_lag=5000))
+    assert response.status_code == 422
+    issues = response.json()["issues"]
+    assert any(i["path"] == "m1.acf_max_lag" and i["code"] == "LAG_TOO_LARGE" for i in issues)
+
+
+def test_auto_mode_reports_the_effective_lag():
+    data = client.post("/api/analysis/temporal", json=base_payload(acf_max_lag=0)).json()
+    assert data["acf"]["mode"] == "auto"
+    assert data["acf"]["requested_max_lag"] == 0
+    assert data["acf"]["max_lag"] == data["acf"]["auto_max_lag"] > 0
+    assert data["acf"]["effective_max_lag"] == data["acf"]["max_lag"]
 
 
 def test_max_lag_changes_the_acf_result():
     short = client.post("/api/analysis/temporal", json=base_payload(acf_max_lag=24)).json()
-    long = client.post("/api/analysis/temporal", json=base_payload(acf_max_lag=144)).json()
+    long = client.post("/api/analysis/temporal", json=base_payload(acf_max_lag=170)).json()
     assert len(short["acf"]["lags"]) == 24
-    assert len(long["acf"]["lags"]) == 144
+    assert len(long["acf"]["lags"]) == 170
     daily = next(c for c in long["acf"]["periodicity"]["candidates"] if "24 小时" in c["name"])
     assert daily["available"] is True
     covered = next(c for c in short["acf"]["periodicity"]["candidates"] if "24 小时" in c["name"])

@@ -161,6 +161,7 @@ export default function Exploration() {
   const [spatial, setSpatial] = useState<any>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [autoLag, setAutoLag] = useState(true)
   const [errorIssues, setErrorIssues] = useState<Issue[]>([])
   const [computedKey, setComputedKey] = useState<string | null>(null)
   const [tab, setTab] = useState('temporal')
@@ -334,17 +335,22 @@ export default function Exploration() {
       setLoading(true)
       setErrorIssues([])
       try {
-        const spatialPayload = {
-          ...payload,
-          time_index: sliceIndex,
-        }
-        const [temporal, spatialData] = await Promise.all([
-          api.post<any>(ENDPOINTS.temporal, payload),
-          api.post<any>(ENDPOINTS.spatial, spatialPayload),
-        ])
+        // Resolve the range first, then clamp the map slice into it so the map
+        // can never show an instant outside the Analysis Time Range.
+        const temporal = await api.post<any>(ENDPOINTS.temporal, payload)
         if (seq !== requestSeq.current) return // ignore stale responses
+        const clampedSlice = Math.min(
+          Math.max(sliceIndex, temporal.range.start_index),
+          Math.max(temporal.range.start_index, temporal.range.end_index - 1),
+        )
+        const spatialData = await api.post<any>(ENDPOINTS.spatial, {
+          ...payload,
+          time_index: clampedSlice,
+        })
+        if (seq !== requestSeq.current) return
         setResult(temporal)
         setSpatial(spatialData)
+        setSliceIndex(clampedSlice)
         setComputedKey(key)
         const range = temporal.range
         if (lastEdit === 'date') {
@@ -377,19 +383,26 @@ export default function Exploration() {
 
   useEffect(() => {
     if (!config.region_ids.length) return
+    // Wait for validation to settle. A transient stale remote error must not
+    // swallow the automatic recompute permanently (valid is a dependency).
+    if (!valid) return
     if (computedKey === requestKey && !loading) return
     const timer = window.setTimeout(() => {
       runAnalysis()
     }, 600)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestKey, config.region_ids.length])
+  }, [requestKey, config.region_ids.length, valid])
+
+  const sliceMin = result?.range?.start_index ?? 0
+  const sliceMax = Math.max(sliceMin, (result?.range?.end_index ?? 1) - 1)
+  const sliceValue = Math.min(Math.max(sliceIndex, sliceMin), sliceMax)
 
   useEffect(() => {
-    if (!spatial) return
-    setSliceIndex((prev) => Math.min(prev, Math.max(0, (result?.range?.total_points ?? 1) - 1)))
+    if (!result?.range) return
+    setSliceIndex((prev) => Math.min(Math.max(prev, sliceMin), sliceMax))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result?.range?.total_points])
+  }, [computedKey, sliceMin, sliceMax])
 
   // The map slice is deliberately independent from the analysis range: moving it
   // only refetches the spatial snapshot, never the temporal statistics/insights.
@@ -399,7 +412,7 @@ export default function Exploration() {
     const seq = ++spatialSeq.current
     const timer = window.setTimeout(async () => {
       try {
-        const payload = { ...JSON.parse(computedKey), time_index: sliceIndex }
+        const payload = { ...JSON.parse(computedKey), time_index: sliceValue }
         const data = await api.post<any>(ENDPOINTS.spatial, payload)
         if (seq === spatialSeq.current) setSpatial(data)
       } catch {
@@ -408,7 +421,7 @@ export default function Exploration() {
     }, 180)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sliceIndex, computedKey])
+  }, [sliceValue, computedKey])
 
   const bounds = useMemo(() => {
     const start = sourceMeta?.time_start ? dayjs(sourceMeta.time_start) : null
@@ -573,6 +586,7 @@ export default function Exploration() {
                     setLastEdit('date')
                     setResult(null)
                     setComputedKey(null)
+                    setAutoLag(true)
                   }}
                 >
                   Reset 配置
@@ -755,18 +769,24 @@ export default function Exploration() {
               </Tooltip>
               <input
                 type="range"
-                min={0}
-                max={Math.max(0, (range?.total_points ?? 1) - 1)}
-                value={sliceIndex}
+                min={sliceMin}
+                max={sliceMax}
+                value={sliceValue}
                 onChange={(event) => setSliceIndex(Number(event.target.value))}
                 style={{ flex: 1 }}
                 aria-label="时间截面位置"
               />
-              <span className="tn-muted">{spatial?.time_at ?? `index ${sliceIndex}`}</span>
+              <span className="tn-muted">{spatial?.time_at ?? `index ${sliceValue}`}</span>
             </div>
             <div className="tn-hint" style={{ marginTop: 6 }}>
               「时间截面」= 从整条时间轴中选<strong>一个时刻</strong>，看这一刻所有区域的取值快照；它只影响地图与
               Spatial Analysis。右侧统计、日内规律、工作日/周末与 ACF 仍使用左侧选择的分析时间范围。
+              {range ? (
+                <div style={{ marginTop: 4 }}>
+                  截面被限制在分析范围内：{range.start_at} ～ {range.end_at}
+                  （index {range.start_index}–{Math.max(range.start_index, range.end_index - 1)}）。
+                </div>
+              ) : null}
             </div>
             <Card size="small" title="多区域时序曲线（真实观测）" style={{ marginTop: 10 }}>
               <div className={stale ? 'tn-stale' : undefined}>
@@ -912,14 +932,48 @@ export default function Exploration() {
                           {acfInfo?.max_lag ?? '—'}
                         </div>
                       </div>
-                      <ParamField
-                        spec={maxLagSpec}
-                        value={config.acf_max_lag}
-                        issues={fieldIssues('acf_max_lag')}
-                        path="m1.acf_max_lag"
-                        onChange={(_key, value) => updateConfig({ acf_max_lag: Number(value) || 0 })}
-                        compact
-                      />
+                      <div className="tn-inline" style={{ marginBottom: 6 }}>
+                        <Switch
+                          size="small"
+                          checked={autoLag}
+                          onChange={(checked) => {
+                            setAutoLag(checked)
+                            if (checked) {
+                              updateConfig({ acf_max_lag: 0 })
+                            } else {
+                              const current = acfInfo?.max_lag ?? acfInfo?.auto_max_lag ?? 2
+                              updateConfig({ acf_max_lag: Math.max(2, Number(current)) })
+                            }
+                          }}
+                        />
+                        <span className="tn-muted">
+                          {autoLag ? 'Auto 自动（按数据长度选择）' : '手动指定 Max Lag'}
+                        </span>
+                      </div>
+                      {autoLag ? (
+                        <div className="tn-range-summary" style={{ marginBottom: 6 }}>
+                          <div>
+                            <strong>实际生效 Max Lag：</strong>
+                            {acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
+                          </div>
+                          <div className="tn-muted">自动值由当前时间点数与采样间隔决定；0 表示 Auto。</div>
+                        </div>
+                      ) : (
+                        <ParamField
+                          spec={{ ...maxLagSpec, label_zh: '手动 Max Lag（≥2）' }}
+                          value={config.acf_max_lag}
+                          issues={fieldIssues('acf_max_lag')}
+                          path="m1.acf_max_lag"
+                          onChange={(_key, value) => updateConfig({ acf_max_lag: Number(value) || 0 })}
+                          compact
+                        />
+                      )}
+                      {!autoLag && acfInfo ? (
+                        <div className="tn-muted" style={{ marginBottom: 6 }}>
+                          实际生效：{acfInfo.max_lag} 步（约 {acfInfo.max_lag_label}） · 可支持上限{' '}
+                          {Math.max(2, (range?.points ?? 0) - 2)} 步
+                        </div>
+                      ) : null}
                       <AcfChart
                         lags={result?.acf?.lags ?? []}
                         values={result?.acf?.values ?? []}

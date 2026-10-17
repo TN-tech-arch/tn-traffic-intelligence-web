@@ -639,6 +639,7 @@ def detect_periodicity(
     """Look for hourly / daily / weekly peaks near the expected lags."""
     detrended = detrend(values)
     curve = acf_curve(detrended, max_lag)
+    n_valid = int(np.isfinite(values).sum())
     candidates = []
     covered_minutes = max_lag * interval_minutes
     span_minutes = span_seconds / 60
@@ -654,11 +655,15 @@ def detect_periodicity(
             "duration_minutes": minutes,
             "duration_label": duration_label(minutes),
             "available": False,
+            "status": "insufficient",
             "reason": None,
             "peak_value": None,
             "peak_lag": None,
             "prominence": None,
             "pairs": 0,
+            "expected_pairs": 0,
+            "coverage_ratio": None,
+            "repetitions": round(span_minutes / minutes, 2) if minutes else None,
             "reliability": "none",
             "evidence": [],
         }
@@ -670,6 +675,14 @@ def detect_periodicity(
             entry["reason"] = (
                 f"当前 Max Lag={max_lag}，只覆盖约 {duration_label(covered_minutes)}，"
                 f"尚未覆盖 {duration_label(minutes)} 周期。建议增加 Max Lag。"
+            )
+            candidates.append(entry)
+            continue
+        probe = max(2, int(round(lag * 0.10)))
+        if lag + probe > max_lag:
+            entry["reason"] = (
+                f"Max Lag={max_lag} 刚好止于候选周期 Lag={lag} 附近，后面没有足够滞后用于确认"
+                f"该处是否为局部峰值；请把 Max Lag 增加到至少 {lag + probe}。"
             )
             candidates.append(entry)
             continue
@@ -686,15 +699,36 @@ def detect_periodicity(
             continue
         lags = curve["lags"]
         values_list = curve["values"]
-        window = max(2, int(round(lag * 0.05)))
-        low = max(0, lag - window - 1)
-        high = min(len(lags), lag + window)
-        segment = [(lags[i], values_list[i]) for i in range(low, high) if values_list[i] is not None]
-        if not segment or not (low <= lag - 1 < high):
+        window = probe
+        low = max(1, lag - window)
+        high = min(len(lags) - 1, lag + window)
+        segment = [(lags[i], values_list[i]) for i in range(low, high + 1) if values_list[i] is not None]
+        if not segment:
             entry["reason"] = "候选周期附近没有足够的 ACF 值。"
             candidates.append(entry)
             continue
-        peak_lag, peak_value = max(segment, key=lambda pair: pair[1])
+        # Only a real local maximum counts as a peak. Without this check a
+        # monotonically decaying ACF would report the window edge as a "peak"
+        # (which is how a weekly sine could masquerade as a daily cycle).
+        local_peaks = []
+        for i in range(low, high + 1):
+            value = values_list[i]
+            if value is None:
+                continue
+            left = values_list[i - 1] if i - 1 >= 0 else None
+            right = values_list[i + 1] if i + 1 < len(values_list) else None
+            if left is None or right is None:
+                continue
+            if value >= left and value >= right and (value > left or value > right):
+                local_peaks.append((lags[i], value))
+        if not local_peaks:
+            entry["reason"] = (
+                f"候选 Lag={lag}（{duration_label(minutes)}）附近的自相关没有形成局部峰值"
+                "（ACF 在此区间单调变化），不能视为周期证据。"
+            )
+            candidates.append(entry)
+            continue
+        peak_lag, peak_value = max(local_peaks, key=lambda pair: pair[1])
         deviation = abs(peak_lag - lag) / max(1, lag)
         entry["candidate_lag"] = lag
         if deviation > 0.2:
@@ -709,17 +743,32 @@ def detect_periodicity(
         baseline = min(neighbour_values) if neighbour_values else 0.0
         prominence = peak_value - baseline
         pairs = int(curve["pairs"][min(len(curve["pairs"]) - 1, peak_lag - 1)])
+        expected_pairs = max(1, n_valid - peak_lag)
+        coverage_ratio = pairs / expected_pairs
+        repetitions = span_minutes / minutes
         covered = span_minutes >= 2 * minutes
-        significant = peak_value >= 0.25 and prominence >= 0.05 and pairs >= 30 and covered
+        base_ok = peak_value >= 0.25 and prominence >= 0.05 and pairs >= 30 and covered
+        # A period is only "confirmed" when there are at least three full repeats
+        # and at least two overlapping samples per lag (2*lag pairs), plus a
+        # reasonably strong autocorrelation. Everything weaker stays a candidate.
+        confirmed = base_ok and repetitions >= 3 and pairs >= 2 * lag and peak_value >= 0.4
+        candidate = base_ok and not confirmed
         entry.update(
             {
-                "available": significant,
+                "available": base_ok,
+                "status": "confirmed" if confirmed else ("candidate" if candidate else "insufficient"),
                 "peak_value": float(peak_value),
                 "peak_lag": int(peak_lag),
                 "prominence": float(prominence),
                 "pairs": pairs,
-                "reliability": "high" if significant and peak_value >= 0.4 and span_minutes >= 4 * minutes
-                else ("medium" if significant else "low"),
+                "expected_pairs": int(expected_pairs),
+                "coverage_ratio": float(coverage_ratio),
+                "repetitions": round(repetitions, 2),
+                "reliability": (
+                    "high" if confirmed and peak_value >= 0.5 and repetitions >= 4
+                    else "medium" if confirmed
+                    else "low"
+                ),
             }
         )
         entry["evidence"].append(
@@ -728,7 +777,20 @@ def detect_periodicity(
         )
         entry["evidence"].append(f"局部突出度 {prominence:.3f}，有效配对 {pairs} 个")
         entry["evidence"].append(f"观测跨度约 {span_minutes / minutes:.1f} 个候选周期")
-        if not significant:
+        if confirmed:
+            entry["evidence"].append(
+                f"至少 {repetitions:.1f} 个完整重复；该滞后处有效配对 {pairs} 个（覆盖 {coverage_ratio * 100:.0f}%）"
+            )
+        elif candidate:
+            reasons = []
+            if repetitions < 3:
+                reasons.append(f"只有约 {repetitions:.1f} 个完整重复（确认需要 ≥3）")
+            if pairs < 2 * lag:
+                reasons.append(f"该滞后处只有 {pairs} 个有效配对（确认需要 ≥{2 * lag}）")
+            if peak_value < 0.4:
+                reasons.append(f"ACF 峰值 {peak_value:.3f} 低于确认阈值 0.4")
+            entry["reason"] = "候选周期，证据尚不足以确认：" + "；".join(reasons)
+        else:
             if peak_value < 0.25:
                 entry["reason"] = f"候选周期附近的最大 ACF 只有 {peak_value:.3f}，低于 0.25 的判定阈值。"
             elif prominence < 0.05:
@@ -738,7 +800,9 @@ def detect_periodicity(
         candidates.append(entry)
     return {"candidates": candidates, "max_lag": max_lag, "interval_minutes": interval_minutes,
             "covered_minutes": covered_minutes, "span_minutes": span_minutes,
-            "method": "先去趋势再做成对 ACF；候选周期 ±5% 邻域内取局部峰值，需同时满足相关度、突出度与样本量阈值"}
+            "method": "先去趋势再做成对 ACF；候选周期 ±5% 邻域内取局部峰值；"
+                      "“候选”需相关度≥0.25、突出度≥0.05、配对≥30；"
+                      "“确认”还需 ≥3 个完整重复、该滞后配对 ≥2×Lag 且峰值≥0.4"}
 
 
 def trend_analysis(values: np.ndarray, interval_minutes: int) -> dict[str, Any]:
@@ -880,19 +944,48 @@ def acf_trend_insights(
             )
         )
 
-    found = [c for c in periodicity["candidates"] if c["available"]]
+    confirmed = [c for c in periodicity["candidates"] if c.get("status") == "confirmed"]
+    candidates_only = [c for c in periodicity["candidates"] if c.get("status") == "candidate"]
     missing = [c for c in periodicity["candidates"] if not c["available"] and c.get("reason")]
-    if found:
+    if confirmed:
         parts = [
             f"{c['name']}：Lag={c['peak_lag']}（{duration_label(c['peak_lag'] * interval_minutes)}），"
-            f"ACF={c['peak_value']:.3f}，突出度 {c['prominence']:.3f}（{c['reliability']} 可靠性）"
-            for c in found
+            f"ACF={c['peak_value']:.3f}，{c['repetitions']:.1f} 个完整重复，有效配对 {c['pairs']}"
+            for c in confirmed
+        ]
+        candidate_note = ""
+        if candidates_only:
+            candidate_parts = [
+                f"{c['name']}（Lag={c['peak_lag']}，ACF={c['peak_value']:.3f}，仅 {c['repetitions']:.1f} 个重复）"
+                for c in candidates_only
+            ]
+            candidate_note = "；另有候选周期但证据不足、未确认：" + "、".join(candidate_parts)
+        items.append(
+            item("periodicity", "潜在周期性",
+                 "已确认的周期证据：" + "；".join(parts) + "。" + candidate_note,
+                 metrics={"candidates": confirmed, "unconfirmed": candidates_only})
+        )
+        for c in confirmed:
+            details.append({"label": f"{c['name']} 证据", "value": "；".join(c["evidence"])})
+        for c in candidates_only:
+            details.append({"label": f"{c['name']}（候选，未确认）", "value": c["reason"] or ""})
+    elif candidates_only:
+        parts = [
+            f"{c['name']}：Lag={c['peak_lag']}（{duration_label(c['peak_lag'] * interval_minutes)}），"
+            f"ACF={c['peak_value']:.3f}，仅 {c['repetitions']:.1f} 个完整重复、{c['pairs']} 个有效配对"
+            for c in candidates_only
         ]
         items.append(
-            item("periodicity", "潜在周期性", "；".join(parts) + "。", metrics={"candidates": found})
+            item(
+                "periodicity", "潜在周期性",
+                "发现候选周期，但证据不足以确认：" + "；".join(parts)
+                + "。需要更长的观测或更多重复才能确认。",
+                level="warning",
+                metrics={"candidates": candidates_only},
+            )
         )
-        for c in found:
-            details.append({"label": f"{c['name']} 证据", "value": "；".join(c["evidence"])})
+        for c in candidates_only:
+            details.append({"label": f"{c['name']} 候选原因", "value": c["reason"] or ""})
     else:
         reasons = "；".join(f"{c['name']}：{c['reason']}" for c in missing[:3])
         items.append(
@@ -940,7 +1033,7 @@ def acf_trend_insights(
         actions.append(f"当前跨度约 {duration_label(span_seconds / 60)}，不足 7 天，无法可靠判断周周期。")
     if valid_points < 100:
         actions.append("有效观测较少，建议扩大时间范围后再判断周期性。")
-    if not found:
+    if not confirmed and not candidates_only:
         actions.append("可尝试扩大时间范围、增加 Max Lag，或检查数据中是否存在长时间缺失。")
     if actions:
         items.append(item("actions", "建议", " ".join(actions[:2]), metrics={"actions": actions[:3]}))

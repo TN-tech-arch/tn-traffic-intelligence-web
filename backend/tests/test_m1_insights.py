@@ -276,6 +276,41 @@ def test_period_not_judged_when_span_is_too_short():
     assert "不足" in daily["reason"]
 
 
+def test_two_week_weekly_peak_is_only_a_candidate():
+    """14 days contain exactly two weekly cycles -> candidate, never 'confirmed'."""
+    values = _sine(168, 24 * 14, 60)  # weekly sine, hourly samples, 14 days
+    result = ins.detect_periodicity(values, interval_minutes=60, max_lag=336, span_seconds=14 * 86400)
+    weekly = next(c for c in result["candidates"] if "7 天" in c["name"])
+    assert weekly["available"] is True
+    assert weekly["status"] == "candidate"
+    assert weekly["repetitions"] == 2.0
+    assert "证据尚不足以确认" in weekly["reason"]
+
+
+def test_five_week_weekly_peak_is_confirmed():
+    values = _sine(168, 24 * 35, 60)
+    result = ins.detect_periodicity(values, interval_minutes=60, max_lag=336, span_seconds=35 * 86400)
+    weekly = next(c for c in result["candidates"] if "7 天" in c["name"])
+    assert weekly["status"] == "confirmed"
+    assert weekly["repetitions"] >= 3
+    assert weekly["pairs"] >= 2 * weekly["peak_lag"]
+
+
+def test_candidate_period_is_not_described_as_confirmed():
+    values = _sine(168, 24 * 14, 60)
+    acf = ins.acf_curve(values, 336)
+    periodicity = ins.detect_periodicity(values, interval_minutes=60, max_lag=336, span_seconds=14 * 86400)
+    trend = ins.trend_analysis(values, 60)
+    result = ins.acf_trend_insights(
+        acf=acf, periodicity=periodicity, trend=trend, interval_minutes=60,
+        valid_points=len(values), span_seconds=14 * 86400, max_lag=336,
+    )
+    period_item = next(i for i in result["items"] if i["key"] == "periodicity")
+    assert "证据不足以确认" in period_item["text"]
+    assert "已确认" not in period_item["text"]
+    assert period_item["level"] == "warning"
+
+
 def test_lag_duration_conversion_matches_sampling_interval():
     assert ins.duration_label(6 * 10) == "1.0 小时"
     assert ins.duration_label(144 * 10) == "1.0 天"
