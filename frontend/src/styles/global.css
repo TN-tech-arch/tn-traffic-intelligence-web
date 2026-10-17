@@ -393,7 +393,7 @@ body {
 }
 
 .tn-range-summary {
-  background: #f7faff;
+  background: #ffffff;
   border: 1px solid #e3ebf6;
   border-radius: 8px;
   padding: 8px 10px;
@@ -419,6 +419,23 @@ body {
 
 .tn-analysis-target .tn-field-label {
   margin-bottom: 4px;
+}
+
+/* Module 1 right pane: three bilingual tabs must fit inside the 35% column */
+.tn-pane-info > .ant-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding: 6px 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  max-width: 168px;
+}
+
+.tn-pane-info > .ant-tabs > .ant-tabs-nav .ant-tabs-tab + .ant-tabs-tab {
+  margin-left: 6px;
+}
+
+.tn-pane-info > .ant-tabs > .ant-tabs-nav .ant-tabs-tab-btn {
+  white-space: normal;
+  text-align: center;
 }
 
 .tn-stat-grid {

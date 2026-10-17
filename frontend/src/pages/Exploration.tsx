@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Button, Card, DatePicker, Modal, Popover, Select, Switch, Tabs, Tag, Tooltip, message,
 } from 'antd'
@@ -60,7 +60,7 @@ const DEFAULT_CONFIG: M1Config = {
   acf_max_lag: 0,
   day_start_hour: 6,
   day_end_hour: 18,
-  max_regions: 6,
+  max_regions: 12,
   insight_region_id: null,
 }
 
@@ -176,13 +176,6 @@ export default function Exploration() {
         enum_labels: sources.map((s) => `${s.display_name}（${s.native_frequency}）`),
         default: 'milano', help_zh: '选择要分析的一个地点数据集。',
         suggestion_zh: '三个来源单位不同，不能直接比较绝对数值。',
-      },
-      {
-        key: 'max_regions', label_zh: '最多对比区域数（Max Comparison Regions）', type: 'integer',
-        min: 1, max: 12, default: 6,
-        help_zh: '允许同时选择并对比的区域数量上限（1–12）。调小上限时不会自动删除已选区域，' +
-                 '需要手动取消多余区域后才能重新运行分析。',
-        suggestion_zh: '默认 6；区域越多地图与时序图越密集。',
       },
       {
         key: 'region_ids', label_zh: '区域（可多选对比）', type: 'array',
@@ -473,8 +466,8 @@ export default function Exploration() {
             : next[0] ?? null
         return { ...prev, region_ids: next, insight_region_id: keep }
       }
-      if (current.length >= prev.max_regions) {
-        messageApi.warning(`最多对比 ${prev.max_regions} 个区域（可在高级设置中调整上限）。`)
+        if (current.length >= prev.max_regions) {
+        messageApi.warning(`最多同时对比 ${prev.max_regions} 个区域。`)
         return prev
       }
       const next = [...current, regionId]
@@ -605,7 +598,7 @@ export default function Exploration() {
               }
             />
             {visibleFields(schema, validationValues as any)
-              .filter((spec) => ['source_key', 'region_ids', 'max_regions', 'frequency', 'aggregation'].includes(spec.key))
+              .filter((spec) => ['source_key', 'region_ids', 'frequency', 'aggregation'].includes(spec.key))
               .map((spec) => (
                 <ParamField
                   key={spec.key}
@@ -629,18 +622,9 @@ export default function Exploration() {
                   compact
                 />
               ))}
-            {selected.length > (config.max_regions ?? 6) ? (
-              <div className="tn-warning-text">
-                <span aria-hidden="true">⚠</span>
-                <span>
-                  已选择 {selected.length} 个区域，超过“最多对比区域数”上限 {config.max_regions}。
-                  系统不会自动删除已选区域，请先取消多余区域或将上限调大。
-                </span>
-              </div>
-            ) : null}
 
             <div className="tn-section-title" style={{ marginTop: 10 }}>
-              Analysis Time Range
+              分析时间范围（Analysis Time Range）
             </div>
             <DateField
               id="m1.time_start"
@@ -755,7 +739,7 @@ export default function Exploration() {
             </div>
             <div className="tn-inline" style={{ marginTop: 8 }}>
               <span className="tn-field-label" style={{ marginBottom: 0 }}>
-                Time Slice（时间截面）
+                时间截面（Time Slice）
                 <Popover
                   placement="top"
                   trigger={['hover', 'click']}
@@ -768,7 +752,7 @@ export default function Exploration() {
                     </div>
                   }
                 >
-                  <InfoCircleOutlined aria-label="Time Slice 帮助" style={{ color: '#5b7095', cursor: 'help' }} />
+                  <InfoCircleOutlined aria-label="时间截面帮助" style={{ color: '#5b7095', cursor: 'help' }} />
                 </Popover>
               </span>
               <input
@@ -868,7 +852,7 @@ export default function Exploration() {
         }
         info={
           config.region_ids.length === 0 ? (
-            <EmptyState text="请先在左侧选择至少一个有效区域；右侧将只针对所选 Analysis Target 显示单区域时间规律。" />
+            <EmptyState text="请先在左侧选择至少一个有效区域；右侧将显示所选分析对象的时间规律。" />
           ) : (
           <>
             <Tabs
@@ -878,39 +862,9 @@ export default function Exploration() {
             items={[
               {
                 key: 'temporal',
-                label: 'Temporal Analysis',
+                label: '时间分析（Temporal Analysis）',
                 children: (
                   <div className={stale ? 'tn-stale' : undefined}>
-                    <div className="tn-analysis-target">
-                      <label className="tn-field-label" htmlFor="analysis-target">
-                        Analysis Target（分析对象）
-                        <Tooltip
-                          title={
-                            <div style={{ maxWidth: 320, lineHeight: 1.6 }}>
-                              右侧三张时间分析图与自动结论只针对这一个区域。
-                              选项来自左侧已选择的区域；切换不会改变左侧选择，也不会改变中央的多区域统计。
-                            </div>
-                          }
-                        >
-                          <InfoCircleOutlined aria-label="Analysis Target 帮助" style={{ color: '#5b7095' }} />
-                        </Tooltip>
-                      </label>
-                      <Select
-                        id="analysis-target"
-                        size="small"
-                        style={{ width: '100%' }}
-                        value={primaryId ?? undefined}
-                        options={regionOptions}
-                        placeholder="请先在左侧选择区域"
-                        disabled={!regionOptions.length}
-                        onChange={(value) => updateConfig({ insight_region_id: value })}
-                      />
-                      <div className="tn-muted" style={{ marginTop: 4 }}>
-                        {primaryId
-                          ? `${primaryId} · ${source?.display_name ?? '—'} · ${range?.start_at ?? '—'} → ${range?.end_at ?? '—'}`
-                          : '当前没有有效区域，请先在左侧选择。'}
-                      </div>
-                    </div>
                     <div className="tn-stack" style={{ marginTop: 8 }}>{[
                         {
                           key: 'hourly',
@@ -945,12 +899,18 @@ export default function Exploration() {
                               >
                                 <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
                                 <HourlyChart
-                                  regions={(result?.hourly ?? [])
-                                    .filter((h: any) => h.region_id === primaryId)
-                                    .map((h: any) => ({ region_id: h.region_id, hours: h.hours }))}
+                                  regions={(result?.hourly ?? []).map((h: any) => ({
+                                    region_id: h.region_id,
+                                    hours: h.hours,
+                                  }))}
                                 />
                               </Card>
-                              <InsightCard title="Hourly Pattern Insights" insights={hourlyInsight} loading={loading} />
+                              <InsightCard
+                                title="Hourly Pattern Insights"
+                                insights={hourlyInsight}
+                                loading={loading}
+                                subtitle={`上方曲线显示全部已选区域；以下结论针对分析对象 ${primaryId ?? '—'}`}
+                              />
                             </div>
                           ),
                         },
@@ -1111,10 +1071,45 @@ export default function Exploration() {
                             </div>
                           ),
                         },
-                      ].map((section) => (
-                        <section key={section.key} aria-label={section.label}>
-                          {section.children}
-                        </section>
+                      ].map((section, index) => (
+                        <Fragment key={section.key}>
+                          <section aria-label={section.label}>
+                            {section.children}
+                          </section>
+                          {index === 0 ? (
+                            <div className="tn-analysis-target">
+                              <label className="tn-field-label" htmlFor="analysis-target">
+                                分析对象（Analysis Target）
+                                <Tooltip
+                                  title={
+                                    <div style={{ maxWidth: 320, lineHeight: 1.6 }}>
+                                      工作日/周末对比与 ACF &amp; Trend 的图表和自动结论只针对这一个区域；
+                                      上方日内小时画像同时显示左侧已选的全部区域。
+                                      切换不会改变左侧选择，也不会改变中央的多区域统计。
+                                    </div>
+                                  }
+                                >
+                                  <InfoCircleOutlined aria-label="分析对象帮助" style={{ color: '#5b7095' }} />
+                                </Tooltip>
+                              </label>
+                              <Select
+                                id="analysis-target"
+                                size="small"
+                                style={{ width: '100%' }}
+                                value={primaryId ?? undefined}
+                                options={regionOptions}
+                                placeholder="请先在左侧选择区域"
+                                disabled={!regionOptions.length}
+                                onChange={(value) => updateConfig({ insight_region_id: value })}
+                              />
+                              <div className="tn-muted" style={{ marginTop: 4 }}>
+                                {primaryId
+                                  ? `${primaryId} · ${source?.display_name ?? '—'} · ${range?.start_at ?? '—'} → ${range?.end_at ?? '—'}`
+                                  : '当前没有有效区域，请先在左侧选择。'}
+                              </div>
+                            </div>
+                          ) : null}
+                        </Fragment>
                       ))}
                     </div>
 
@@ -1138,7 +1133,7 @@ export default function Exploration() {
               },
               {
                 key: 'spatial',
-                label: 'Spatial Analysis',
+                label: '空间分析（Spatial Analysis）',
                 children: (
                   <div className={stale ? 'tn-stale' : undefined}>
                     <div className="tn-stack">
@@ -1206,7 +1201,7 @@ export default function Exploration() {
               },
               {
                 key: 'multi',
-                label: 'Multi-City Comparison',
+                label: '多城市对比（Multi-City Comparison）',
                 children: (
                   <div className="tn-stack">
                     {(compareDisclaimers.length ? compareDisclaimers : []).map((line: string) => (
@@ -1244,11 +1239,17 @@ export default function Exploration() {
               <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
               <HourlyChart
                 height={480}
-                regions={(result?.hourly ?? [])
-                  .filter((h: any) => h.region_id === primaryId)
-                  .map((h: any) => ({ region_id: h.region_id, hours: h.hours }))}
+                regions={(result?.hourly ?? []).map((h: any) => ({
+                  region_id: h.region_id,
+                  hours: h.hours,
+                }))}
               />
-              <InsightCard title="Hourly Pattern Insights" insights={hourlyInsight} loading={loading} />
+              <InsightCard
+                title="Hourly Pattern Insights"
+                insights={hourlyInsight}
+                loading={loading}
+                subtitle={`上方曲线显示全部已选区域；以下结论针对分析对象 ${primaryId ?? '—'}`}
+              />
             </>
           ) : null}
           {expanded === 'weekday' ? (

@@ -111,7 +111,7 @@ try {
   record(
     'T31 M1 三个右侧 Tab 齐全',
     ['Temporal Analysis', 'Spatial Analysis', 'Multi-City Comparison'].every((label) =>
-      moduleTabs.some((text) => text.trim() === label),
+      moduleTabs.some((text) => text.includes(label)),
     ) &&
       !moduleTabs.some((text) => text.trim() === 'Hourly Profile'),
     moduleTabs.join('|'),

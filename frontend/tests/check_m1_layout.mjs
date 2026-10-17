@@ -45,11 +45,13 @@ const leftPane = page.locator('.tn-three-pane > section').nth(0)
 const leftText = await leftPane.innerText()
 check('2 左侧不再有 Advanced Settings 入口', !leftText.includes('Advanced Settings'), 'no advanced entry')
 check(
-  '3 左侧顺序：数据源 → 最多对比区域数 → 区域 → 分辨率',
-  ['数据源', '最多对比区域数', '区域（可多选对比）', '时间分辨率'].every(
-    (label, index, all) => leftText.indexOf(label) >= 0 && (index === 0 || leftText.indexOf(label) > leftText.indexOf(all[index - 1])),
-  ),
-  'max regions is above regions',
+  '3 左侧顺序正确且已删除“最多对比区域数”',
+  !leftText.includes('最多对比区域数') &&
+    ['数据源', '区域（可多选对比）', '时间分辨率', '聚合方式', '分析时间范围（Analysis Time Range）'].every(
+      (label, index, all) =>
+        leftText.indexOf(label) >= 0 && (index === 0 || leftText.indexOf(label) > leftText.indexOf(all[index - 1])),
+    ),
+  'max-regions control removed',
 )
 check('4 日期范围与范围摘要仍在', (await page.locator('[data-field="m1.time_start"] input').count()) === 1 && leftText.includes('实际起点') && leftText.includes('时间跨度'), 'date pickers + summary')
 check('5 已移除可见的时间索引输入', (await page.locator('[data-field="m1.start_index"] input').count()) === 0, 'no index inputs')
@@ -70,22 +72,26 @@ check(
 )
 check('7 中央时序不再有橙色拟合线/图例', !centerText.includes('趋势拟合'), 'fitted line removed')
 check('8 中央统计包含范围与样本说明', /参与区域 \d+/.test(centerText) && centerText.includes('有效样本'), 'range note present')
-check('9 GIS 蓝色说明框已删除，改为 ⓘ', (await page.locator('.tn-hint').count()) === 0 && (await page.locator('[aria-label="Time Slice 帮助"]').count()) === 1, 'no hint boxes, one help icon')
+check('9 GIS 蓝色说明框已删除，改为 ⓘ', (await page.locator('.tn-hint').count()) === 0 && (await page.locator('[aria-label="时间截面帮助"]').count()) === 1, 'no hint boxes, one help icon')
 check('10 地图图例、滑块、区域名称开关仍在', centerText.includes('No Data') && centerText.includes('Time Slice') && centerText.includes('在地图上显示区域名称'), 'map controls intact')
 
 // --------------------------------------------------------- right pane ----
 const infoPane = page.locator('.tn-three-pane > section').nth(2)
 const infoText = await infoPane.innerText()
 check(
-  '11 Analysis Target 位于 Temporal 内部顶部',
+  '11 Analysis Target 位于日内小时画像之后、工作日对比之前',
   infoText.indexOf('Temporal Analysis') >= 0 &&
-    infoText.indexOf('Analysis Target') > infoText.indexOf('Temporal Analysis') &&
-    infoText.indexOf('Analysis Target') < infoText.indexOf('日内小时画像'),
+    infoText.indexOf('分析对象（Analysis Target）') > infoText.indexOf('日内小时画像') &&
+    infoText.indexOf('分析对象（Analysis Target）') < infoText.indexOf('工作日 vs 周末'),
   infoText.slice(0, 80).replace(/\n/g, ' '),
 )
 check('12 右侧不再有统计摘要/时序图', !infoText.includes('统计摘要') && !infoText.includes('流量时间序列'), 'no duplicated stats/series')
 const outer = (await infoPane.locator('.ant-tabs-nav').first().locator('.ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
-check('13 三个一级 Tab 保留', ['Temporal Analysis', 'Spatial Analysis', 'Multi-City Comparison'].every((t) => outer.includes(t)), outer.join('|'))
+check(
+  '13 三个一级 Tab 保留（中文+英文）',
+  ['Temporal Analysis', 'Spatial Analysis', 'Multi-City Comparison'].every((t) => outer.some((label) => label.includes(t))),
+  outer.join('|'),
+)
 const subTabs = await page.locator('.tn-subtabs').count()
 const sections = await infoPane.locator('section[aria-label]').evaluateAll((nodes) =>
   nodes.map((node) => node.getAttribute('aria-label')),
@@ -129,10 +135,11 @@ const targetValue = await page.locator('.tn-analysis-target .ant-select-selectio
 check('18 Analysis Target 已切到 BRERA', targetValue.includes('BRERA'), targetValue)
 
 const hourlyAfter = await page.locator('section[aria-label="Hourly Profile"] .tn-insight-card').first().innerText()
+const peakLine = (text) => text.split('\n').find((line) => line.includes('主要高峰')) ?? ''
 check(
   '19 右侧 Insights 随 Analysis Target 重新计算',
-  hourlyBefore !== hourlyAfter && hourlyAfter.length > 0,
-  `${hourlyBefore.split('\n')[2] ?? ''} → ${hourlyAfter.split('\n')[2] ?? ''}`,
+  peakLine(hourlyBefore) !== peakLine(hourlyAfter) && peakLine(hourlyAfter).length > 0,
+  `${peakLine(hourlyBefore).slice(0, 60)} → ${peakLine(hourlyAfter).slice(0, 60)}`,
 )
 
 // ----------------------------------------------------- subtab + modal ----
@@ -157,25 +164,7 @@ check('21 放大查看打开图表与 Insights', (await modal.isVisible()) && (a
 await page.locator('.ant-modal-close').click()
 await page.waitForTimeout(400)
 
-// Max Comparison Regions lower than the selection must warn, never silently trim
-const maxInput = page.locator('[data-field="m1.max_regions"] input').first()
-await maxInput.click({ clickCount: 3 })
-await maxInput.fill('1')
-await maxInput.press('Tab')
-await page.waitForTimeout(2000)
-const limitWarning = await page.locator('text=系统不会自动删除已选区域').count()
-const limitError = await page.locator('[data-field="m1.region_ids"] .tn-error-text').count()
-const runDisabled = await page.locator('button:has-text("运行分析")').first().isDisabled()
-const regionChips = await page.locator('[data-field="m1.region_ids"] .ant-select-selection-item').count()
-check(
-  '25 上限低于已选数量时提示且不自动删除区域',
-  limitWarning + limitError > 0 && runDisabled && regionChips === 2,
-  `warning=${limitWarning} error=${limitError} chips=${regionChips} runDisabled=${runDisabled}`,
-)
-await maxInput.click({ clickCount: 3 })
-await maxInput.fill('6')
-await maxInput.press('Tab')
-await page.waitForTimeout(1500)
+check('25 已删除 Max Comparison Regions 输入框', (await page.locator('[data-field="m1.max_regions"]').count()) === 0, 'no max-regions field')
 
 await page.screenshot({ path: path.join(SHOTS, '20-m1-integrated-1600.png'), fullPage: true })
 

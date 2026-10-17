@@ -351,8 +351,8 @@ M1_SCHEMA: list[dict[str, Any]] = [
      "help_zh": "mean 为桶内样本平均，sum 为桶内样本求和；源单位未确认，不代表物理总量。",
      "suggestion_zh": "原生频率下该参数无影响。"},
     {"key": "max_regions", "label": "Max Compare Regions", "label_zh": "最多对比区域数", "type": "integer",
-     "default": 6, "min": 1, "max": 12, "level": "advanced",
-     "help_zh": "多区域对比上限，避免图表过载。", "suggestion_zh": "默认 6。"},
+     "default": 12, "min": 1, "max": 12,
+     "help_zh": "内部多区域对比上限（界面上不暴露该参数）。", "suggestion_zh": "默认 12。"},
     {"key": "start_index", "label": "Start Index", "label_zh": "起始索引（高级）", "type": "integer",
      "default": 0, "min": 0, "level": "advanced",
      "help_zh": "按重采样后的时间点数计算的起点索引，与日期时间选择双向同步。",
@@ -631,7 +631,7 @@ def validate_m2(values: dict[str, Any], *, region_count: int | None = None) -> l
 def validate_m1(values: dict[str, Any], *, available_regions: list[str] | None = None) -> list[Issue]:
     issues, coerced = check_module("m1", values)
     region_ids = values.get("region_ids") or []
-    max_regions = coerced.get("max_regions") or 6
+    max_regions = coerced.get("max_regions") or 12
     if isinstance(region_ids, list):
         if len(region_ids) > max_regions:
             issues.append(error("m1.region_ids", "TOO_MANY_REGIONS",

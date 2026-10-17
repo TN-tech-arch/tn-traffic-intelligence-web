@@ -284,3 +284,22 @@ node tests\check_m1_insights.mjs  # 三个 Insights + 日期联动，无错误
 ```
 
 截图：`23-m1-left-config.png`、`24-m1-center-multi-region.png`、`25-m1-right-temporal-stacked.png`、`29-m1-stacked-temporal.png`。
+
+## 13. Module 1 反馈微调（2026-10-17 第四轮）
+
+| 反馈 | 处理 | 验证 |
+|---|---|---|
+| 删除“最多对比区域数” | 从界面与前端 schema 移除；内部上限固定 12（后端默认同步为 12），不再有该输入框 | `[data-field="m1.max_regions"]` 数量为 0 |
+| 标签统一“中文（英文）” | 分析时间范围（Analysis Time Range）、时间截面（Time Slice）、分析对象（Analysis Target）、三个一级 Tab 全部双语 | 浏览器文本断言 |
+| ACF 计算框白底 | `.tn-range-summary` 改为白底 + 浅边框，与图表说明一致 | 截图 `25-m1-right-temporal-stacked.png` |
+| 分析对象位置 | 移到日内小时画像之后、工作日对比之前 | `分析对象` 索引介于 `日内小时画像` 与 `工作日 vs 周末` 之间 |
+| 日内图显示全部区域 | Hourly Profile 恢复多区域曲线；Insights 卡片注明“结论针对分析对象” | 2 个区域时曲线图例含 ADRIANO + BRERA |
+| 标签不截断 | 右侧一级 Tab 允许两行显示（11px / max-width 168px） | 三个标签完整可见 |
+
+```powershell
+cd backend; ..\.venv\Scripts\python.exe -m pytest tests -q   # 116 passed
+cd ..\frontend
+node tests\check_m1_layout.mjs    # 27/27
+node tests\check_m1_fixes.mjs     # 12/12
+node tests\ui_check.mjs           # 35/35
+```
