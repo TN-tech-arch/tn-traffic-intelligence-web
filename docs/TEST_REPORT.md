@@ -208,3 +208,27 @@ node tests\ui_check.mjs                             # 35/35，其他模块未回
 
 回归：`pytest 110 passed`、`ui_check.mjs 35/35`、`check_m1_fixes.mjs 12/12`。
 截图：`data/screenshots/14-m1-final-fixes.png`。
+
+## 10. Module 1 三栏比例与右侧二级 Tab（2026-10-17）
+
+| 检查 | 实测 |
+|---|---|
+| 三栏比例 | `gridTemplateColumns = 384px 614.4px 537.6px` → **25% / 40% / 35%** |
+| 右侧结构 | 顶部固定 `统计摘要`，其后 `Hourly Profile / Weekday vs Weekend / ACF & Trend` 三个二级 Tab |
+| 重复图表 | 右侧不再包含 `流量时间序列`；中央保留多区域曲线 |
+| Tab 切换 | 每次只显示 1 张图 + 1 组 Insights（三个 Tab 均验证） |
+| 放大查看 | Modal 打开后含 480px 高图表与同一份 Insights，可关闭 |
+| 响应式 1200px | 两栏（391 / 759），右侧 `grid-column: 1 / -1`，横向溢出 0px |
+| 响应式 900px | 单栏（864px），横向溢出 0px |
+| 控制台 | 无未预期错误 |
+
+```powershell
+cd frontend
+node tests\check_m1_layout.mjs     # 13/13
+node tests\check_m1_fixes.mjs      # 12/12
+node tests\check_m1_insights.mjs   # 三个 Insights 均正常，无错误
+node tests\ui_check.mjs            # 35/35（含 M2–M5 回归）
+```
+
+截图：`15-m1-layout-modal.png`（放大视图）、`16-m1-layout-1600.png`（25/40/35）、
+`17-m1-layout-1200.png`（两栏）、`18-m1-layout-900.png`（单栏）。

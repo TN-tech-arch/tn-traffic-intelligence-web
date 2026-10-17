@@ -110,7 +110,12 @@ try {
   const moduleTabs = await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()
   record(
     'T31 M1 三个右侧 Tab 齐全',
-    moduleTabs.map((t) => t.trim()).join(',') === 'Temporal Analysis,Spatial Analysis,Multi-City Comparison',
+    ['Temporal Analysis', 'Spatial Analysis', 'Multi-City Comparison'].every((label) =>
+      moduleTabs.some((text) => text.trim() === label),
+    ) &&
+      ['Hourly Profile', 'Weekday vs Weekend', 'ACF & Trend'].every((label) =>
+        moduleTabs.some((text) => text.trim() === label),
+      ),
     moduleTabs.join('|'),
   )
   const mapVisible = await page.locator('.leaflet-container').count()

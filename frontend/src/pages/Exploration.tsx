@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Card, Collapse, DatePicker, Select, Switch, Tabs, Tag, Tooltip, message,
+  Alert, Button, Card, Collapse, DatePicker, Modal, Select, Switch, Tabs, Tag, Tooltip, message,
 } from 'antd'
 import { InfoCircleOutlined } from '@ant-design/icons'
 import dayjs, { Dayjs } from 'dayjs'
@@ -165,6 +165,8 @@ export default function Exploration() {
   const [errorIssues, setErrorIssues] = useState<Issue[]>([])
   const [computedKey, setComputedKey] = useState<string | null>(null)
   const [tab, setTab] = useState('temporal')
+  const [subTab, setSubTab] = useState('hourly')
+  const [expanded, setExpanded] = useState<null | 'hourly' | 'weekday' | 'acf'>(null)
   const [showLabels, setShowLabels] = useState(true)
   const [advancedOpen, setAdvancedOpen] = useState<string[]>([])
   const requestSeq = useRef(0)
@@ -562,6 +564,7 @@ export default function Exploration() {
         />
       ) : null}
       <ThreePane
+        variant="m1"
         config={
           <>
             <PaneHead
@@ -831,18 +834,19 @@ export default function Exploration() {
                     <Card size="small" title="统计摘要（当前分析时间范围）">
                       <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
                       {result?.statistics?.length ? (
-                        <table style={{ width: '100%', fontSize: 11.5 }}>
+                        <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', minWidth: 430, fontSize: 11 }}>
                           <thead>
                             <tr style={{ color: '#5b7095', textAlign: 'left' }}>
-                              <th>区域</th>
-                              <th>均值</th>
-                              <th>最大</th>
-                              <th>最小</th>
-                              <th>标准差</th>
-                              <th>P95</th>
-                              <th>CV</th>
-                              <th>零值</th>
-                              <th>有效点</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>区域</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>均值</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>最大</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>最小</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>标准差</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>P95</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>CV</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>零值</th>
+                              <th style={{ whiteSpace: 'nowrap' }}>有效点</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -861,6 +865,7 @@ export default function Exploration() {
                             ))}
                           </tbody>
                         </table>
+                        </div>
                       ) : (
                         <EmptyState text="选择区域后显示真实统计量。" />
                       )}
@@ -870,124 +875,178 @@ export default function Exploration() {
                       </div>
                     </Card>
 
-                    <Card size="small" title="流量时间序列（当前范围）" style={{ marginTop: 10 }}>
-                      <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
-                      <LineChart height={180} x={seriesChart.x} series={seriesChart.series} yName={source?.unit_label} empty={!result} />
-                      <div className="tn-muted">
-                        有效观测：{primaryStats?.valid_points ?? 0} / {range?.points ?? 0} 个时间点
-                        {primaryStats?.peak_at ? ` · 峰值出现在 ${primaryStats.peak_at}` : ''}
-                      </div>
-                    </Card>
-
-                    <Card size="small" title="日内小时画像（Hourly Profile）" style={{ marginTop: 10 }}>
-                      <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
-                      <div className="tn-hint" style={{ marginBottom: 6 }}>
-                        把当前时间范围内所有观测按「一天中的第几小时」分组求平均，得到典型日内模式；
-                        这不是某一天的原始曲线。某个小时没有有效观测时显示为断点（No Data）。
-                      </div>
-                      <HourlyChart
-                        regions={(result?.hourly ?? []).map((h: any) => ({ region_id: h.region_id, hours: h.hours }))}
-                      />
-                    </Card>
-                    <InsightCard title="Hourly Pattern Insights" insights={hourlyInsight} loading={loading} />
-
-                    <Card size="small" title="工作日 vs 周末（Weekday vs Weekend）" style={{ marginTop: 12 }}>
-                      <ChartMeta range={range} validPoints={primaryWeekday ? primaryWeekday.weekday.samples + primaryWeekday.weekend.samples : null} />
-                      <div className="tn-hint" style={{ marginBottom: 6 }}>
-                        只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，分别按 0–23 小时求平均。
-                        若范围内没有周末（或没有工作日），对应曲线显示为 No Data，不会借用范围外的数据。
-                      </div>
-                      {primaryWeekday ? (
-                        <>
-                          <WeekdayChart
-                            weekday={primaryWeekday.weekday.profile}
-                            weekend={primaryWeekday.weekend.profile}
-                          />
-                          <div className="tn-muted">
-                            工作日：{primaryWeekday.weekday.valid_dates} 个有效日期 / {primaryWeekday.weekday.samples} 个观测；
-                            周末：{primaryWeekday.weekend.valid_dates} 个有效日期 / {primaryWeekday.weekend.samples} 个观测。
-                          </div>
-                        </>
-                      ) : (
-                        <EmptyState text="暂无数据。" />
-                      )}
-                    </Card>
-                    <InsightCard title="Weekday vs Weekend Insights" insights={weekdayInsight} loading={loading} />
-
-                    <Card size="small" title="ACF 与趋势（ACF & Trend）" style={{ marginTop: 12 }}>
-                      <div className="tn-hint" style={{ marginBottom: 6 }}>
-                        ACF（自相关）衡量序列与自身滞后 k 步的相关程度；Lag 是“向后错几步”，不是只用 k 个点。
-                        灰色虚线为 ±95% 白噪声置信带，用于判断相关是否明显偏离 0。
-                      </div>
-                      <div className="tn-range-summary" style={{ marginBottom: 8 }}>
-                        <div>
-                          <strong>计算范围：</strong>
-                          {acfInfo?.start_at ?? range?.start_at ?? '—'} ～ {acfInfo?.end_at ?? range?.end_at ?? '—'}
-                        </div>
-                        <div>
-                          <strong>有效样本：</strong>
-                          {acfInfo?.valid_points ?? 0} 个 · <strong>采样间隔：</strong>
-                          {acfInfo?.interval_minutes ?? range?.interval_minutes ?? '—'} 分钟 ·{' '}
-                          <strong>Max Lag：</strong>
-                          {acfInfo?.max_lag ?? '—'}
-                        </div>
-                      </div>
-                      <div className="tn-inline" style={{ marginBottom: 6 }}>
-                        <Switch
-                          size="small"
-                          checked={autoLag}
-                          onChange={(checked) => {
-                            setAutoLag(checked)
-                            if (checked) {
-                              updateConfig({ acf_max_lag: 0 })
-                            } else {
-                              const current = acfInfo?.max_lag ?? acfInfo?.auto_max_lag ?? 2
-                              updateConfig({ acf_max_lag: Math.max(2, Number(current)) })
-                            }
-                          }}
-                        />
-                        <span className="tn-muted">
-                          {autoLag ? 'Auto 自动（按数据长度选择）' : '手动指定 Max Lag'}
-                        </span>
-                      </div>
-                      {autoLag ? (
-                        <div className="tn-range-summary" style={{ marginBottom: 6 }}>
-                          <div>
-                            <strong>实际生效 Max Lag：</strong>
-                            {acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
-                          </div>
-                          <div className="tn-muted">自动值由当前时间点数与采样间隔决定；0 表示 Auto。</div>
-                        </div>
-                      ) : (
-                        <ParamField
-                          spec={{ ...maxLagSpec, label_zh: '手动 Max Lag（≥2）' }}
-                          value={config.acf_max_lag}
-                          issues={fieldIssues('acf_max_lag')}
-                          path="m1.acf_max_lag"
-                          onChange={(_key, value) => updateConfig({ acf_max_lag: Number(value) || 0 })}
-                          compact
-                        />
-                      )}
-                      {!autoLag && acfInfo ? (
-                        <div className="tn-muted" style={{ marginBottom: 6 }}>
-                          实际生效：{acfInfo.max_lag} 步（约 {acfInfo.max_lag_label}） · 可支持上限{' '}
-                          {Math.max(2, (range?.points ?? 0) - 2)} 步
-                        </div>
-                      ) : null}
-                      <AcfChart
-                        lags={result?.acf?.lags ?? []}
-                        values={result?.acf?.values ?? []}
-                        ci={result?.acf?.ci ?? []}
-                        intervalMinutes={result?.acf?.interval_minutes ?? 10}
-                      />
-                      <div className="tn-muted">
-                        {result?.trend?.available
-                          ? `线性趋势：${result.trend.direction_label}；斜率 ${result.trend.slope_per_hour?.toFixed(4)} / 小时` +
-                            (result.trend.r2 !== null && result.trend.r2 !== undefined ? `；R²=${result.trend.r2.toFixed(3)}` : '')
-                          : '有效样本不足，无法估计趋势。'}
-                      </div>
-                    </Card>
-                    <InsightCard title="ACF & Trend Insights" insights={acfInsight} loading={loading} />
+                    <Tabs
+                      className="tn-tabs-tight tn-subtabs"
+                      style={{ marginTop: 10 }}
+                      activeKey={subTab}
+                      onChange={setSubTab}
+                      items={[
+                        {
+                          key: 'hourly',
+                          label: 'Hourly Profile',
+                          children: (
+                            <div>
+                              <Card
+                                size="small"
+                                title={
+                                  <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
+                                    日内小时画像（Hourly Profile）
+                                    <Button size="small" type="link" onClick={() => setExpanded('hourly')}>
+                                      放大查看
+                                    </Button>
+                                  </span>
+                                }
+                              >
+                                <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
+                                <div className="tn-hint" style={{ marginBottom: 6 }}>
+                                  把当前时间范围内所有观测按「一天中的第几小时」分组求平均，得到典型日内模式；
+                                  这不是某一天的原始曲线。某个小时没有有效观测时显示为断点（No Data）。
+                                </div>
+                                <HourlyChart
+                                  regions={(result?.hourly ?? []).map((h: any) => ({ region_id: h.region_id, hours: h.hours }))}
+                                />
+                              </Card>
+                              <InsightCard title="Hourly Pattern Insights" insights={hourlyInsight} loading={loading} />
+                            </div>
+                          ),
+                        },
+                        {
+                          key: 'weekday',
+                          label: 'Weekday vs Weekend',
+                          children: (
+                            <div>
+                              <Card
+                                size="small"
+                                title={
+                                  <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
+                                    工作日 vs 周末
+                                    <Button size="small" type="link" onClick={() => setExpanded('weekday')}>
+                                      放大查看
+                                    </Button>
+                                  </span>
+                                }
+                              >
+                                <ChartMeta
+                                  range={range}
+                                  validPoints={primaryWeekday ? primaryWeekday.weekday.samples + primaryWeekday.weekend.samples : null}
+                                />
+                                <div className="tn-hint" style={{ marginBottom: 6 }}>
+                                  只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，分别按 0–23 小时求平均。
+                                  若范围内没有周末（或没有工作日），对应曲线显示为 No Data，不会借用范围外的数据。
+                                </div>
+                                {primaryWeekday ? (
+                                  <>
+                                    <WeekdayChart
+                                      weekday={primaryWeekday.weekday.profile}
+                                      weekend={primaryWeekday.weekend.profile}
+                                    />
+                                    <div className="tn-muted">
+                                      工作日：{primaryWeekday.weekday.valid_dates} 个有效日期 / {primaryWeekday.weekday.samples} 个观测；
+                                      周末：{primaryWeekday.weekend.valid_dates} 个有效日期 / {primaryWeekday.weekend.samples} 个观测。
+                                    </div>
+                                  </>
+                                ) : (
+                                  <EmptyState text="暂无数据。" />
+                                )}
+                              </Card>
+                              <InsightCard title="Weekday vs Weekend Insights" insights={weekdayInsight} loading={loading} />
+                            </div>
+                          ),
+                        },
+                        {
+                          key: 'acf',
+                          label: 'ACF & Trend',
+                          children: (
+                            <div>
+                              <Card
+                                size="small"
+                                title={
+                                  <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
+                                    ACF 与趋势
+                                    <Button size="small" type="link" onClick={() => setExpanded('acf')}>
+                                      放大查看
+                                    </Button>
+                                  </span>
+                                }
+                              >
+                                <div className="tn-hint" style={{ marginBottom: 6 }}>
+                                  ACF（自相关）衡量序列与自身滞后 k 步的相关程度；Lag 是“向后错几步”，不是只用 k 个点。
+                                  灰色虚线为 ±95% 白噪声置信带，用于判断相关是否明显偏离 0。
+                                </div>
+                                <div className="tn-range-summary" style={{ marginBottom: 8 }}>
+                                  <div>
+                                    <strong>计算范围：</strong>
+                                    {acfInfo?.start_at ?? range?.start_at ?? '—'} ～ {acfInfo?.end_at ?? range?.end_at ?? '—'}
+                                  </div>
+                                  <div>
+                                    <strong>有效样本：</strong>
+                                    {acfInfo?.valid_points ?? 0} 个 · <strong>采样间隔：</strong>
+                                    {acfInfo?.interval_minutes ?? range?.interval_minutes ?? '—'} 分钟 ·{' '}
+                                    <strong>Max Lag：</strong>
+                                    {acfInfo?.max_lag ?? '—'}
+                                  </div>
+                                </div>
+                                <div className="tn-inline" style={{ marginBottom: 6 }}>
+                                  <Switch
+                                    size="small"
+                                    checked={autoLag}
+                                    onChange={(checked) => {
+                                      setAutoLag(checked)
+                                      if (checked) {
+                                        updateConfig({ acf_max_lag: 0 })
+                                      } else {
+                                        const current = acfInfo?.max_lag ?? acfInfo?.auto_max_lag ?? 2
+                                        updateConfig({ acf_max_lag: Math.max(2, Number(current)) })
+                                      }
+                                    }}
+                                  />
+                                  <span className="tn-muted">
+                                    {autoLag ? 'Auto 自动（按数据长度选择）' : '手动指定 Max Lag'}
+                                  </span>
+                                </div>
+                                {autoLag ? (
+                                  <div className="tn-range-summary" style={{ marginBottom: 6 }}>
+                                    <div>
+                                      <strong>实际生效 Max Lag：</strong>
+                                      {acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
+                                    </div>
+                                    <div className="tn-muted">自动值由当前时间点数与采样间隔决定；0 表示 Auto。</div>
+                                  </div>
+                                ) : (
+                                  <ParamField
+                                    spec={{ ...maxLagSpec, label_zh: '手动 Max Lag（≥2）' }}
+                                    value={config.acf_max_lag}
+                                    issues={fieldIssues('acf_max_lag')}
+                                    path="m1.acf_max_lag"
+                                    onChange={(_key, value) => updateConfig({ acf_max_lag: Number(value) || 0 })}
+                                    compact
+                                  />
+                                )}
+                                {!autoLag && acfInfo ? (
+                                  <div className="tn-muted" style={{ marginBottom: 6 }}>
+                                    实际生效：{acfInfo.max_lag} 步（约 {acfInfo.max_lag_label}） · 可支持上限{' '}
+                                    {Math.max(2, (range?.points ?? 0) - 2)} 步
+                                  </div>
+                                ) : null}
+                                <AcfChart
+                                  lags={result?.acf?.lags ?? []}
+                                  values={result?.acf?.values ?? []}
+                                  ci={result?.acf?.ci ?? []}
+                                  intervalMinutes={result?.acf?.interval_minutes ?? 10}
+                                />
+                                <div className="tn-muted">
+                                  {result?.trend?.available
+                                    ? `线性趋势：${result.trend.direction_label}；斜率 ${result.trend.slope_per_hour?.toFixed(4)} / 小时` +
+                                      (result.trend.r2 !== null && result.trend.r2 !== undefined ? `；R²=${result.trend.r2.toFixed(3)}` : '')
+                                    : '有效样本不足，无法估计趋势。'}
+                                </div>
+                              </Card>
+                              <InsightCard title="ACF & Trend Insights" insights={acfInsight} loading={loading} />
+                            </div>
+                          ),
+                        },
+                      ]}
+                    />
 
                     {(result?.warnings ?? []).length ? (
                       <div style={{ marginTop: 8 }}>
@@ -1091,6 +1150,74 @@ export default function Exploration() {
           />
         }
       />
+
+      <Modal
+        open={expanded !== null}
+        title={
+          expanded === 'hourly'
+            ? 'Hourly Profile · 放大查看'
+            : expanded === 'weekday'
+              ? 'Weekday vs Weekend · 放大查看'
+              : 'ACF & Trend · 放大查看'
+        }
+        footer={null}
+        width={1080}
+        style={{ maxWidth: '94vw', top: 40 }}
+        onCancel={() => setExpanded(null)}
+        destroyOnClose
+      >
+        <div className="tn-stack">
+          {expanded === 'hourly' ? (
+            <>
+              <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
+              <HourlyChart
+                height={480}
+                regions={(result?.hourly ?? []).map((h: any) => ({ region_id: h.region_id, hours: h.hours }))}
+              />
+              <InsightCard title="Hourly Pattern Insights" insights={hourlyInsight} loading={loading} />
+            </>
+          ) : null}
+          {expanded === 'weekday' ? (
+            <>
+              <ChartMeta
+                range={range}
+                validPoints={primaryWeekday ? primaryWeekday.weekday.samples + primaryWeekday.weekend.samples : null}
+              />
+              {primaryWeekday ? (
+                <WeekdayChart
+                  height={480}
+                  weekday={primaryWeekday.weekday.profile}
+                  weekend={primaryWeekday.weekend.profile}
+                />
+              ) : (
+                <EmptyState text="暂无数据。" />
+              )}
+              <InsightCard title="Weekday vs Weekend Insights" insights={weekdayInsight} loading={loading} />
+            </>
+          ) : null}
+          {expanded === 'acf' ? (
+            <>
+              <div className="tn-range-summary">
+                <div>
+                  <strong>计算范围：</strong>
+                  {acfInfo?.start_at ?? range?.start_at ?? '—'} ～ {acfInfo?.end_at ?? range?.end_at ?? '—'} ·{' '}
+                  <strong>有效样本：</strong>
+                  {acfInfo?.valid_points ?? 0} · <strong>Max Lag：</strong>
+                  {acfInfo?.max_lag ?? '—'} 步（约 {acfInfo?.max_lag_label ?? '—'}）
+                </div>
+              </div>
+              <AcfChart
+                height={480}
+                lags={result?.acf?.lags ?? []}
+                values={result?.acf?.values ?? []}
+                ci={result?.acf?.ci ?? []}
+                intervalMinutes={result?.acf?.interval_minutes ?? 10}
+              />
+              <InsightCard title="ACF & Trend Insights" insights={acfInsight} loading={loading} />
+            </>
+          ) : null}
+        </div>
+      </Modal>
     </div>
   )
 }

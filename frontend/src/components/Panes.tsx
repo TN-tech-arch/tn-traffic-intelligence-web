@@ -1,8 +1,19 @@
 import type { ReactNode } from 'react'
 
-export function ThreePane({ config, visual, info }: { config: ReactNode; visual: ReactNode; info: ReactNode }) {
+export function ThreePane({
+  config,
+  visual,
+  info,
+  variant,
+}: {
+  config: ReactNode
+  visual: ReactNode
+  info: ReactNode
+  /** layout variant; "m1" uses 25% / 40% / 35% for the Module 1 workspace */
+  variant?: 'default' | 'm1'
+}) {
   return (
-    <div className="tn-three-pane">
+    <div className={`tn-three-pane${variant === 'm1' ? ' tn-three-pane-m1' : ''}`}>
       <section className="tn-pane" aria-label="Configuration">
         {config}
       </section>

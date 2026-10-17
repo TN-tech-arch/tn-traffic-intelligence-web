@@ -164,6 +164,37 @@ body {
   align-items: start;
 }
 
+.tn-three-pane > section {
+  /* grid children must be allowed to shrink, otherwise charts force overflow */
+  min-width: 0;
+}
+
+/* Module 1: 25% configuration / 40% map+series / 35% analysis */
+.tn-three-pane.tn-three-pane-m1 {
+  grid-template-columns: minmax(280px, 25fr) minmax(380px, 40fr) minmax(360px, 35fr);
+}
+
+@media (max-width: 1500px) {
+  .tn-three-pane.tn-three-pane-m1 {
+    grid-template-columns: minmax(260px, 26fr) minmax(340px, 39fr) minmax(330px, 35fr);
+  }
+}
+
+@media (max-width: 1250px) {
+  .tn-three-pane.tn-three-pane-m1 {
+    grid-template-columns: minmax(260px, 34fr) minmax(340px, 66fr);
+  }
+  .tn-three-pane.tn-three-pane-m1 > .tn-pane-info {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .tn-three-pane.tn-three-pane-m1 {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1400px) {
   .tn-three-pane {
     grid-template-columns: minmax(280px, 32fr) minmax(360px, 68fr);
