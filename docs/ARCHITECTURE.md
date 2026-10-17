@@ -67,8 +67,8 @@ X_i = [v[t] … v[t+L-1]]      Y_i = [v[t+L] … v[t+L+H-1]]      next start = t
   线性趋势），每条结论都返回 `metrics` 供前端展开详情，并可被单元测试用构造序列直接验证。
 * 中央地图的 `time_index` 独立于分析范围，只触发 Spatial 快照刷新。
 * 布局：`ThreePane` 提供 `variant="m1"`，Module 1 使用 25/40/35（其它模块保持 25/45/30）；
-  中央为「GIS → 多区域时序 → 多区域统计摘要 + Insights」，右侧为「Analysis Target + 三个一级 Tab +
-  Temporal 内三个二级 Tab（Hourly / Weekday / ACF）」，
+  中央为「GIS → 多区域时序 → 多区域统计摘要 + Insights」，右侧为三个一级 Tab，
+  且 Analysis Target 位于 Temporal 内部顶部，其下依次纵向排列 Hourly / Weekday / ACF（无二级 Tab），
   图表右上角 `放大查看` 通过 Modal 渲染同源数据的 480px 高图表与同一份 Insights。
   断点：≤1500px 微调比例，≤1250px 两栏（右侧整行），≤900px 单栏。
 * 数据隔离：一次 `temporal_analysis` 返回**所有已选区域**的 `statistics`（供中央表格与

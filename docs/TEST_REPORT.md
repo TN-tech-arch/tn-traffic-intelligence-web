@@ -257,3 +257,30 @@ node tests\check_m1_insights.mjs  # 三个 Insights + 日期联动，无错误
 
 截图：`23-m1-left-config.png`、`24-m1-center-multi-region.png`、
 `25-m1-right-hourly.png`、`26-m1-right-weekday.png`、`27-m1-right-acf.png`、`28-m1-integrated-full.png`。
+
+## 12. Module 1 三项界面重排（2026-10-17 第三轮）
+
+本轮只调整排列，不改计算逻辑：
+
+| 检查 | 实测 |
+|---|---|
+| 左侧顺序 | 数据源 → 最多对比区域数 → 区域 → 所有参数保持原功能与校验 |
+| Analysis Target | 位于 Temporal Analysis 内部顶部；切换到 Spatial Analysis 时该控件消失 |
+| 二级 Tab | `.tn-subtabs` 数量为 0；三个段落 `Hourly Profile / Weekday vs Weekend / ACF & Trend` 纵向排列 |
+| 图表与结论相邻 | 每个 section 内 1 个图表 + 1 组 Insights（adjacency = true,true,true） |
+| Target 切换 | 右侧数值变化（ADRIANO 7,634.99 → BRERA 43,378.01），中央统计表逐字不变 |
+| 单区域约束 | 右侧 Hourly 图只绘制 Analysis Target（不再混合其他已选区域） |
+| 放大查看 | 模态框含图表与对应 Insights |
+| 上限校验 | 调小到 1 且已选 2 个区域：Error + 提示 + 运行禁用，已选区域不被自动删除 |
+| 响应式 | 1200px 两栏 / 900px 单栏，横向溢出 0px |
+
+```powershell
+cd backend; ..\.venv\Scripts\python.exe -m pytest tests -q   # 116 passed
+cd ..\frontend
+node tests\check_m1_layout.mjs    # 27/27
+node tests\check_m1_fixes.mjs     # 12/12
+node tests\ui_check.mjs           # 35/35
+node tests\check_m1_insights.mjs  # 三个 Insights + 日期联动，无错误
+```
+
+截图：`23-m1-left-config.png`、`24-m1-center-multi-region.png`、`25-m1-right-temporal-stacked.png`、`29-m1-stacked-temporal.png`。

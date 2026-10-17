@@ -19,8 +19,8 @@
 ### 2.1 选择数据与时间范围
 
 1. **数据源**：Milano（88 区 / 10 分钟）、Trentino（223 区 / 10 分钟）、ZTE 4G 下行（148 个有时序区域 / 15 分钟）。
-2. **区域**：可在地图上点选，或用下拉框搜索；默认最多同时对比 6 个区域。
-3. **最多对比区域数（Max Comparison Regions）**：紧跟在区域选择下方，可调 1–12。
+2. **最多对比区域数（Max Comparison Regions）**：位于区域选择**上方**，可调 1–12。
+3. **区域**：可在地图上点选，或用下拉框搜索；可选数量受上方上限约束。
    调小到低于已选数量时，系统**不会自动删除**已选区域，而是提示并阻止运行，直到手动取消多余区域。
 4. **Analysis Time Range**：直接选 `Start Date & Time` 与 `End Date & Time`（含边界）。
    下方摘要实时显示：数据可用范围、实际起点、最后一个观测、时间跨度、采样间隔、
@@ -53,9 +53,10 @@
 ### 2.4 右侧：Analysis Target 与三个二级 Tab
 
 布局：Module 1 的三栏比例为 **Configuration 25% / GIS+时序 40% / Analysis 35%**。
-右侧最上方是 **Analysis Target（分析对象）** 单选（选项仅来自左侧已选区域，默认第一个；有 ⓘ 说明），
-其下是三个一级 Tab（Temporal / Spatial / Multi-City）；Temporal 内再分三个二级 Tab
-（同一时间只显示一个图表，不再纵向堆叠）：
+右侧是三个一级 Tab（Temporal / Spatial / Multi-City）。
+**Analysis Target（分析对象）位于 Temporal Analysis 内部最上方**（单选，选项仅来自左侧已选区域，
+默认第一个，带 ⓘ）；Spatial Analysis 与 Multi-City Comparison 不显示该控件。
+Temporal 内部**不再有二级 Tab**，而是按顺序纵向排列：
 
 1. **Hourly Profile**：日内小时画像 + Hourly Pattern Insights。
    高峰小时、低谷小时（并列时如实列出）；单峰 / 多峰 / 整体平稳（基于平滑后的局部峰值、突出度与覆盖率，
@@ -67,8 +68,9 @@
    上方显示计算范围、有效样本、采样间隔与 Max Lag；`Max Lag` 可调（0 = 自动）；
    图中含 ACF=0 参考线与 ±95% 白噪声置信带；结论包含短期相关性、相关性衰减、负相关、
    潜在周期（1 小时 / 24 小时 / 7 天）、线性趋势与建议。周期不足以判断时会说明具体原因。
-4. 每个二级 Tab 内都是「图表 → 自动分析结论 → 展开详细说明」；右上角 `放大查看` 会打开大尺寸图表与同一份结论。
-5. 右侧不再有 Statistical Summary 或重复的 Traffic Time Series；它们分别位于中央与仅中央。
+4. 每张图下方紧跟对应的 Insights（图表 → 自动结论 → 展开详细说明）；右上角 `放大查看` 打开大尺寸图表与同一份结论。
+5. 右侧三张图只使用当前 Analysis Target 的单区域数据；中央统计仍覆盖全部已选区域。
+6. 右侧不再有 Statistical Summary 或重复的 Traffic Time Series；它们分别位于中央与仅中央。
 
 修改日期、区域、分辨率或 Max Lag 会自动重算；计算期间旧结果变暗并提示“正在按当前参数重新计算”，
 完成后图表与结论整体替换，不会出现图表已更新而文字仍是旧值。

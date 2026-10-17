@@ -24,14 +24,7 @@ console.log('date inputs:', dateInputs)
 const summary = await page.locator('.tn-range-summary').first().innerText()
 console.log('range summary:', summary.replace(/\n/g, ' | '))
 
-const subTabByInsight = {
-  'Hourly Pattern Insights': 'Hourly Profile',
-  'Weekday vs Weekend Insights': 'Weekday vs Weekend',
-  'ACF & Trend Insights': 'ACF & Trend',
-}
-for (const title of Object.keys(subTabByInsight)) {
-  await page.locator('.tn-subtabs .ant-tabs-tab', { hasText: subTabByInsight[title] }).first().click()
-  await page.waitForTimeout(600)
+for (const title of ['Hourly Pattern Insights', 'Weekday vs Weekend Insights', 'ACF & Trend Insights']) {
   const card = page.locator(`.tn-insight-card:has-text("${title}")`)
   const count = await card.count()
   const text = count ? await card.first().innerText() : ''

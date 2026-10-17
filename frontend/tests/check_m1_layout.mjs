@@ -44,7 +44,13 @@ check(
 const leftPane = page.locator('.tn-three-pane > section').nth(0)
 const leftText = await leftPane.innerText()
 check('2 左侧不再有 Advanced Settings 入口', !leftText.includes('Advanced Settings'), 'no advanced entry')
-check('3 最多对比区域数在主配置区且靠近 Regions', leftText.includes('最多对比区域数') && leftText.indexOf('最多对比区域数') < leftText.indexOf('时间分辨率'), 'max regions placed after regions')
+check(
+  '3 左侧顺序：数据源 → 最多对比区域数 → 区域 → 分辨率',
+  ['数据源', '最多对比区域数', '区域（可多选对比）', '时间分辨率'].every(
+    (label, index, all) => leftText.indexOf(label) >= 0 && (index === 0 || leftText.indexOf(label) > leftText.indexOf(all[index - 1])),
+  ),
+  'max regions is above regions',
+)
 check('4 日期范围与范围摘要仍在', (await page.locator('[data-field="m1.time_start"] input').count()) === 1 && leftText.includes('实际起点') && leftText.includes('时间跨度'), 'date pickers + summary')
 check('5 已移除可见的时间索引输入', (await page.locator('[data-field="m1.start_index"] input').count()) === 0, 'no index inputs')
 
@@ -70,12 +76,30 @@ check('10 地图图例、滑块、区域名称开关仍在', centerText.includes
 // --------------------------------------------------------- right pane ----
 const infoPane = page.locator('.tn-three-pane > section').nth(2)
 const infoText = await infoPane.innerText()
-check('11 右侧顶部为 Analysis Target', infoText.trimStart().startsWith('Analysis Target'), infoText.slice(0, 40).replace(/\n/g, ' '))
+check(
+  '11 Analysis Target 位于 Temporal 内部顶部',
+  infoText.indexOf('Temporal Analysis') >= 0 &&
+    infoText.indexOf('Analysis Target') > infoText.indexOf('Temporal Analysis') &&
+    infoText.indexOf('Analysis Target') < infoText.indexOf('日内小时画像'),
+  infoText.slice(0, 80).replace(/\n/g, ' '),
+)
 check('12 右侧不再有统计摘要/时序图', !infoText.includes('统计摘要') && !infoText.includes('流量时间序列'), 'no duplicated stats/series')
 const outer = (await infoPane.locator('.ant-tabs-nav').first().locator('.ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
 check('13 三个一级 Tab 保留', ['Temporal Analysis', 'Spatial Analysis', 'Multi-City Comparison'].every((t) => outer.includes(t)), outer.join('|'))
-const sub = (await page.locator('.tn-subtabs .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
-check('14 三个二级 Tab 齐全', sub.join(',') === 'Hourly Profile,Weekday vs Weekend,ACF & Trend', sub.join('|'))
+const subTabs = await page.locator('.tn-subtabs').count()
+const sections = await infoPane.locator('section[aria-label]').evaluateAll((nodes) =>
+  nodes.map((node) => node.getAttribute('aria-label')),
+)
+check(
+  '14 二级 Tab 已取消，三个分析段落纵向排列',
+  subTabs === 0 && sections.join(',') === 'Hourly Profile,Weekday vs Weekend,ACF & Trend',
+  `subtabs=${subTabs} sections=${sections.join('|')}`,
+)
+await infoPane.locator('.ant-tabs-tab', { hasText: 'Spatial Analysis' }).click()
+await page.waitForTimeout(600)
+check('14b Spatial Analysis 不显示 Analysis Target', !(await infoPane.innerText()).includes('Analysis Target'), 'target only inside Temporal')
+await infoPane.locator('.ant-tabs-tab', { hasText: 'Temporal Analysis' }).click()
+await page.waitForTimeout(800)
 
 // ---------------------------------------------------- add a second region ----
 await page.locator('[data-field="m1.region_ids"] .ant-select-selector').first().click()
@@ -90,7 +114,7 @@ check('15 增加区域后中央统计出现两行', rowCount === 2, `${rowCount}
 check('16 多区域 Insights 出现区域间比较', /平均流量最高的是/.test(centerAfterAdd) && /最低的是/.test(centerAfterAdd), 'comparison insight')
 
 const statsBefore = (await centerPane.locator('table').first().innerText()).replace(/\s+/g, ' ')
-const hourlyBefore = await page.locator('.tn-subtabs .tn-insight-card').first().innerText()
+const hourlyBefore = await page.locator('section[aria-label="Hourly Profile"] .tn-insight-card').first().innerText()
 const targetSelect = page.locator('.tn-analysis-target .ant-select').first()
 await targetSelect.click()
 await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'BRERA' }).first().click()
@@ -104,7 +128,7 @@ check(
 const targetValue = await page.locator('.tn-analysis-target .ant-select-selection-item').first().innerText()
 check('18 Analysis Target 已切到 BRERA', targetValue.includes('BRERA'), targetValue)
 
-const hourlyAfter = await page.locator('.tn-subtabs .tn-insight-card').first().innerText()
+const hourlyAfter = await page.locator('section[aria-label="Hourly Profile"] .tn-insight-card').first().innerText()
 check(
   '19 右侧 Insights 随 Analysis Target 重新计算',
   hourlyBefore !== hourlyAfter && hourlyAfter.length > 0,
@@ -112,22 +136,20 @@ check(
 )
 
 // ----------------------------------------------------- subtab + modal ----
-const tabChecks = []
+const adjacency = []
 for (const [label, insight] of [
   ['Hourly Profile', 'Hourly Pattern Insights'],
   ['Weekday vs Weekend', 'Weekday vs Weekend Insights'],
   ['ACF & Trend', 'ACF & Trend Insights'],
 ]) {
-  await page.locator('.tn-subtabs .ant-tabs-tab', { hasText: label }).first().click()
-  await page.waitForTimeout(800)
-  const visible = await page.locator('.tn-subtabs .tn-insight-card:visible').allInnerTexts()
-  const charts = await page.locator('.tn-subtabs .echarts-for-react:visible').count()
-  tabChecks.push(visible.length === 1 && visible[0].includes(insight) && charts === 1)
+  const section = infoPane.locator(`section[aria-label="${label}"]`)
+  const chartCount = await section.locator('.echarts-for-react').count()
+  const insightText = await section.locator('.tn-insight-card').count()
+  const text = await section.innerText()
+  adjacency.push(chartCount >= 1 && insightText === 1 && text.includes(insight))
 }
-check('20 二级 Tab 每次只显示一组图表+Insights', tabChecks.every(Boolean), tabChecks.join(','))
+check('20 三组图表+Insights 同页相邻展示', adjacency.every(Boolean), adjacency.join(','))
 
-await page.locator('.tn-subtabs .ant-tabs-tab', { hasText: 'Hourly Profile' }).first().click()
-await page.waitForTimeout(500)
 await page.locator('button:has-text("放大查看")').first().click()
 await page.waitForTimeout(900)
 const modal = page.locator('.ant-modal-content')

@@ -63,8 +63,6 @@ const lastRow = await page.locator('.tn-inline:has-text("Time Slice")').first().
 check('1d 滑到末端仍显示分析范围内时间', lastRow.includes('2013-11-15'), lastRow.replace(/\n/g, ' '))
 
 // 2. Auto / manual Max Lag
-await page.locator('.tn-subtabs .ant-tabs-tab', { hasText: 'ACF & Trend' }).first().click()
-await page.waitForTimeout(600)
 const acfCard = page.locator('.ant-card:has-text("ACF 与趋势")').first()
 const autoLine = await acfCard.innerText()
 check(
@@ -104,8 +102,6 @@ check('2e 可切回 Auto 自动模式', autoRestored, `aria-checked=${await auto
 await page.waitForTimeout(6000)
 
 // 3. weekly candidate vs confirmed
-await page.locator('.tn-subtabs .ant-tabs-tab', { hasText: 'ACF & Trend' }).first().click()
-await page.waitForTimeout(600)
 let acfInsight = ''
 for (let i = 0; i < 20; i++) {
   acfInsight = await page.locator('.tn-insight-card:has-text("ACF & Trend Insights")').first().innerText()

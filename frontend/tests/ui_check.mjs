@@ -113,9 +113,7 @@ try {
     ['Temporal Analysis', 'Spatial Analysis', 'Multi-City Comparison'].every((label) =>
       moduleTabs.some((text) => text.trim() === label),
     ) &&
-      ['Hourly Profile', 'Weekday vs Weekend', 'ACF & Trend'].every((label) =>
-        moduleTabs.some((text) => text.trim() === label),
-      ),
+      !moduleTabs.some((text) => text.trim() === 'Hourly Profile'),
     moduleTabs.join('|'),
   )
   const mapVisible = await page.locator('.leaflet-container').count()
