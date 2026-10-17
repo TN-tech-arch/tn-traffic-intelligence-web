@@ -421,6 +421,19 @@ body {
   margin-bottom: 4px;
 }
 
+/* ACF Auto/manual control: one clearly framed row group with a larger switch */
+.tn-acf-control {
+  background: #f5f9ff;
+  border: 1px solid #d8e5fb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.tn-acf-control .ant-switch {
+  min-width: 38px;
+}
+
 /* Module 1 right pane: three bilingual tabs must fit inside the 35% column */
 .tn-pane-info > .ant-tabs > .ant-tabs-nav .ant-tabs-tab {
   padding: 6px 6px;

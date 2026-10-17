@@ -786,6 +786,13 @@ export default function Exploration() {
               <div className={stale ? 'tn-stale' : undefined}>
                 {result?.statistics?.length ? (
                   <>
+                    <div className="tn-muted" style={{ marginBottom: 6 }}>
+                      数据源 {source?.display_name} · 参与区域 {result.statistics.length} · 范围 {range?.start_at} →{' '}
+                      {range?.end_at} · 每点 {range?.interval_minutes ?? '—'} 分钟 · 有效样本{' '}
+                      {Math.min(...result.statistics.map((s: any) => s.valid_points ?? 0))}–
+                      {Math.max(...result.statistics.map((s: any) => s.valid_points ?? 0))} · 单位{' '}
+                      {source?.unit_label}
+                    </div>
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', minWidth: 520, fontSize: 11 }}>
                         <thead>
@@ -835,13 +842,6 @@ export default function Exploration() {
                       </table>
                     </div>
                     <InsightCard title="Statistical Summary Insights" insights={summaryInsight} loading={loading} />
-                    <div className="tn-muted" style={{ marginTop: 8 }}>
-                      数据源 {source?.display_name} · 参与区域 {result.statistics.length} · 范围 {range?.start_at} →{' '}
-                      {range?.end_at} · 每点 {range?.interval_minutes ?? '—'} 分钟 · 有效样本{' '}
-                      {Math.min(...result.statistics.map((s: any) => s.valid_points ?? 0))}–
-                      {Math.max(...result.statistics.map((s: any) => s.valid_points ?? 0))} · 单位{' '}
-                      {source?.unit_label}
-                    </div>
                   </>
                 ) : (
                   <EmptyState text="选择区域后显示多区域真实统计量。" />
@@ -1006,45 +1006,46 @@ export default function Exploration() {
                                   {acfInfo?.interval_minutes ?? range?.interval_minutes ?? '—'} 分钟 · Max Lag{' '}
                                   {acfInfo?.max_lag ?? '—'}
                                 </div>
-                                <div className="tn-inline" style={{ marginBottom: 6 }}>
-                                  <Switch
-                                    size="small"
-                                    checked={autoLag}
-                                    onChange={(checked) => {
-                                      setAutoLag(checked)
-                                      if (checked) {
-                                        updateConfig({ acf_max_lag: 0 })
-                                      } else {
-                                        const current = acfInfo?.max_lag ?? acfInfo?.auto_max_lag ?? 2
-                                        updateConfig({ acf_max_lag: Math.max(2, Number(current)) })
-                                      }
-                                    }}
-                                  />
-                                  <span className="tn-muted">
-                                    {autoLag ? 'Auto 自动（按数据长度选择）' : '手动指定 Max Lag'}
-                                  </span>
+                                <div className="tn-acf-control">
+                                  <div className="tn-inline" style={{ marginBottom: 6 }}>
+                                    <Switch
+                                      checked={autoLag}
+                                      onChange={(checked) => {
+                                        setAutoLag(checked)
+                                        if (checked) {
+                                          updateConfig({ acf_max_lag: 0 })
+                                        } else {
+                                          const current = acfInfo?.max_lag ?? acfInfo?.auto_max_lag ?? 2
+                                          updateConfig({ acf_max_lag: Math.max(2, Number(current)) })
+                                        }
+                                      }}
+                                    />
+                                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+                                      {autoLag ? 'Auto 自动（按数据长度选择）' : '手动指定 Max Lag'}
+                                    </span>
+                                  </div>
+                                  {autoLag ? (
+                                    <div className="tn-muted">
+                                      实际生效 Max Lag：{acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
+                                      （自动值由时间点数与采样间隔决定；0 表示 Auto）
+                                    </div>
+                                  ) : (
+                                    <ParamField
+                                      spec={{ ...maxLagSpec, label_zh: '手动 Max Lag（≥2）' }}
+                                      value={config.acf_max_lag}
+                                      issues={fieldIssues('acf_max_lag')}
+                                      path="m1.acf_max_lag"
+                                      onChange={(_key, value) => updateConfig({ acf_max_lag: Number(value) || 0 })}
+                                      compact
+                                    />
+                                  )}
+                                  {!autoLag && acfInfo ? (
+                                    <div className="tn-muted" style={{ marginTop: 4 }}>
+                                      实际生效：{acfInfo.max_lag} 步（约 {acfInfo.max_lag_label}） · 可支持上限{' '}
+                                      {Math.max(2, (range?.points ?? 0) - 2)} 步
+                                    </div>
+                                  ) : null}
                                 </div>
-                                {autoLag ? (
-                                  <div className="tn-muted" style={{ marginBottom: 6 }}>
-                                    实际生效 Max Lag：{acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
-                                    （自动值由时间点数与采样间隔决定；0 表示 Auto）
-                                  </div>
-                                ) : (
-                                  <ParamField
-                                    spec={{ ...maxLagSpec, label_zh: '手动 Max Lag（≥2）' }}
-                                    value={config.acf_max_lag}
-                                    issues={fieldIssues('acf_max_lag')}
-                                    path="m1.acf_max_lag"
-                                    onChange={(_key, value) => updateConfig({ acf_max_lag: Number(value) || 0 })}
-                                    compact
-                                  />
-                                )}
-                                {!autoLag && acfInfo ? (
-                                  <div className="tn-muted" style={{ marginBottom: 6 }}>
-                                    实际生效：{acfInfo.max_lag} 步（约 {acfInfo.max_lag_label}） · 可支持上限{' '}
-                                    {Math.max(2, (range?.points ?? 0) - 2)} 步
-                                  </div>
-                                ) : null}
                                 <AcfChart
                                   lags={result?.acf?.lags ?? []}
                                   values={result?.acf?.values ?? []}

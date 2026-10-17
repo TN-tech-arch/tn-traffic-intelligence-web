@@ -312,3 +312,9 @@ node tests\ui_check.mjs           # 35/35
 | ACF 计算信息框格式 | 去掉浅色边框/背景，改为与日内、工作日图下方一致的纯文本行（计算范围 · 有效样本 · 间隔 · Max Lag；实际生效 Max Lag 同行说明） | 截图 `25-m1-right-temporal-stacked.png` |
 
 回归：`pytest 116 passed`、`check_m1_layout 27/27`、`check_m1_fixes 12/12`、`ui_check 35/35`。
+
+### 14.1 追加微调
+
+* 多区域统计摘要的范围说明改为紧跟卡片标题（标题 → 说明 → 表格 → Insights）。
+* ACF 的 Auto 开关与"实际生效 Max Lag"合并为蓝底控制块，开关与标题字号放大。
+* 回归：`check_m1_layout 27/27`、`check_m1_fixes 12/12`、`ui_check 35/35`。
