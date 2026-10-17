@@ -14,7 +14,7 @@ import pandas as pd
 
 from app.core.errors import RequestRejected
 from app.services import insights as insight_engine
-from app.services.ingest import regions_for, source_row
+from app.services.ingest import load_series, regions_for, source_row
 from app.services.series import resample
 from app.services.time_range import has_blocking, resolve_range
 
@@ -459,67 +459,189 @@ def _spatial_histogram(values: np.ndarray) -> dict[str, Any]:
     }
 
 
+def zscore_typical(values: list[float | None]) -> dict[str, Any]:
+    """Normalise one source's own 24 typical hours without filling missing data.
+
+    Population standard deviation (ddof=0) is used, matching the rest of the
+    Module 1 descriptive statistics.  Fewer than two valid hours or a constant
+    profile cannot produce a meaningful Z-score, so every Z value is returned
+    as ``None`` instead of silently replacing the standard deviation with 1.
+    """
+    if len(values) != 24:
+        raise ValueError("typical hourly profile must contain exactly 24 values")
+    array = np.asarray([np.nan if value is None else value for value in values], dtype="float64")
+    finite = np.isfinite(array)
+    valid = array[finite]
+    mean = float(valid.mean()) if valid.size else None
+    std = float(valid.std()) if valid.size else None
+    if valid.size < 2:
+        return {
+            "values": [None] * 24,
+            "mean": mean,
+            "std": std,
+            "zero_variance": False,
+            "available": False,
+            "reason": f"只有 {int(valid.size)} 个有效小时，无法计算 Z-score。",
+        }
+    assert mean is not None and std is not None
+    if std <= 1e-12:
+        return {
+            "values": [None] * 24,
+            "mean": mean,
+            "std": std,
+            "zero_variance": True,
+            "available": False,
+            "reason": "24 个有效小时的典型值完全相同，标准差为 0，未生成 Z-score。",
+        }
+    z_values = [None if not finite[i] else float((array[i] - mean) / std) for i in range(24)]
+    return {
+        "values": z_values,
+        "mean": mean,
+        "std": std,
+        "zero_variance": False,
+        "available": True,
+        "reason": None,
+    }
+
+
 def compare_sources(payload: dict[str, Any]) -> dict[str, Any]:
-    """Cross-city comparison on **normalised shapes** (units are unknown)."""
-    sources = payload.get("source_keys") or ["milano", "trentino", "zte"]
-    frequency = payload.get("frequency", "60min")
-    aggregation = payload.get("aggregation", "mean")
-    entries = []
-    for key in sources:
+    """Cross-source comparison of each source's own normalised daily shape.
+
+    Raw values are never compared across sources.  The shared analytical grid is
+    fixed at complete hourly buckets; a source-level hourly value is the
+    unweighted mean of the available regions at that timestamp.  Clock hours
+    are then averaged across the entire observed period to obtain 24 points.
+    """
+    source_keys = payload.get("source_keys") or ["milano", "trentino", "zte"]
+    # The comparison is intentionally fixed to hourly, mean aggregation so all
+    # three sources use the same 0--23 clock coordinate.
+    frequency = "60min"
+    aggregation = "mean"
+    entries: list[dict[str, Any]] = []
+    for key in source_keys:
         source = source_row(key)
-        data = resample(key, frequency=frequency, aggregation=aggregation)
-        with np.errstate(invalid="ignore"):
-            mean_profile = np.nanmean(data.values, axis=1)
-        mask = np.isfinite(mean_profile)
-        if not mask.any():
+        loaded = load_series(key)
+        data = resample(
+            key,
+            frequency=frequency,
+            aggregation=aggregation,
+            loaded=loaded,
+        )
+        raw_finite = np.isfinite(loaded.values)
+        raw_time_valid = raw_finite.any(axis=1)
+        raw_time_complete = raw_finite.all(axis=1)
+
+        # Keep the cross-region aggregation explicit: every region receives the
+        # same weight at a timestamp; missing regions are skipped, never zeroed.
+        hourly_finite = np.isfinite(data.values)
+        hourly_counts = hourly_finite.sum(axis=1)
+        hourly_sum = np.where(hourly_finite, data.values, 0.0).sum(axis=1)
+        spatial_hourly = np.where(
+            hourly_counts > 0,
+            hourly_sum / np.maximum(hourly_counts, 1),
+            np.nan,
+        )
+        hourly_valid = np.isfinite(spatial_hourly)
+        if not hourly_valid.any():
             continue
-        profile = np.where(mask, mean_profile, np.nan)
-        shape_mean = float(np.nanmean(profile))
-        shape_std = float(np.nanstd(profile))
-        shape_std = shape_std if shape_std > 1e-12 else 1.0
-        normalised = (profile - shape_mean) / shape_std
-        index = pd.to_datetime(data.timestamps, unit="s")
-        hourly = []
-        hours = index.hour.to_numpy()
+
+        hourly_index = pd.to_datetime(data.timestamps, unit="s")
+        clock_hours = hourly_index.hour.to_numpy()
+        hourly_profile: list[dict[str, Any]] = []
         for hour in range(24):
-            selector = mask & (hours == hour)
-            hourly.append(float(np.nanmean(profile[selector])) if selector.any() else None)
-        hourly_values = np.array([v for v in hourly if v is not None], dtype="float64")
-        if hourly_values.size:
-            hour_mean = float(hourly_values.mean())
-            hour_std = float(hourly_values.std()) or 1.0
-            hourly_z = [None if v is None else (v - hour_mean) / hour_std for v in hourly]
-        else:
-            hour_mean, hour_std, hourly_z = None, None, [None] * 24
-        step = max(1, profile.size // 200)
+            selector = hourly_valid & (clock_hours == hour)
+            sample_count = int(selector.sum())
+            hourly_profile.append(
+                {
+                    "hour": hour,
+                    "mean": float(spatial_hourly[selector].mean()) if sample_count else None,
+                    "z": None,
+                    "samples": sample_count,
+                }
+            )
+
+        typical_values = [point["mean"] for point in hourly_profile]
+        z_result = zscore_typical(typical_values)
+        for point, z_value in zip(hourly_profile, z_result["values"]):
+            point["z"] = z_value
+        hourly_means = np.asarray(
+            [point["mean"] for point in hourly_profile if point["mean"] is not None],
+            dtype="float64",
+        )
+        cv_typical = (
+            float(hourly_means.std() / hourly_means.mean())
+            if hourly_means.size and abs(float(hourly_means.mean())) > 1e-12
+            else None
+        )
+        coverage_hours = int(sum(1 for point in hourly_profile if point["mean"] is not None))
+        raw_start = pd.Timestamp(int(loaded.timestamps[0]), unit="s")
+        raw_end = pd.Timestamp(int(loaded.timestamps[-1]), unit="s")
+
         entries.append(
             {
                 "source_key": key,
                 "display_name": source["display_name"],
                 "unit_label": source["unit_label"],
-                "time_start": str(index[0]) if index.size else None,
-                "time_end": str(index[-1]) if index.size else None,
-                "points": int(profile.size),
-                "native_frequency_minutes": source["native_frequency_minutes"],
-                "hourly_shape": hourly,
-                "hourly_shape_z": hourly_z,
-                "hourly_mean_level": hour_mean,
-                "hourly_std_level": hour_std,
-                "normalised_sample": [
-                    {"index": int(i), "value": None if not np.isfinite(normalised[i]) else float(normalised[i])}
-                    for i in range(0, profile.size, step)
-                ],
-                "cv": float(np.nanstd(profile) / np.nanmean(profile)) if abs(np.nanmean(profile)) > 1e-12 else None,
+                "time_start": str(raw_start),
+                "time_end": str(raw_end),
+                "hourly_axis_start": str(hourly_index[0]),
+                "hourly_axis_end": str(hourly_index[-1]),
+                "native_frequency_minutes": int(source["native_frequency_minutes"]),
+                "region_count": len(loaded.region_ids),
+                "raw_time_point_count": int(loaded.timestamps.size),
+                "raw_observation_count": int(loaded.values.size),
+                "raw_valid_observation_count": int(raw_finite.sum()),
+                "raw_valid_time_point_count": int(raw_time_valid.sum()),
+                "raw_complete_time_point_count": int(raw_time_complete.sum()),
+                "hourly_bucket_count": int(data.timestamps.size),
+                "hourly_valid_bucket_count": int(hourly_valid.sum()),
+                "hourly_profile_points": 24,
+                # Backwards-compatible aliases used by older frontends/tests.
+                "points": int(data.timestamps.size),
+                "hourly_shape": typical_values,
+                "hourly_shape_z": z_result["values"],
+                "hourly_mean_level": z_result["mean"],
+                "hourly_std_level": z_result["std"],
+                "hourly_profile": hourly_profile,
+                "coverage_hours": coverage_hours,
+                "cv": cv_typical,
+                "cv_typical": cv_typical,
+                "cv_basis": "24 个典型小时均值（各来源自身）的总体标准差 / 均值",
+                "zscore_mean": z_result["mean"],
+                "zscore_std": z_result["std"],
+                "zero_variance": bool(z_result["zero_variance"]),
+                "zscore_available": bool(z_result["available"]),
+                "zscore_reason": z_result["reason"],
             }
         )
+
+    comparison_insight = insight_engine.comparison_insights(entries)
+    period_labels = []
+    for entry in entries:
+        period_labels.append(
+            f"{entry['display_name']} {entry['time_start'][:10]}–{entry['time_end'][:10]}"
+        )
+    warning = (
+        "三个来源的观测时期与物理单位不同（"
+        + "；".join(period_labels)
+        + "），原始值不可直接比较；下图只比较各来源自身的标准化日内形状。"
+        "ZTE 为 4G 下行流量，不是道路车辆流量。"
+    )
     return {
         "frequency": frequency,
         "aggregation": aggregation,
+        "requested_frequency": payload.get("frequency", frequency),
         "sources": entries,
-        "normalisation": "z-score（按每个来源自身 24 小时均值的均值/标准差归一化）",
-        "disclaimers": [
-            "三个来源的单位不一致且观测时段不重叠（Milano/Trentino 为 2013-11~2014-01，ZTE 为 2024-07~08），"
-            "因此只能比较归一化后的周期形状，不能比较绝对值或声称同时发生。",
-            "ZTE 为 4G 下行流量，不是道路车辆流量。",
-        ],
+        "insights": comparison_insight,
+        "warning": warning,
+        "normalisation": "每个来源仅使用自身 24 个典型小时值的总体均值与标准差计算 Z-score",
+        "method": {
+            "hourly_aggregation": "各区域原始观测按完整整点小时聚合为小时均值（缺失不补 0）",
+            "spatial_aggregation": "同一小时内对所有有值区域取等权平均",
+            "daily_profile": "按 0–23 钟点对整段观测期取平均，得到每个来源的 24 点典型曲线",
+            "zscore": "每个来源分别用自身 24 点典型值的 mean/std 标准化，不跨来源共享参数",
+            "similarity": "在共同有效小时上计算 Pearson r；少于 3 个共同小时或任一方零方差时不输出",
+            "cv": "CV 基于各来源自身的 24 点典型曲线计算，不代表跨来源绝对规模比较",
+        },
+        "disclaimers": [warning],
     }

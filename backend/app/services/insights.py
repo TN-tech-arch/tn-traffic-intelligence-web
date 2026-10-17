@@ -1027,6 +1027,474 @@ def weekday_insights(data: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Multi-source normalised daily-profile comparison
+# ---------------------------------------------------------------------------
+
+
+def _hours_text(hours: list[int]) -> str:
+    if not hours:
+        return "—"
+    if len(hours) > 8:
+        return "、".join(f"{h:02d}:00" for h in hours[:8]) + f" 等 {len(hours)} 个小时"
+    return "、".join(f"{h:02d}:00" for h in hours)
+
+
+def _extreme_hours(
+    profile: list[dict[str, Any]],
+    *,
+    mode: str,
+) -> dict[str, Any]:
+    """Return peak/valley hours, treating values within 2% of the range as ties."""
+    pairs = [
+        (int(point["hour"]), float(point["mean"]))
+        for point in profile
+        if point.get("mean") is not None
+    ]
+    if not pairs:
+        return {"hours": [], "value": None, "range": None, "all_tied": False}
+    values = [value for _, value in pairs]
+    extreme = max(values) if mode == "max" else min(values)
+    value_range = max(values) - min(values)
+    tolerance = max(1e-12, value_range * 0.02)
+    hours = [hour for hour, value in pairs if abs(value - extreme) <= tolerance]
+    return {
+        "hours": hours,
+        "value": float(extreme),
+        "range": float(value_range),
+        "all_tied": value_range <= 1e-12,
+    }
+
+
+def _hour_z(profile: list[dict[str, Any]], hour: int) -> float | None:
+    point = next((item for item in profile if int(item["hour"]) == hour), None)
+    value = point.get("z") if point else None
+    return float(value) if value is not None and np.isfinite(value) else None
+
+
+def _max_circular_gap(hours: list[int]) -> int | None:
+    if len(hours) < 2:
+        return None
+    return max(min(abs(a - b), 24 - abs(a - b)) for i, a in enumerate(hours) for b in hours[i + 1:])
+
+
+def _correlation_strength(value: float) -> str:
+    if value >= 0.8:
+        return "高度相似"
+    if value >= 0.5:
+        return "中等相似"
+    if value > 0:
+        return "弱相似"
+    return "方向相反"
+
+
+def comparison_insights(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Data-driven conclusions for the normalised 24-hour comparison.
+
+    Peaks/valleys use a 2%-of-range tie band. Similarity is pairwise Pearson
+    correlation over common valid hours. Time-of-day statements use the
+    normalised Z values, so they describe each source relative to its own mean.
+    """
+    entries = [
+        entry
+        for entry in entries
+        if entry.get("hourly_profile")
+        and any(point.get("mean") is not None for point in entry["hourly_profile"])
+    ]
+    if not entries:
+        return {
+            "available": False,
+            "items": [
+                item(
+                    "no_data",
+                    "多来源对比",
+                    "没有一个来源具备可用的 24 小时典型曲线。",
+                    level="warning",
+                )
+            ],
+            "warnings": ["没有可用于比较的有效小时数据。"],
+            "details": [],
+            "reliability": {"level": "none", "notes": ["有效小时数为 0。"]},
+        }
+
+    warnings: list[str] = []
+    details: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
+    names = [str(entry["display_name"]) for entry in entries]
+    source_peaks: dict[str, dict[str, Any]] = {}
+    source_valleys: dict[str, dict[str, Any]] = {}
+    peak_hours: list[int] = []
+    valley_hours: list[int] = []
+
+    for entry in entries:
+        name = str(entry["display_name"])
+        profile = entry["hourly_profile"]
+        peak = _extreme_hours(profile, mode="max")
+        valley = _extreme_hours(profile, mode="min")
+        source_peaks[name] = peak
+        source_valleys[name] = valley
+        if peak["hours"]:
+            peak_hours.append(int(peak["hours"][0]))
+        if valley["hours"]:
+            valley_hours.append(int(valley["hours"][0]))
+        peak_z = _hour_z(profile, int(peak["hours"][0])) if peak["hours"] else None
+        valley_z = _hour_z(profile, int(valley["hours"][0])) if valley["hours"] else None
+        peak_tie = "（接近并列）" if len(peak["hours"]) > 1 else ""
+        valley_tie = "（接近并列）" if len(valley["hours"]) > 1 else ""
+        details.append(
+            {
+                "label": f"{name} 高峰",
+                "value": (
+                    f"{_hours_text(peak['hours'])}{peak_tie}"
+                    + (f"（Z={peak_z:+.3f}）" if peak_z is not None else "（Z-score 不可用）")
+                    if peak["hours"] and not peak["all_tied"]
+                    else "24 个典型小时基本持平，没有唯一高峰"
+                ),
+            }
+        )
+        details.append(
+            {
+                "label": f"{name} 低谷",
+                "value": (
+                    f"{_hours_text(valley['hours'])}{valley_tie}"
+                    + (f"（Z={valley_z:+.3f}）" if valley_z is not None else "（Z-score 不可用）")
+                    if valley["hours"] and not valley["all_tied"]
+                    else "24 个典型小时基本持平，没有唯一低谷"
+                ),
+            }
+        )
+
+    peak_parts = []
+    for entry in entries:
+        name = str(entry["display_name"])
+        peak = source_peaks[name]
+        if not peak["hours"]:
+            peak_parts.append(f"{name} 无有效小时")
+        elif peak["all_tied"]:
+            peak_parts.append(f"{name} 全天基本持平")
+        else:
+            z_value = _hour_z(entry["hourly_profile"], int(peak["hours"][0]))
+            z_text = f"，Z={z_value:+.2f}" if z_value is not None else ""
+            tie_text = "（接近并列）" if len(peak["hours"]) > 1 else ""
+            peak_parts.append(f"{name} {_hours_text(peak['hours'])}{tie_text}{z_text}")
+    peak_gap = _max_circular_gap(peak_hours)
+    peak_gap_text = ""
+    if peak_gap is not None:
+        peak_gap_text = (
+            f"首个高峰的最大时间跨度为 {peak_gap} 小时"
+            + ("，存在明显错峰。" if peak_gap >= 3 else "，高峰出现时间较接近。")
+        )
+    items.append(
+        item(
+            "peaks",
+            "典型高峰",
+            "；".join(peak_parts) + "。" + peak_gap_text,
+            metrics={
+                "peak_hours": {name: source_peaks[name]["hours"] for name in names},
+                "max_peak_gap_hours": peak_gap,
+                "tie_rule": "与最高值相差不超过 24 点典型值极差的 2% 视为接近并列",
+            },
+        )
+    )
+
+    valley_parts = []
+    for entry in entries:
+        name = str(entry["display_name"])
+        valley = source_valleys[name]
+        if not valley["hours"]:
+            valley_parts.append(f"{name} 无有效小时")
+        elif valley["all_tied"]:
+            valley_parts.append(f"{name} 全天基本持平")
+        else:
+            z_value = _hour_z(entry["hourly_profile"], int(valley["hours"][0]))
+            z_text = f"，Z={z_value:+.2f}" if z_value is not None else ""
+            tie_text = "（接近并列）" if len(valley["hours"]) > 1 else ""
+            valley_parts.append(f"{name} {_hours_text(valley['hours'])}{tie_text}{z_text}")
+    items.append(
+        item(
+            "valleys",
+            "典型低谷",
+            "；".join(valley_parts) + "。低谷同样是各来源相对自身典型水平的时点，不代表原始流量可跨来源比较。",
+            metrics={"valley_hours": {name: source_valleys[name]["hours"] for name in names}},
+        )
+    )
+
+    pair_results: list[dict[str, Any]] = []
+    for i, left in enumerate(entries):
+        for right in entries[i + 1:]:
+            common = [
+                hour
+                for hour in HOURS
+                if _hour_z(left["hourly_profile"], hour) is not None
+                and _hour_z(right["hourly_profile"], hour) is not None
+            ]
+            if len(common) < 3:
+                continue
+            left_values = np.asarray(
+                [_hour_z(left["hourly_profile"], hour) for hour in common],
+                dtype="float64",
+            )
+            right_values = np.asarray(
+                [_hour_z(right["hourly_profile"], hour) for hour in common],
+                dtype="float64",
+            )
+            if left_values.std() <= 1e-12 or right_values.std() <= 1e-12:
+                continue
+            r = float(np.corrcoef(left_values, right_values)[0, 1])
+            pair_results.append(
+                {
+                    "left": str(left["display_name"]),
+                    "right": str(right["display_name"]),
+                    "r": r,
+                    "common_hours": len(common),
+                    "strength": _correlation_strength(r),
+                }
+            )
+    closest = max(pair_results, key=lambda pair: pair["r"]) if pair_results else None
+    if pair_results:
+        pair_text = "；".join(
+            f"{pair['left']}–{pair['right']} r={pair['r']:.3f}（{pair['common_hours']} 个共同小时）"
+            for pair in pair_results
+        )
+        closest_text = ""
+        if closest:
+            closest_text = (
+                f"最接近的是 {closest['left']}–{closest['right']}"
+                f"（r={closest['r']:.3f}，{closest['strength']}）。"
+            )
+        items.append(
+            item(
+                "similarity",
+                "形状相似性",
+                pair_text + "。" + closest_text + "Pearson r 只描述 24 点曲线形状，不代表同步观测或因果关系。",
+                metrics={"pairs": pair_results, "closest": closest},
+            )
+        )
+        for pair in pair_results:
+            details.append(
+                {
+                    "label": f"{pair['left']}–{pair['right']}",
+                    "value": f"Pearson r={pair['r']:.4f}，共同有效小时 {pair['common_hours']} 个",
+                }
+            )
+    else:
+        items.append(
+            item(
+                "similarity",
+                "形状相似性",
+                "共同有效小时少于 3 个，或至少一条曲线方差为 0，未生成无效相关系数。",
+                level="warning",
+            )
+        )
+        warnings.append("曲线相似性因有效小时不足或零方差而无法计算。")
+
+    am_pm: dict[str, dict[str, float | None]] = {}
+    day_night: dict[str, dict[str, float | None]] = {}
+    for entry in entries:
+        name = str(entry["display_name"])
+        profile = entry["hourly_profile"]
+        am_values = [_hour_z(profile, hour) for hour in range(6, 12)]
+        pm_values = [_hour_z(profile, hour) for hour in range(18, 24)]
+        day_values = [_hour_z(profile, hour) for hour in range(6, 18)]
+        night_values = [_hour_z(profile, hour) for hour in list(range(18, 24)) + list(range(0, 6))]
+        am = [value for value in am_values if value is not None]
+        pm = [value for value in pm_values if value is not None]
+        daytime = [value for value in day_values if value is not None]
+        nighttime = [value for value in night_values if value is not None]
+        am_mean = float(np.mean(am)) if am else None
+        pm_mean = float(np.mean(pm)) if pm else None
+        day_mean = float(np.mean(daytime)) if daytime else None
+        night_mean = float(np.mean(nighttime)) if nighttime else None
+        am_pm[name] = {"am": am_mean, "evening": pm_mean}
+        day_night[name] = {"day": day_mean, "night": night_mean}
+        details.append(
+            {
+                "label": f"{name} 时段平均 Z",
+                "value": (
+                    f"上午 06–11 {fmt_num(am_mean, digits=3)}；晚间 18–23 {fmt_num(pm_mean, digits=3)}；"
+                    f"日间 06–17 {fmt_num(day_mean, digits=3)}；夜间 18–05 {fmt_num(night_mean, digits=3)}"
+                ),
+            }
+        )
+
+    am_candidates = [(name, values["am"]) for name, values in am_pm.items() if values["am"] is not None]
+    pm_candidates = [(name, values["evening"]) for name, values in am_pm.items() if values["evening"] is not None]
+    am_high = max(am_candidates, key=lambda pair: pair[1]) if am_candidates else None
+    pm_high = max(pm_candidates, key=lambda pair: pair[1]) if pm_candidates else None
+
+    spreads: list[dict[str, Any]] = []
+    for hour in HOURS:
+        values = [(str(entry["display_name"]), _hour_z(entry["hourly_profile"], hour)) for entry in entries]
+        available = [(name, value) for name, value in values if value is not None]
+        if len(available) < 2:
+            continue
+        high = max(available, key=lambda pair: pair[1])
+        low = min(available, key=lambda pair: pair[1])
+        spreads.append(
+            {
+                "hour": hour,
+                "spread": float(high[1] - low[1]),
+                "highest": high[0],
+                "lowest": low[0],
+                "values": {name: value for name, value in available},
+            }
+        )
+    largest_spread = max(spreads, key=lambda row: row["spread"]) if spreads else None
+
+    cv_rows = [
+        (str(entry["display_name"]), entry.get("cv_typical"))
+        for entry in entries
+        if entry.get("cv_typical") is not None
+    ]
+    cv_high = max(cv_rows, key=lambda pair: pair[1]) if cv_rows else None
+    cv_low = min(cv_rows, key=lambda pair: pair[1]) if cv_rows else None
+
+    direction_values = [
+        (name, values["day"], values["night"])
+        for name, values in day_night.items()
+        if values["day"] is not None and values["night"] is not None
+    ]
+    if direction_values:
+        signs = [np.sign(day - night) for _, day, night in direction_values if abs(day - night) > 1e-12]
+        if signs and all(sign > 0 for sign in signs):
+            direction_text = "三条曲线的日间平均 Z 均高于夜间，白天相对活跃的方向一致。"
+        elif signs and all(sign < 0 for sign in signs):
+            direction_text = "三条曲线的日间平均 Z 均低于夜间，昼夜变化方向一致。"
+        else:
+            direction_text = "各来源的日间/夜间方向并不完全一致。"
+    else:
+        direction_text = "Z-score 不可用，无法判断昼夜方向。"
+
+    variation_parts = [direction_text]
+    if am_high and pm_high:
+        variation_parts.append(
+            f"上午（06–11）平均 Z 最高为 {am_high[0]}（{am_high[1]:+.2f}），"
+            f"晚间（18–23）最高为 {pm_high[0]}（{pm_high[1]:+.2f}）。"
+        )
+    if largest_spread:
+        variation_parts.append(
+            f"三条曲线差异最大在 {hour_label(largest_spread['hour'])}，"
+            f"Z 极差 {largest_spread['spread']:.2f}（{largest_spread['highest']} 较高、"
+            f"{largest_spread['lowest']} 较低）。"
+        )
+    if cv_high and cv_low:
+        variation_parts.append(
+            f"按 24 点典型曲线 CV，{cv_high[0]} 波动最大（{cv_high[1]:.3f}），"
+            f"{cv_low[0]} 最小（{cv_low[1]:.3f}）。"
+        )
+    items.append(
+        item(
+            "variation",
+            "时段差异与波动",
+            " ".join(variation_parts),
+            metrics={
+                "am_pm": am_pm,
+                "day_night": day_night,
+                "largest_hourly_spread": largest_spread,
+                "cv_typical": {name: value for name, value in cv_rows},
+            },
+        )
+    )
+    if spreads:
+        details.append(
+            {
+                "label": "小时差异最大 Top 5",
+                "value": "；".join(
+                    f"{hour_label(row['hour'])}：极差 {row['spread']:.3f}"
+                    for row in sorted(spreads, key=lambda row: row["spread"], reverse=True)[:5]
+                ),
+            }
+        )
+
+    coverage_notes: list[str] = []
+    minimum_samples = None
+    for entry in entries:
+        name = str(entry["display_name"])
+        coverage = int(entry.get("coverage_hours") or 0)
+        sample_counts = [
+            int(point.get("samples") or 0)
+            for point in entry["hourly_profile"]
+            if point.get("mean") is not None
+        ]
+        if sample_counts:
+            minimum_samples = min(sample_counts) if minimum_samples is None else min(minimum_samples, min(sample_counts))
+        coverage_notes.append(f"{name}：{coverage}/24 个小时有典型值")
+        if coverage < 24:
+            warnings.append(f"{name} 只有 {coverage}/24 个有效钟点，缺失小时保留为 No Data，未填 0。")
+        if entry.get("zero_variance"):
+            warnings.append(f"{name} 的 24 点典型值为常量，未生成 Z-score。")
+        details.append(
+            {
+                "label": f"{name} 样本口径",
+                "value": (
+                    f"原始 {entry.get('raw_time_point_count', 0)} 个时间点，"
+                    f"原始有效观测 {entry.get('raw_valid_observation_count', 0)} 个；"
+                    f"小时桶 {entry.get('hourly_bucket_count', 0)} 个，"
+                    f"有效小时桶 {entry.get('hourly_valid_bucket_count', 0)} 个；"
+                    f"典型曲线 24 点。观测范围 {entry.get('time_start')}–{entry.get('time_end')}。"
+                ),
+            }
+        )
+
+    all_have_z = all(
+        any(point.get("z") is not None for point in entry["hourly_profile"])
+        for entry in entries
+    )
+    if all_have_z and minimum_samples is not None and minimum_samples < 2:
+        warnings.append(f"至少一个钟点的典型值只由 {minimum_samples} 个小时桶构成，代表性有限。")
+    if len(pair_results) < 3:
+        warnings.append("并非所有来源两两之间都具有可计算相关系数的共同有效小时。")
+
+    reliability_level = "high"
+    if any(int(entry.get("coverage_hours") or 0) < 24 for entry in entries):
+        reliability_level = "medium"
+    if any(
+        entry.get("zero_variance") or int(entry.get("coverage_hours") or 0) < 18
+        for entry in entries
+    ) or len(pair_results) == 0:
+        reliability_level = "low"
+    reliability_notes = [
+        "各来源观测时期和物理单位不同，不能比较绝对流量规模或推断同步发生。",
+        "Z-score 仅表示各来源相对于自身典型小时平均水平的偏离。",
+        "曲线相似性是基于共同小时形状的描述性 Pearson 相关，不代表因果或出行行为。",
+        "不能从这些曲线直接推断城市车辆拥堵或人群出行强度。",
+        *coverage_notes,
+    ]
+    details.extend(
+        [
+            {"label": "Z-score 方法", "value": "每个来源自身 24 点典型值的 (x−mean)/std，总体标准差 ddof=0"},
+            {"label": "相似性方法", "value": "共同有效小时上的 Pearson r；少于 3 小时或零方差时不输出"},
+            {"label": "高峰并列规则", "value": "与极值相差不超过 24 点典型值极差的 2% 视为接近并列"},
+            {"label": "CV 口径", "value": "24 点典型曲线均值的总体标准差 / 均值，不是原始采样点或整段小时序列的 CV"},
+        ]
+    )
+    return {
+        "available": True,
+        "items": items[:4],
+        "warnings": warnings,
+        "details": details,
+        "reliability": {"level": reliability_level, "notes": reliability_notes},
+        "peaks": {name: source_peaks[name] for name in names},
+        "valleys": {name: source_valleys[name] for name in names},
+        "similarity": {
+            "pairs": pair_results,
+            "closest": closest,
+            "method": "Pearson correlation on common valid hourly Z values",
+        },
+        "time_difference": {
+            "am_pm": am_pm,
+            "day_night": day_night,
+            "largest_hourly_spread": largest_spread,
+            "top_hourly_spreads": sorted(spreads, key=lambda row: row["spread"], reverse=True)[:5],
+        },
+        "flatness": {
+            "cv_typical": {name: value for name, value in cv_rows},
+            "highest": cv_high,
+            "lowest": cv_low,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # ACF, periodicity and trend
 # ---------------------------------------------------------------------------
 

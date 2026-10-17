@@ -253,6 +253,104 @@ export function HistogramChart({
   return <ReactECharts option={option} style={{ height }} notMerge />
 }
 
+/** Multi-source Z-score curves on a fixed 0--23 clock; no DataZoom. */
+export function MultiCityZChart({
+  sources,
+  height = 300,
+}: {
+  sources: Array<{
+    source_key?: string
+    display_name: string
+    hourly_shape_z: Array<number | null>
+  }>
+  height?: number
+}) {
+  if (!sources.length) return <Empty description="暂无真实数据" />
+  const x = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`)
+  const colors = ['#2467E8', '#12A67A', '#D98F00', '#8B5CF6', '#E4572E']
+  const option = {
+    animationDuration: 300,
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any[]) => {
+        const index = params[0]?.dataIndex ?? 0
+        const rows = sources.map((source, sourceIndex) => {
+          const value = source.hourly_shape_z?.[index]
+          const marker = params[sourceIndex]?.marker ?? ''
+          return `<div>${marker}${source.display_name}: ${
+            value === null || value === undefined ? '<b>No Data</b>' : `<b>${value.toFixed(3)}</b>`
+          }</div>`
+        })
+        return (
+          `<div style="font-size:12px;line-height:1.7">` +
+          `<div><b>${x[index]}–${String((index + 1) % 24).padStart(2, '0')}:00</b></div>` +
+          rows.join('') +
+          `<div style="color:#c3cadb;margin-top:3px">Z=0 为该来源自身的典型小时平均水平</div>` +
+          `</div>`
+        )
+      },
+    },
+    legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 10 } },
+    grid: { left: 62, right: 18, top: 22, bottom: 60 },
+    xAxis: {
+      type: 'category',
+      data: x,
+      boundaryGap: false,
+      name: '小时（0–23）',
+      nameLocation: 'middle',
+      nameGap: 27,
+      nameTextStyle: { fontSize: 10, color: '#5b7095' },
+      axisLabel: {
+        fontSize: 9,
+        interval: 0,
+        formatter: (value: string) => value.slice(0, 2),
+      },
+      axisLine: { lineStyle: { color: '#b8c6dc' } },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Z-score（标准化相对水平）',
+      nameLocation: 'middle',
+      nameGap: 45,
+      nameRotate: 90,
+      nameTextStyle: { fontSize: 10, color: '#5b7095' },
+      axisLabel: { fontSize: 9, formatter: (value: number) => value.toFixed(1) },
+      splitLine: { lineStyle: { color: '#eef3fa' } },
+    },
+    series: sources.map((source, index) => ({
+      name: source.display_name,
+      type: 'line',
+      showSymbol: true,
+      symbolSize: 4,
+      connectNulls: false,
+      data: source.hourly_shape_z,
+      lineStyle: { width: 1.9, color: colors[index % colors.length] },
+      itemStyle: { color: colors[index % colors.length] },
+      emphasis: { focus: 'series' },
+      markLine:
+        index === 0
+          ? {
+              silent: true,
+              symbol: 'none',
+              label: {
+                formatter: 'Z=0（自身平均）',
+                fontSize: 9,
+                color: '#7a8bab',
+                position: 'insideEndTop',
+              },
+              lineStyle: { color: '#9fb0c9', type: 'dashed', width: 1 },
+              data: [{ yAxis: 0 }],
+            }
+          : undefined,
+    })),
+  }
+  return (
+    <div data-testid="m1-multicity-z-chart" data-datazoom="none">
+      <ReactECharts option={option} style={{ height }} notMerge lazyUpdate />
+    </div>
+  )
+}
+
 /** 24 hourly means with real sample counts in the tooltip; missing hours stay gaps. */
 export function HourlyChart({
   regions,

@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Card, DatePicker, Modal, Select, Switch, Tabs, Tag, message,
+  Alert, Button, Card, Collapse, DatePicker, Modal, Select, Switch, Table, Tabs, Tag, message,
 } from 'antd'
 import dayjs, { Dayjs } from 'dayjs'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import MapView, { BLUE_PALETTE, colorScale, type MapEntry } from '../components/MapView'
-import { AcfChart, HistogramChart, HorizontalRankChart, HourlyChart, LineChart, WeekdayChart } from '../components/Charts'
+import {
+  AcfChart, HistogramChart, HorizontalRankChart, HourlyChart, LineChart, MultiCityZChart, WeekdayChart,
+} from '../components/Charts'
 import InsightCard, { type InsightPayload } from '../components/InsightCard'
 import HelpTip from '../components/HelpTip'
 import { useGroupValidation } from '../validation/useValidation'
@@ -1208,9 +1210,6 @@ export default function Exploration() {
                 label: '多城市对比（Multi-City Comparison）',
                 children: (
                   <div className="tn-stack">
-                    {(compareDisclaimers.length ? compareDisclaimers : []).map((line: string) => (
-                      <Alert key={line} type="warning" showIcon message={line} />
-                    ))}
                     <MultiCityPanel frequency="60min" aggregation="mean" />
                   </div>
                 ),
@@ -1355,51 +1354,220 @@ export default function Exploration() {
   )
 }
 
-const compareDisclaimers = [
-  '三个来源的单位不一致且观测时段不重叠（Milano/Trentino 为 2013-11~2014-01，ZTE 为 2024-07~08），只能比较归一化后的形状，不能比较绝对值或声称同时发生。',
-  'ZTE 为 4G 下行流量，不是道路车辆流量。',
-]
-
 function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggregation: string }) {
   const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+
   useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
     api
       .post<any>(ENDPOINTS.compare, { source_keys: ['milano', 'trentino', 'zte'], frequency, aggregation })
-      .then(setData)
-      .catch(() => setData(null))
+      .then((next) => {
+        if (active) setData(next)
+      })
+      .catch((reason) => {
+        if (!active) return
+        setData(null)
+        setError(reason instanceof Error ? reason.message : '无法读取多来源对比数据')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
   }, [frequency, aggregation])
+
+  const sources = data?.sources ?? []
+  const insights = data?.insights
+  const sourceColumns = [
+    {
+      title: '数据源 / 单位',
+      key: 'source',
+      width: '27%',
+      render: (_: unknown, item: any) => (
+        <div>
+          <strong>{item.display_name}</strong>
+          <div className="tn-muted" style={{ fontSize: 10.5, lineHeight: 1.45 }}>{item.unit_label}</div>
+        </div>
+      ),
+    },
+    {
+      title: '观测范围',
+      key: 'period',
+      width: '29%',
+      render: (_: unknown, item: any) => (
+        <div style={{ fontSize: 10.5, lineHeight: 1.5 }}>
+          <div>{String(item.time_start ?? '—').slice(0, 10)}</div>
+          <div className="tn-muted">→ {String(item.time_end ?? '—').slice(0, 10)}</div>
+        </div>
+      ),
+    },
+    {
+      title: '采样与样本',
+      key: 'samples',
+      width: '44%',
+      render: (_: unknown, item: any) => (
+        <div style={{ fontSize: 10.5, lineHeight: 1.55 }}>
+          <div>
+            原始 {Number(item.raw_time_point_count ?? 0).toLocaleString('zh-CN')} 个时间点 ·{' '}
+            间隔 {item.native_frequency_minutes} 分钟
+          </div>
+          <div>
+            小时聚合 {Number(item.hourly_bucket_count ?? 0).toLocaleString('zh-CN')} 个（有效{' '}
+            {Number(item.hourly_valid_bucket_count ?? 0).toLocaleString('zh-CN')}）
+          </div>
+          <div>
+            典型曲线 24 个钟点 · 有效原始观测（区域×时间）{' '}
+            {Number(item.raw_valid_observation_count ?? 0).toLocaleString('zh-CN')}
+          </div>
+          <div className="tn-muted">
+            CV（24 点典型值）{item.cv_typical === null || item.cv_typical === undefined ? '—' : Number(item.cv_typical).toFixed(3)}
+          </div>
+        </div>
+      ),
+    },
+  ]
+  const methodRows = data?.method
+    ? [
+        ['小时聚合', data.method.hourly_aggregation],
+        ['区域聚合', data.method.spatial_aggregation],
+        ['典型日内曲线', data.method.daily_profile],
+        ['Z-score', data.method.zscore],
+        ['曲线相似性', data.method.similarity],
+        ['CV', data.method.cv],
+      ]
+    : []
+
   return (
     <>
-      <Card size="small" title="归一化形状比较（z-score，禁用原始值同量纲比较）">
-        <LineChart
-          height={220}
-          x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
-          series={(data?.sources ?? []).map((item: any) => ({
-            name: item.display_name,
-            data: item.hourly_shape_z,
-          }))}
-          empty={!data?.sources?.length}
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: 8 }}
+        message="仅比较标准化后的日内形状"
+        description={data?.warning ?? '三个来源的观测时期与物理单位不同，原始值不可直接比较；ZTE 为 4G 下行流量，不是道路车辆流量。'}
+      />
+      {error ? (
+        <Alert
+          type="error"
+          showIcon
+          message="多来源对比数据加载失败"
+          description={error}
+          style={{ marginBottom: 8 }}
         />
-        <div className="tn-muted">归一化方式：{data?.normalisation ?? 'z-score'}</div>
-        <div className="tn-hint" style={{ marginTop: 6 }}>
-          每条线是该来源自身 24 小时均值曲线再做 z-score：<strong>0 线＝该来源自身的平均小时水平</strong>，
-          正值表示该小时高于自身平均。三个来源量级差几个数量级，因此只比较“形状”（高峰在几点、波动谁更大）。
+      ) : null}
+      <Card
+        size="small"
+        title={(
+          <span className="tn-inline">
+            标准化日内模式对比（Z-score）
+            <HelpTip
+              label="多来源标准化日内模式"
+              title="三个来源各自计算自身的 24 点典型曲线，再做 Z-score。"
+              detail="各区域原始观测先按完整整点小时聚合；同一小时对所有有值区域等权平均，再按 0–23 钟点跨日期平均。缺失小时保留为 No Data，不填 0；零方差时不生成归一化曲线。原始流量值从不跨来源比较。"
+            />
+          </span>
+        )}
+        extra={(
+          <Button size="small" onClick={() => setExpanded(true)} disabled={!sources.length}>
+            放大查看
+          </Button>
+        )}
+      >
+        {loading && !data ? (
+          <div className="tn-empty">正在读取三个来源的真实观测并计算 24 点典型曲线…</div>
+        ) : (
+          <MultiCityZChart sources={sources} height={310} />
+        )}
+        <div className="tn-muted" style={{ fontSize: 10.5, marginTop: 4 }}>
+          曲线：Milano、Trentino、ZTE 4G Downlink。Z=0 表示该来源自身的典型小时平均水平，
+          正值高于自身平均，负值低于自身平均。
         </div>
       </Card>
-      {(data?.sources ?? []).map((item: any) => (
-        <Card size="small" key={item.source_key} title={item.display_name}>
-          <div className="tn-muted">
-            单位：{item.unit_label}
-            <br />
-            观测时段：{item.time_start} → {item.time_end}（{item.points} 点 @ {item.native_frequency_minutes} 分钟）
-            <br />
-            变异系数 CV：{item.cv?.toFixed(3) ?? '—'}
-          </div>
-          <Tag color="orange" style={{ marginTop: 6 }}>
-            时间与单位免责声明
-          </Tag>
-        </Card>
-      ))}
+      <InsightCard
+        title="Multi-City Comparison Insights（多来源日内模式对比分析）"
+        insights={insights}
+        loading={loading}
+      />
+      <Card
+        size="small"
+        title={(
+          <span className="tn-inline">
+            Dataset Comparison Summary（数据源对比摘要）
+            <HelpTip
+              label="数据源对比摘要"
+              title="原始时间点、小时桶和典型曲线点是三个不同口径。"
+              detail="原始时间点是 CSV 的时间行数；小时桶是固定整点小时的聚合结果；典型曲线固定为 24 个钟点。有效原始观测按“区域 × 时间”的非空值计数。CV 只基于每个来源自身 24 点典型曲线计算。"
+            />
+          </span>
+        )}
+        style={{ marginTop: 8 }}
+      >
+        <Table
+          size="small"
+          rowKey="source_key"
+          pagination={false}
+          columns={sourceColumns}
+          dataSource={sources}
+          loading={loading}
+        />
+        <div className="tn-muted" style={{ fontSize: 10.5, marginTop: 6 }}>
+          观测范围不同（Milano/Trentino 与 ZTE 并非同一年份）；单位不同，因此表中数值仅作数据质量说明，不用于跨来源规模比较。
+        </div>
+        <Collapse
+          size="small"
+          ghost
+          style={{ marginTop: 4 }}
+          items={[
+            {
+              key: 'method',
+              label: '展开数据处理与统计口径',
+              children: (
+                <div className="tn-insight-details">
+                  {methodRows.map(([label, value]) => (
+                    <div key={label}>
+                      <span className="tn-insight-detail-label">{label}</span>
+                      <span>{value}</span>
+                    </div>
+                  ))}
+                  {sources.map((item: any) => (
+                    <div key={`${item.source_key}-counts`}>
+                      <span className="tn-insight-detail-label">{item.display_name}</span>
+                      <span>
+                        原始时间点 {item.raw_time_point_count}；有效原始观测 {item.raw_valid_observation_count} /{' '}
+                        {item.raw_observation_count}（区域 × 时间）；小时桶 {item.hourly_bucket_count}；
+                        有效小时桶 {item.hourly_valid_bucket_count}；典型曲线 {item.hourly_profile_points} 点。
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ),
+            },
+          ]}
+        />
+      </Card>
+      <Modal
+        open={expanded}
+        onCancel={() => setExpanded(false)}
+        footer={null}
+        width={1120}
+        title="标准化日内模式对比（Z-score）"
+        destroyOnClose
+      >
+        <div className="tn-muted" style={{ marginBottom: 6 }}>
+          横轴为 0–23 小时；Z=0 表示该来源自身的典型小时平均水平。三个来源仅作形状比较。
+        </div>
+        <MultiCityZChart sources={sources} height={480} />
+        <InsightCard
+          title="Multi-City Comparison Insights（多来源日内模式对比分析）"
+          insights={insights}
+        />
+      </Modal>
     </>
   )
 }
