@@ -280,6 +280,37 @@ body {
   margin-right: 4px;
 }
 
+.tn-map-label {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  color: #142b52;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-shadow:
+    0 0 3px #fff,
+    0 0 3px #fff,
+    0 0 3px #fff;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.tn-map-label::before {
+  display: none !important;
+}
+
+.tn-hint {
+  background: #f5f8ff;
+  border: 1px dashed #cfdcf2;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #4a5d80;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
 .tn-stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

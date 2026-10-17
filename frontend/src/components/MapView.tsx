@@ -19,6 +19,9 @@ interface Props {
   height?: number
   formatTooltip?: (entry: MapEntry | undefined, regionId: string) => string
   legend?: React.ReactNode
+  /** show the region name permanently in the middle of each polygon */
+  showLabels?: boolean
+  labelFor?: (entry: MapEntry | undefined, regionId: string) => string
 }
 
 /**
@@ -35,6 +38,8 @@ export default function MapView({
   height = 460,
   formatTooltip,
   legend,
+  showLabels = false,
+  labelFor,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -68,10 +73,12 @@ export default function MapView({
       center: [45.46, 9.19],
       zoom: 10,
     })
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    // Standard OSM tiles (no API key / watermark). They are drawn semi
+    // transparent so the thematic polygon colours stay readable.
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      subdomains: 'abcd',
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      opacity: 0.55,
+      attribution: '&copy; OpenStreetMap contributors',
     }).addTo(map)
     mapRef.current = map
     setReady(true)
@@ -102,6 +109,16 @@ export default function MapView({
             : `${regionId}: ${entry?.value ?? 'No Data'}`
           featureLayer.bindTooltip(text, { sticky: true }).openTooltip()
         })
+        if (showLabels) {
+          const entry = valuesRef.current[regionId]
+          const label = labelFor ? labelFor(entry, regionId) : regionId
+          featureLayer.bindTooltip(label, {
+            permanent: true,
+            direction: 'center',
+            className: 'tn-map-label',
+            opacity: 1,
+          })
+        }
       },
     }).addTo(map)
     layerRef.current = layer
@@ -112,7 +129,7 @@ export default function MapView({
     } catch {
       /* empty geometry */
     }
-  }, [geojson, ready])
+  }, [geojson, ready, showLabels])
 
   useEffect(() => {
     Object.entries(pathsRef.current).forEach(([regionId, path]) => {

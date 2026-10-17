@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Segmented, Select, Tabs, Tag, Tooltip, message } from 'antd'
+import { Alert, Button, Card, Switch, Tabs, Tag, Tooltip, message } from 'antd'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { ModuleHeader, PaneHead, ThreePane, EmptyState } from '../components/Panes'
 import ParamField from '../components/ParamField'
@@ -29,7 +29,7 @@ export default function Exploration() {
     aggregation: 'mean',
     max_regions: 6,
     start_index: 0,
-    window_points: 288,
+    window_points: 1008,
   })
   const [regions, setRegions] = useState<Array<{ region_id: string; display_name: string; has_timeseries: boolean }>>([])
   const [geojson, setGeojson] = useState<any>(null)
@@ -40,6 +40,7 @@ export default function Exploration() {
   const [loading, setLoading] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
   const [tab, setTab] = useState('temporal')
+  const [showLabels, setShowLabels] = useState(true)
   const [messageApi, contextHolder] = message.useMessage()
 
   const schema: FieldSpec[] = useMemo(
@@ -49,7 +50,7 @@ export default function Exploration() {
       { key: 'frequency', label_zh: '时间分辨率', type: 'enum', enum: ['native', '30min', '60min', '1day'], enum_labels: FREQUENCIES.map((f) => f.label), default: 'native', help_zh: '必须是原生频率的整数倍。', suggestion_zh: '探索分析建议先用原生频率。' },
       { key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'], enum_labels: ['均值 mean', '求和 sum'], default: 'mean', help_zh: 'sum 为桶内求和，mean 为桶内平均；源单位未确认，不代表物理总量。', suggestion_zh: '原生频率下该参数无影响。' },
       { key: 'start_index', label_zh: '起始时间点', type: 'integer', min: 0, default: 0, help_zh: '分析窗口起点（按重采样后的点数计）。', suggestion_zh: '0 表示从最早时间点开始。' },
-      { key: 'window_points', label_zh: '窗口点数', type: 'integer', min: 8, max: 100000, default: 288, help_zh: '分析窗口包含的时间点数。', suggestion_zh: '10 分钟频率下 144 点约为一天。' },
+      { key: 'window_points', label_zh: '窗口点数', type: 'integer', min: 8, max: 100000, default: 1008, help_zh: '分析窗口包含的时间点数。', suggestion_zh: '10 分钟频率下 144 点约为一天，1008 点约为一周。' },
       { key: 'max_regions', label_zh: '最多对比区域数', type: 'integer', min: 1, max: 12, default: 6, level: 'advanced', help_zh: '多区域对比上限，避免图表过载。', suggestion_zh: '默认 6。' },
     ],
     [regions],
@@ -207,7 +208,7 @@ export default function Exploration() {
                       aggregation: 'mean',
                       max_regions: 6,
                       start_index: 0,
-                      window_points: 288,
+                      window_points: 1008,
                     })
                     setSpatialIndex(0)
                   }}
@@ -259,6 +260,8 @@ export default function Exploration() {
               entries={spatialValues}
               selected={selected}
               onToggle={toggleRegion}
+              showLabels={showLabels}
+              labelFor={(entry, regionId) => entry?.label ?? regionId}
               colorFor={(entry) => colorScale(entry?.value ?? null, bounds.min, bounds.max, BLUE_PALETTE)}
               formatTooltip={(entry, regionId) =>
                 `${entry?.label ?? regionId}: ${entry?.value === null || entry?.value === undefined ? 'No Data' : entry.value.toFixed(2)}${source ? ` (${source.unit_label})` : ''}`
@@ -276,20 +279,33 @@ export default function Exploration() {
                 </>
               }
             />
+            <div className="tn-inline" style={{ marginTop: 8, justifyContent: 'space-between' }}>
+              <span className="tn-inline">
+                <Switch size="small" checked={showLabels} onChange={setShowLabels} />
+                <span className="tn-muted">在地图上显示区域名称</span>
+              </span>
+              <span className="tn-muted">地图颜色 = 当前时间截面该区域的真实观测值（越深越大）</span>
+            </div>
             <div className="tn-inline" style={{ marginTop: 8 }}>
-              <span className="tn-muted">时间截面位置</span>
+              <Tooltip title="在整段时间轴里挑一个时刻。地图和 Spatial Analysis 会显示该时刻各区域的真实值，用来观察同一时刻不同区域的差异。">
+                <span className="tn-muted">时间截面位置 ⓘ</span>
+              </Tooltip>
               <input
                 type="range"
                 min={0}
-                max={Math.max(0, (spatial?.regions ? (temporal?.window?.stop_index ?? 1) - 1 : 1))}
+                max={Math.max(0, (temporal?.total_points ?? 1) - 1)}
                 value={spatialIndex}
                 onChange={(event) => setSpatialIndex(Number(event.target.value))}
                 style={{ flex: 1 }}
                 aria-label="时间截面位置"
               />
               <span className="tn-muted">
-                index {spatialIndex} / {(temporal?.window?.stop_index ?? 1) - 1}
+                {spatial?.time_at ?? `index ${spatialIndex}`}
               </span>
+            </div>
+            <div className="tn-hint" style={{ marginTop: 6 }}>
+              「时间截面」= 从整条时间轴中选<strong>一个时刻</strong>，看这一刻所有区域的取值快照。
+              拖动滑块 → 地图重新着色、Spatial Analysis 的排名与分布同步更新；右侧曲线仍显示上方设置的整个分析窗口。
             </div>
             <Card size="small" title="多区域时序曲线（真实观测）" style={{ marginTop: 10 }}>
               <LineChart
@@ -318,7 +334,29 @@ export default function Exploration() {
                 label: 'Temporal Analysis',
                 children: (
                   <div className="tn-stack">
-                    <Card size="small" title="统计摘要（真实计算）">
+                    <Card
+                      size="small"
+                      title={
+                        <span className="tn-inline">
+                          统计摘要（当前分析窗口）
+                          <Tooltip
+                            title={
+                              <div style={{ maxWidth: 320, lineHeight: 1.7 }}>
+                                均值：窗口内所有有效观测的平均值（源单位）
+                                <br />峰值：窗口内最大值（对应时刻见曲线）
+                                <br />P95：95% 分位值，95% 的观测不超过它，比峰值更稳健
+                                <br />CV：变异系数 = 标准差 ÷ 均值，越大表示相对波动越剧烈
+                                <br />零值：观测恰好为 0 的点数（ZTE 的真实零值会保留，不当作缺失）
+                              </div>
+                            }
+                          >
+                            <Tag color="blue" style={{ cursor: 'help' }}>
+                              各列含义 ⓘ
+                            </Tag>
+                          </Tooltip>
+                        </span>
+                      }
+                    >
                       {temporal?.statistics?.length ? (
                         <table style={{ width: '100%', fontSize: 11.5 }}>
                           <thead>
@@ -347,8 +385,16 @@ export default function Exploration() {
                       ) : (
                         <EmptyState text="选择一个区域后显示真实统计量。" />
                       )}
+                      <div className="tn-hint" style={{ marginTop: 8 }}>
+                        这些数字只统计 <strong>上方「窗口点数」所覆盖的时间段</strong>，且只使用真实观测；
+                        缺失点不参与计算，也不会被当成 0。
+                      </div>
                     </Card>
                     <Card size="small" title="日内小时画像">
+                      <div className="tn-hint" style={{ marginBottom: 6 }}>
+                        把窗口内所有观测按<strong>一天中的第几小时</strong>分组求平均：看每天几点高、几点低。
+                        横轴 0:00–23:00，纵轴为源单位的平均值。
+                      </div>
                       <LineChart
                         height={200}
                         x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
@@ -377,8 +423,18 @@ export default function Exploration() {
                         }))}
                         empty={!temporal?.weekly_profiles?.length}
                       />
+                      <div className="tn-hint" style={{ marginTop: 6 }}>
+                        {temporal?.weekly_note ??
+                          '周内模式基于完整序列计算（不受显示窗口限制），因此周一到周日都有真实均值。'}
+                        比值 &gt; 1 表示工作日平均更高；≈1 表示工作日与周末差异很小。
+                      </div>
                     </Card>
                     <Card size="small" title="自相关 ACF 与趋势（实际算法支持）">
+                      <div className="tn-hint" style={{ marginBottom: 6 }}>
+                        ACF（自相关）：横轴是滞后步数 k，纵轴是「当前值与 k 步之前的值的相关系数」。
+                        接近 1 表示序列有很强的惯性/周期；在 0 附近表示与过去没有明显线性关系；
+                        负值表示反向。曲线缓慢衰减说明该区域适合用历史窗口做预测。
+                      </div>
                       <LineChart
                         height={180}
                         x={(temporal?.acf?.lags ?? []).map((lag: number) => String(lag))}
@@ -387,6 +443,9 @@ export default function Exploration() {
                       />
                       <div className="tn-muted">
                         {temporal?.acf?.note ?? `线性趋势斜率 ${temporal?.trend?.slope?.toFixed(4) ?? '—'}（每点变化量）`}
+                      </div>
+                      <div className="tn-hint" style={{ marginTop: 6 }}>
+                        趋势斜率用最小二乘线性回归估计：正值表示窗口内整体在上升，负值表示下降，数值是每个时间点的平均变化量。
                       </div>
                     </Card>
                     {notes.map((line: string) => (
@@ -402,6 +461,11 @@ export default function Exploration() {
                 label: 'Spatial Analysis',
                 children: (
                   <div className="tn-stack">
+                    <div className="tn-hint">
+                      这一页把「当前时间截面」横向切开，比较同一时刻不同区域：
+                      上图看最高的 12 个区域，中图看所有区域取值的分布，下图看最低的区域。
+                      拖动左侧时间截面滑块即可看到不同时刻的空间差异。
+                    </div>
                     <Card size="small" title={`当前时间截面空间强度（${spatial?.time_at ?? '—'}）`}>
                       <div className="tn-muted">
                         有效区域 {spatial?.summary?.regions_with_value ?? 0} · 缺失{' '}
@@ -414,6 +478,9 @@ export default function Exploration() {
                         categories={(spatial?.ranking ?? []).slice(0, 12).map((item: any) => item.region_id)}
                         values={(spatial?.ranking ?? []).slice(0, 12).map((item: any) => item.value)}
                       />
+                      <div className="tn-hint" style={{ marginTop: 6 }}>
+                        图 1：该时刻取值最高的 12 个区域（横条越长表示该时刻流量越大），按区域 ID 标注。
+                      </div>
                     </Card>
                     <Card size="small" title="区域差异分布">
                       <BarChart
@@ -424,6 +491,10 @@ export default function Exploration() {
                         values={(spatial?.summary?.distribution ?? []).map((bin: any) => bin.count)}
                         color="#12A67A"
                       />
+                      <div className="tn-hint" style={{ marginTop: 6 }}>
+                        图 2：把所有区域在该时刻的取值按数值区间分箱，柱高 = 落在该区间的区域个数。
+                        可看整体是「普遍接近」还是「少数区域特别高」。
+                      </div>
                     </Card>
                     <Card size="small" title="最低区域（同截面）">
                       {(spatial?.bottom ?? []).slice(0, 6).map((item: any) => (
@@ -431,6 +502,9 @@ export default function Exploration() {
                           {item.region_id}: {item.value?.toFixed(2)}
                         </div>
                       ))}
+                      <div className="tn-hint" style={{ marginTop: 6 }}>
+                        图 3：同一时刻取值最低的 6 个区域，与图 1 一起构成该截面的两端对比。
+                      </div>
                     </Card>
                   </div>
                 ),
@@ -449,12 +523,18 @@ export default function Exploration() {
                         x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
                         series={(compare?.sources ?? []).map((item: any) => ({
                           name: item.display_name,
-                          data: item.hourly_shape,
+                          data: item.hourly_shape_z,
                         }))}
                         empty={!compare?.sources?.length}
                       />
                       <div className="tn-muted">
                         归一化方式：{compare?.normalisation ?? 'z-score'}
+                      </div>
+                      <div className="tn-hint" style={{ marginTop: 6 }}>
+                        读图方法：每条线是「该来源自己 24 小时均值曲线」再做 z-score。
+                        <strong>0 线 = 该来源自身的平均小时水平</strong>；正值表示该小时高于它自己的平均，负值表示低于。
+                        三个来源的单位与绝对量级不同（ZTE 是 4G 下行流量，数值大几个数量级），
+                        所以这里只比较「形状」——例如高峰出现在哪些小时、波动幅度谁更大，不能比较绝对高低。
                       </div>
                     </Card>
                     {(compare?.sources ?? []).map((item: any) => (

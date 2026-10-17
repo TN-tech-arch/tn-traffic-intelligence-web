@@ -81,6 +81,12 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     hours = index.hour.to_numpy()
     weekdays = index.weekday.to_numpy()
 
+    # Weekly patterns must not be limited to a short display window (2 days would
+    # only contain 2 weekdays). They are therefore computed over the *full*
+    # resampled series and labelled as such in the UI.
+    full_index = pd.to_datetime(data.timestamps, unit="s")
+    full_weekdays = full_index.weekday.to_numpy()
+
     series_out = []
     stats_out = []
     profiles = []
@@ -101,12 +107,14 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
             selector = np.isfinite(column) & (hours == hour)
             hourly.append(float(column[selector].mean()) if selector.any() else None)
         profiles.append({"region_id": region_id, "hourly_mean": hourly})
-        weekday_values = column[np.isfinite(column) & (weekdays < 5)]
-        weekend_values = column[np.isfinite(column) & (weekdays >= 5)]
+        full_column = data.values[:, position]
+        full_finite = np.isfinite(full_column)
+        weekday_values = full_column[full_finite & (full_weekdays < 5)]
+        weekend_values = full_column[full_finite & (full_weekdays >= 5)]
         weekly = []
         for day in range(7):
-            selector = np.isfinite(column) & (weekdays == day)
-            weekly.append(float(column[selector].mean()) if selector.any() else None)
+            selector = full_finite & (full_weekdays == day)
+            weekly.append(float(full_column[selector].mean()) if selector.any() else None)
         weekly_profiles.append(
             {
                 "region_id": region_id,
@@ -118,6 +126,8 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
                     else None
                 ),
                 "weekly_mean": weekly,
+                "basis": "full_series",
+                "points_used": int(full_finite.sum()),
             }
         )
 
@@ -132,6 +142,7 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
         "frequency": data.frequency,
         "frequency_minutes": data.frequency_minutes,
         "aggregation": data.aggregation,
+        "total_points": int(data.timestamps.size),
         "window": {
             "start_index": start,
             "stop_index": stop,
@@ -143,6 +154,7 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
         "statistics": stats_out,
         "intraday_profiles": profiles,
         "weekly_profiles": weekly_profiles,
+        "weekly_note": "周内模式基于该来源的完整序列计算（不受上方显示窗口限制），因此七天都有真实均值。",
         "acf": autocorrelation(first),
         "trend": _trend(first),
         "notes": [
@@ -262,6 +274,17 @@ def compare_sources(payload: dict[str, Any]) -> dict[str, Any]:
         for hour in range(24):
             selector = mask & (hours == hour)
             hourly.append(float(np.nanmean(profile[selector])) if selector.any() else None)
+        # z-score of the hourly shape so the three sources can be compared on
+        # shape only (their units and absolute levels differ).
+        hourly_values = np.array([v for v in hourly if v is not None], dtype="float64")
+        if hourly_values.size:
+            hour_mean = float(hourly_values.mean())
+            hour_std = float(hourly_values.std()) or 1.0
+            hourly_z = [
+                None if v is None else (v - hour_mean) / hour_std for v in hourly
+            ]
+        else:
+            hour_mean, hour_std, hourly_z = None, None, [None] * 24
         step = max(1, profile.size // 200)
         entries.append(
             {
@@ -273,6 +296,9 @@ def compare_sources(payload: dict[str, Any]) -> dict[str, Any]:
                 "points": int(profile.size),
                 "native_frequency_minutes": source["native_frequency_minutes"],
                 "hourly_shape": hourly,
+                "hourly_shape_z": hourly_z,
+                "hourly_mean_level": hour_mean,
+                "hourly_std_level": hour_std,
                 "normalised_sample": [
                     {"index": int(i), "value": None if not np.isfinite(normalised[i]) else float(normalised[i])}
                     for i in range(0, profile.size, step)

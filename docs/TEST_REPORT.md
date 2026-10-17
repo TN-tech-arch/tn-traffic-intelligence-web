@@ -143,3 +143,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\test_install.ps1
 | 公网 HTTPS 部署 | 未验证（Blocked） | 需要服务器、域名、凭据与许可确认，见 `DEPLOYMENT.md` |
 | GPU 训练性能 | 未验证（Blocked） | 本机无 CUDA 设备 |
 | Milano/Trentino All Regions × All Models 全量训练 | 未验证 | 计划数与队列机制已实测；全量执行需要数小时，按 spec 要求分别报告“设计容量/自动化覆盖/实测批次” |
+
+## 8. 界面可读性改进（用户反馈轮）
+
+收到 8 条针对 Module 1 / Home 的界面反馈后完成的改动，并重新实测：
+
+| 反馈 | 改动 | 验证 |
+|---|---|---|
+| Recent Activity 看不懂 | 卡片顶部新增说明块：记录类型（Dataset/Experiment/Batch/Evaluation）、状态含义、ID 与时间的用途 | `data/screenshots/01-home.png` |
+| 地图没有区域名称 | 地图新增「显示区域名称」开关（默认开启），所有多边形按区域 ID 标注；底图切换为标准 OSM（去掉 CARTO 的 “API KEY REQUIRED” 水印） | `visual_check_m1.mjs` 输出 `map labels: 88`、`carto watermark present: false` |
+| 「时间截面位置」不明 | 滑块右侧直接显示该截面的真实时间；下方新增说明：从整条时间轴选一个时刻，看该时刻所有区域的取值快照 | `data/screenshots/10-m1-map-labels-and-explain.png` |
+| 统计摘要各列含义不明 | 标题旁新增「各列含义 ⓘ」（均值/峰值/P95/CV/零值逐项解释）+ 统计范围说明 | `data/screenshots/11-m1-explanations.png` |
+| 周内图只有周五、周六有线段（实为 bug） | 周内模式改为基于**完整序列**计算（原先受 2 天显示窗口限制，只有两个星期几有数据）；默认分析窗口改为 1008 点（10 分钟频率约 7 天），并注明计算依据 | API 实测 `weekly non-null days: 7`，`weekly_note` 已显示 |
+| ACF 与趋势图不明 | 新增读图说明：ACF 衡量与滞后 k 步的相关性、接近 1 / 0 / 负值的含义、斜率含义 | `data/screenshots/11-m1-explanations.png` |
+| Spatial Analysis 三个图不明 | 顶部新增整页说明，三张图分别加「图 1/2/3」的解释（Top-12 排名、取值分布直方图、最低 6 个区域） | 同上 |
+| 跨城图蓝绿线为何在 0 以上（实为 bug） | 前端原先错误地绘制了**原始小时均值**（与 z-score 标签不符），已改为绘制 `hourly_shape_z`；并解释 0 线 = 该来源自身平均小时水平 | API/浏览器实测：Milano z 范围 −1.72..1.10，原始最大值 9.17e3；ZTE 原始 1.69e7，三者现在同图可比形状 |
+
+重新执行回归：`pytest 55 passed`、`ui_check.mjs 35/35 passed`、`e2e_smoke.py ALL E2E STEPS PASSED`。

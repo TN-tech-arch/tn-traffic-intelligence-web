@@ -152,6 +152,13 @@ export default function Home() {
         </Col>
         <Col xs={24} lg={10}>
           <Card title="Recent Activity（来自数据库）" size="small">
+            <div className="tn-hint" style={{ marginBottom: 10 }}>
+              这是系统最近创建过的任务记录，按时间倒序显示，全部直接来自数据库，没有任何示例数据。
+              每条包含：<strong>类型</strong>（Dataset 数据集 / Experiment 单模型实验 / Batch 批量任务 / Evaluation 评价）、
+              <strong>名称</strong>、<strong>状态</strong>（排队中 Queued、运行中 Running、已完成 Completed、
+              部分完成 Partial、失败 Failed、已停止 Stopped、已跳过 Skipped）以及 <strong>ID</strong> 与创建时间。
+              点击左侧导航的 Dataset / Training / Evaluation 即可查看这些记录的详细结果。
+            </div>
             {data.recent_activity.length === 0 ? (
               <EmptyState text="暂无历史记录：还没有创建任何 Dataset / Experiment / Evaluation（真实空态，不显示假记录）" />
             ) : (
