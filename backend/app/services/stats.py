@@ -1,4 +1,9 @@
-"""Module 1 analytics computed from the real series (no fabricated statistics)."""
+"""Module 1 analytics computed from the real series (no fabricated statistics).
+
+Every statistic in this module is derived from **one** resolved analysis range
+(`services.time_range.resolve_range`).  Charts, numbers and the generated
+insights therefore always describe the same observations.
+"""
 
 from __future__ import annotations
 
@@ -7,131 +12,224 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.services.ingest import load_series, source_row
-from app.services.series import available_frequencies, resample
+from app.core.errors import RequestRejected
+from app.services import insights as insight_engine
+from app.services.ingest import source_row
+from app.services.series import resample
+from app.services.time_range import has_blocking, resolve_range
 
 
 def _clean_series(values: np.ndarray) -> np.ndarray:
     return np.asarray(values, dtype="float64")
 
 
-def describe(values: np.ndarray) -> dict[str, Any]:
+def describe(values: np.ndarray, timestamps: np.ndarray | None = None) -> dict[str, Any]:
     array = _clean_series(values)
     mask = np.isfinite(array)
+    base = {
+        "valid_points": int(mask.sum()),
+        "missing_points": int((~mask).sum()),
+        "mean": None, "std": None, "min": None, "max": None, "p95": None, "cv": None,
+        "peak_value": None, "trough_value": None, "peak_index": None, "trough_index": None,
+        "peak_at": None, "trough_at": None, "zero_points": 0,
+    }
     if not mask.any():
-        return {
-            "valid_points": 0, "missing_points": int((~mask).sum()), "mean": None, "std": None,
-            "min": None, "max": None, "p95": None, "cv": None, "peak_value": None,
-            "trough_value": None, "peak_index": None, "trough_index": None, "zero_points": 0,
-        }
+        return base
     valid = array[mask]
     indices = np.arange(array.size)[mask]
     mean = float(valid.mean())
     std = float(valid.std())
-    return {
-        "valid_points": int(mask.sum()),
-        "missing_points": int((~mask).sum()),
-        "mean": mean,
-        "std": std,
-        "min": float(valid.min()),
-        "max": float(valid.max()),
-        "p95": float(np.percentile(valid, 95)),
-        "cv": float(std / mean) if abs(mean) > 1e-12 else None,
-        "peak_value": float(valid.max()),
-        "trough_value": float(valid.min()),
-        "peak_index": int(indices[int(np.argmax(valid))]),
-        "trough_index": int(indices[int(np.argmin(valid))]),
-        "zero_points": int((valid == 0).sum()),
-    }
+    peak_pos = int(np.argmax(valid))
+    trough_pos = int(np.argmin(valid))
+    peak_index = int(indices[peak_pos])
+    trough_index = int(indices[trough_pos])
+    base.update(
+        {
+            "mean": mean,
+            "std": std,
+            "min": float(valid.min()),
+            "max": float(valid.max()),
+            "p95": float(np.percentile(valid, 95)),
+            "cv": float(std / mean) if abs(mean) > 1e-12 else None,
+            "peak_value": float(valid.max()),
+            "trough_value": float(valid.min()),
+            "peak_index": peak_index,
+            "trough_index": trough_index,
+            "zero_points": int((valid == 0).sum()),
+        }
+    )
+    if timestamps is not None and timestamps.size:
+        base["peak_at"] = str(pd.Timestamp(int(timestamps[peak_index]), unit="s").strftime("%Y-%m-%d %H:%M:%S"))
+        base["trough_at"] = str(pd.Timestamp(int(timestamps[trough_index]), unit="s").strftime("%Y-%m-%d %H:%M:%S"))
+    return base
 
 
-def autocorrelation(values: np.ndarray, max_lag: int = 48) -> dict[str, Any]:
-    array = _clean_series(values)
-    array = array[np.isfinite(array)]
-    if array.size < 4:
-        return {"lags": [], "values": [], "note": "有效点不足，无法计算自相关。"}
-    centered = array - array.mean()
-    denominator = float(np.dot(centered, centered))
-    if denominator <= 0:
-        return {"lags": [], "values": [], "note": "序列为常数，自相关未定义（N/A）。"}
-    lags = list(range(1, min(max_lag, array.size - 1) + 1))
-    acf = [float(np.dot(centered[:-lag], centered[lag:]) / denominator) for lag in lags]
-    return {"lags": lags, "values": acf, "note": None}
+def _auto_max_lag(points: int, interval_minutes: int) -> int:
+    day_lag = max(1, 1440 // max(1, interval_minutes))
+    week_lag = max(1, 10080 // max(1, interval_minutes))
+    if points >= 2 * week_lag:
+        candidate = week_lag
+    elif points >= 2 * day_lag:
+        candidate = day_lag
+    else:
+        candidate = max(2, min(points - 2, points // 4))
+    return int(min(max(2, candidate), 5000, max(2, points - 2)))
+
+
+def _analysis_frame(payload: dict[str, Any]):
+    source = source_row(payload["source_key"])
+    frequency = payload.get("frequency", "native")
+    aggregation = payload.get("aggregation", "mean")
+    resolved = resolve_range(
+        source["key"],
+        frequency,
+        time_start=payload.get("time_start"),
+        time_end=payload.get("time_end"),
+        start_index=payload.get("start_index"),
+        window_points=payload.get("window_points"),
+    )
+    if has_blocking(resolved.issues):
+        raise RequestRejected(
+            [issue for issue in resolved.issues if issue["severity"] == "error"],
+            message="分析时间范围校验未通过",
+        )
+    return source, frequency, aggregation, resolved
 
 
 def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
-    source = source_row(payload["source_key"])
+    source, frequency, aggregation, resolved = _analysis_frame(payload)
     region_ids = payload.get("region_ids") or []
     if not region_ids:
-        all_series = resample(source["key"], frequency=payload.get("frequency", "native"),
-                              aggregation=payload.get("aggregation", "mean"))
-        region_ids = all_series.region_ids[:1]
+        preview = resample(source["key"], frequency=frequency, aggregation=aggregation)
+        region_ids = preview.region_ids[:1]
     data = resample(
         source["key"],
         region_ids=region_ids,
-        frequency=payload.get("frequency", "native"),
-        aggregation=payload.get("aggregation", "mean"),
+        frequency=frequency,
+        aggregation=aggregation,
     )
-    start = int(payload.get("start_index") or 0)
-    points = int(payload.get("window_points") or data.timestamps.size)
-    stop = min(start + points, data.timestamps.size)
-    ts = data.timestamps[start:stop]
-    values = data.values[start:stop]
+    ts = data.timestamps[resolved.start_index: resolved.end_index]
+    values = data.values[resolved.start_index: resolved.end_index]
     index = pd.to_datetime(ts, unit="s")
     hours = index.hour.to_numpy()
     weekdays = index.weekday.to_numpy()
+    dates = index.strftime("%Y-%m-%d").to_numpy()
+    interval = resolved.interval_minutes
 
-    # Weekly patterns must not be limited to a short display window (2 days would
-    # only contain 2 weekdays). They are therefore computed over the *full*
-    # resampled series and labelled as such in the UI.
-    full_index = pd.to_datetime(data.timestamps, unit="s")
-    full_weekdays = full_index.weekday.to_numpy()
+    warnings: list[str] = [issue["message"] for issue in resolved.issues if issue["severity"] == "warning"]
+    if resolved.span_seconds < 86400:
+        warnings.append("所选时间范围不足 1 天，日内规律与工作日/周末比较的代表性有限。")
+    elif resolved.span_seconds < 7 * 86400:
+        warnings.append("所选时间范围不足 7 天，周内规律的稳定性有限。")
 
-    series_out = []
-    stats_out = []
-    profiles = []
-    weekly_profiles = []
+    series_out: list[dict[str, Any]] = []
+    stats_out: list[dict[str, Any]] = []
+    hourly_out: list[dict[str, Any]] = []
+    weekday_out: list[dict[str, Any]] = []
+    per_region_valid: dict[str, int] = {}
+    per_region_dates: dict[str, int] = {}
+
     for position, region_id in enumerate(data.region_ids):
         column = values[:, position]
-        stats = describe(column)
+        valid_points = int(np.isfinite(column).sum())
+        valid_dates = int(len(set(dates[np.isfinite(column)].tolist())))
+        per_region_valid[region_id] = valid_points
+        per_region_dates[region_id] = valid_dates
         series_out.append(
             {
                 "region_id": region_id,
                 "timestamps": [str(t) for t in index.strftime("%Y-%m-%d %H:%M:%S")],
                 "values": [None if not np.isfinite(v) else float(v) for v in column],
+                "valid_points": valid_points,
             }
         )
-        stats_out.append({"region_id": region_id, **stats})
-        hourly = []
-        for hour in range(24):
-            selector = np.isfinite(column) & (hours == hour)
-            hourly.append(float(column[selector].mean()) if selector.any() else None)
-        profiles.append({"region_id": region_id, "hourly_mean": hourly})
-        full_column = data.values[:, position]
-        full_finite = np.isfinite(full_column)
-        weekday_values = full_column[full_finite & (full_weekdays < 5)]
-        weekend_values = full_column[full_finite & (full_weekdays >= 5)]
-        weekly = []
-        for day in range(7):
-            selector = full_finite & (full_weekdays == day)
-            weekly.append(float(full_column[selector].mean()) if selector.any() else None)
-        weekly_profiles.append(
+        stats_out.append({"region_id": region_id, **describe(column, ts)})
+
+        profile = insight_engine.hourly_profile(column, hours)
+        hourly_insight = insight_engine.hourly_insights(
+            profile, valid_points=valid_points, valid_dates=valid_dates,
+            day_start=int(payload.get("day_start_hour") or 6),
+            day_end=int(payload.get("day_end_hour") or 18),
+        )
+        hourly_out.append(
             {
                 "region_id": region_id,
-                "weekday_mean": float(weekday_values.mean()) if weekday_values.size else None,
-                "weekend_mean": float(weekend_values.mean()) if weekend_values.size else None,
-                "weekday_weekend_ratio": (
-                    float(weekday_values.mean() / weekend_values.mean())
-                    if weekday_values.size and weekend_values.size and abs(weekend_values.mean()) > 1e-12
-                    else None
-                ),
-                "weekly_mean": weekly,
-                "basis": "full_series",
-                "points_used": int(full_finite.sum()),
+                "hours": profile,
+                "overall_mean": hourly_insight.get("overall_mean"),
+                "insights": hourly_insight,
             }
         )
 
-    first = values[:, 0] if values.shape[1] else np.array([])
+        groups = insight_engine.weekday_profiles(column, hours, weekdays, dates)
+        weekday_insight = insight_engine.weekday_insights(groups)
+        weekday_out.append({"region_id": region_id, **groups, "insights": weekday_insight})
+
+    if not data.region_ids:
+        raise RequestRejected(
+            [{"path": "m1.region_ids", "code": "NO_REGION", "severity": "error",
+              "message": "没有可分析的区域。", "suggestion": "请选择至少一个有效区域。", "received_value": []}],
+            message="没有可分析的区域",
+        )
+
+    max_lag_requested = int(payload.get("acf_max_lag") or 0)
+    auto_lag = _auto_max_lag(resolved.points, interval)
+    max_lag = auto_lag if max_lag_requested <= 0 else max_lag_requested
+    max_lag = int(min(max(2, max_lag), max(2, resolved.points - 2), 5000))
+    if max_lag_requested > 0 and max_lag_requested > resolved.points - 2:
+        warnings.append(
+            f"Max Lag={max_lag_requested} 超过可支持的范围（有效点 {resolved.points} 个，最多 {max(2, resolved.points - 2)}），"
+            f"已按 {max_lag} 计算。"
+        )
+
+    requested_primary = payload.get("insight_region_id")
+    primary_index = data.region_ids.index(requested_primary) if requested_primary in data.region_ids else 0
+    primary_region = data.region_ids[primary_index]
+    primary_values = values[:, primary_index]
+    acf = insight_engine.acf_curve(primary_values, max_lag)
+    periodicity = insight_engine.detect_periodicity(
+        primary_values,
+        interval_minutes=interval,
+        max_lag=max_lag,
+        span_seconds=resolved.span_seconds,
+    )
+    trend = insight_engine.trend_analysis(primary_values, interval)
+    acf_trend_insight = insight_engine.acf_trend_insights(
+        acf=acf,
+        periodicity=periodicity,
+        trend=trend,
+        interval_minutes=interval,
+        valid_points=per_region_valid.get(primary_region, 0),
+        span_seconds=resolved.span_seconds,
+        max_lag=max_lag,
+    )
+    insight_map = {
+        "region_id": primary_region,
+        "hourly": hourly_out[primary_index]["insights"],
+        "weekday": weekday_out[primary_index]["insights"],
+        "acf_trend": acf_trend_insight,
+    }
+
+    trend_line: list[dict[str, Any]] = []
+    if trend.get("available") and trend.get("r2") is not None:
+        step = max(1, resolved.points // 240)
+        for i in range(0, resolved.points, step):
+            trend_line.append(
+                {"index": int(i), "value": float(trend["intercept"] + trend["slope_per_point"] * i)}
+            )
+
+    acf_public = {
+        **acf,
+        "region_id": primary_region,
+        "max_lag": max_lag,
+        "auto_max_lag": auto_lag,
+        "interval_minutes": interval,
+        "lag_seconds": interval * 60,
+        "periodicity": periodicity,
+        "start_at": resolved.start_at,
+        "end_at": resolved.end_at,
+        "valid_points": per_region_valid.get(primary_region, 0),
+    }
+
     return {
         "source": {
             "key": source["key"],
@@ -139,78 +237,80 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
             "unit_label": source["unit_label"],
             "native_frequency_minutes": source["native_frequency_minutes"],
         },
-        "frequency": data.frequency,
-        "frequency_minutes": data.frequency_minutes,
-        "aggregation": data.aggregation,
-        "total_points": int(data.timestamps.size),
-        "window": {
-            "start_index": start,
-            "stop_index": stop,
-            "points": int(ts.size),
-            "start_at": str(index[0]) if ts.size else None,
-            "end_at": str(index[-1]) if ts.size else None,
+        "frequency": frequency,
+        "frequency_minutes": interval,
+        "aggregation": aggregation,
+        "range": {
+            **resolved.to_public(),
+            "valid_points": per_region_valid,
+            "valid_dates": per_region_dates,
+            "native_interval_minutes": int(source["native_frequency_minutes"]),
         },
+        "primary_region_id": primary_region,
         "series": series_out,
         "statistics": stats_out,
-        "intraday_profiles": profiles,
-        "weekly_profiles": weekly_profiles,
-        "weekly_note": "周内模式基于该来源的完整序列计算（不受上方显示窗口限制），因此七天都有真实均值。",
-        "acf": autocorrelation(first),
-        "trend": _trend(first),
+        "hourly": hourly_out,
+        "weekday": weekday_out,
+        "acf": acf_public,
+        "trend": trend,
+        "trend_line": trend_line,
+        "insights": insight_map,
+        "warnings": warnings,
         "notes": [
             "统计量基于真实观测计算；缺失点不参与统计，也不会被当作 0。",
-            f"单位标注：{source['unit_label']}。",
+            "ZTE 的真实 0 值会被保留为有效观测。",
+            f"单位标注：{source['unit_label']}；时间边界为闭区间 [start_at, end_at]（按桶起始时间）。",
         ],
-    }
-
-
-def _trend(values: np.ndarray) -> dict[str, Any]:
-    array = _clean_series(values)
-    mask = np.isfinite(array)
-    if mask.sum() < 3:
-        return {"slope": None, "intercept": None, "note": "有效点不足，无法估计趋势。"}
-    x = np.arange(array.size)[mask]
-    slope, intercept = np.polyfit(x, array[mask], 1)
-    rolling = pd.Series(array).rolling(24, min_periods=6).mean().to_numpy()
-    step = max(1, array.size // 200)
-    return {
-        "slope": float(slope),
-        "intercept": float(intercept),
-        "rolling_window": 24,
-        "rolling_sample": [
-            {"index": int(i), "value": None if not np.isfinite(rolling[i]) else float(rolling[i])}
-            for i in range(0, array.size, step)
-        ],
-        "note": None,
     }
 
 
 def spatial_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     source = source_row(payload["source_key"])
-    data = resample(
-        source["key"],
-        frequency=payload.get("frequency", "native"),
-        aggregation=payload.get("aggregation", "mean"),
-    )
+    frequency = payload.get("frequency", "native")
+    aggregation = payload.get("aggregation", "mean")
+    data = resample(source["key"], frequency=frequency, aggregation=aggregation)
+    total = int(data.timestamps.size)
     index_value = payload.get("time_index")
     if index_value is None:
-        index_value = int(data.timestamps.size) - 1
-    index_value = int(np.clip(index_value, 0, max(0, data.timestamps.size - 1)))
+        index_value = total - 1
+    index_value = int(np.clip(int(index_value), 0, max(0, total - 1)))
     slice_values = data.values[index_value]
-    window_points = int(payload.get("window_points") or 0)
-    if window_points > 1:
-        low = max(0, index_value - window_points // 2)
-        high = min(data.timestamps.size, index_value + window_points // 2)
-        with np.errstate(invalid="ignore"):
-            aggregated = np.nanmean(data.values[low:high], axis=0)
-        window_used = {"start_index": low, "stop_index": high}
-    else:
-        aggregated = slice_values
-        window_used = None
+
+    # The analysis range only feeds the range statistics; the map slice is an
+    # independent "one instant" view and never changes the range statistics.
+    range_info: dict[str, Any] = {}
+    range_means: dict[str, float | None] = {}
+    range_counts: dict[str, int] = {}
+    range_warnings: list[str] = []
+    try:
+        resolved = resolve_range(
+            source["key"], frequency,
+            time_start=payload.get("time_start"), time_end=payload.get("time_end"),
+            start_index=payload.get("start_index"), window_points=payload.get("window_points"),
+        )
+        range_info = resolved.to_public()
+        range_warnings = [i["message"] for i in resolved.issues if i["severity"] == "warning"]
+        if not has_blocking(resolved.issues):
+            block = data.values[resolved.start_index: resolved.end_index]
+            for position, region_id in enumerate(data.region_ids):
+                column = block[:, position]
+                finite = np.isfinite(column)
+                range_means[region_id] = float(column[finite].mean()) if finite.any() else None
+                range_counts[region_id] = int(finite.sum())
+    except Exception as exc:  # range statistics are supplementary for the map view
+        range_warnings.append(f"时间范围统计不可用：{exc}")
+
     entries = []
     for position, region_id in enumerate(data.region_ids):
-        value = float(aggregated[position]) if np.isfinite(aggregated[position]) else None
-        entries.append({"region_id": region_id, "value": value})
+        value = float(slice_values[position]) if np.isfinite(slice_values[position]) else None
+        entries.append(
+            {
+                "region_id": region_id,
+                "value": value,
+                "range_mean": range_means.get(region_id),
+                "range_valid_points": range_counts.get(region_id),
+            }
+        )
     finite = [e for e in entries if e["value"] is not None]
     ranked = sorted(finite, key=lambda e: e["value"], reverse=True)
     values_array = np.array([e["value"] for e in finite], dtype="float64")
@@ -219,8 +319,9 @@ def spatial_analysis(payload: dict[str, Any]) -> dict[str, Any]:
                    "unit_label": source["unit_label"]},
         "frequency": data.frequency,
         "time_index": index_value,
-        "time_at": str(pd.Timestamp(int(data.timestamps[index_value]), unit="s")) if data.timestamps.size else None,
-        "window": window_used,
+        "time_at": str(pd.Timestamp(int(data.timestamps[index_value]), unit="s")) if total else None,
+        "range": range_info,
+        "range_warnings": range_warnings,
         "regions": entries,
         "ranking": ranked[:20],
         "bottom": list(reversed(ranked[-20:])),
@@ -234,7 +335,8 @@ def spatial_analysis(payload: dict[str, Any]) -> dict[str, Any]:
             "distribution": _histogram(values_array),
         },
         "notes": [
-            "空间强度为当前时间截面在真实观测上的统计值；No Data 区域显示为空值。",
+            "地图与排名是“当前时间截面”的真实观测；range_mean 是在所选分析时间范围内的逐区域均值。",
+            "No Data 区域保持为空值，不参与均值与排名。",
         ],
     }
 
@@ -274,15 +376,11 @@ def compare_sources(payload: dict[str, Any]) -> dict[str, Any]:
         for hour in range(24):
             selector = mask & (hours == hour)
             hourly.append(float(np.nanmean(profile[selector])) if selector.any() else None)
-        # z-score of the hourly shape so the three sources can be compared on
-        # shape only (their units and absolute levels differ).
         hourly_values = np.array([v for v in hourly if v is not None], dtype="float64")
         if hourly_values.size:
             hour_mean = float(hourly_values.mean())
             hour_std = float(hourly_values.std()) or 1.0
-            hourly_z = [
-                None if v is None else (v - hour_mean) / hour_std for v in hourly
-            ]
+            hourly_z = [None if v is None else (v - hour_mean) / hour_std for v in hourly]
         else:
             hour_mean, hour_std, hourly_z = None, None, [None] * 24
         step = max(1, profile.size // 200)
@@ -310,7 +408,7 @@ def compare_sources(payload: dict[str, Any]) -> dict[str, Any]:
         "frequency": frequency,
         "aggregation": aggregation,
         "sources": entries,
-        "normalisation": "z-score（按每个来源自身的窗口均值/标准差归一化）",
+        "normalisation": "z-score（按每个来源自身 24 小时均值的均值/标准差归一化）",
         "disclaimers": [
             "三个来源的单位不一致且观测时段不重叠（Milano/Trentino 为 2013-11~2014-01，ZTE 为 2024-07~08），"
             "因此只能比较归一化后的周期形状，不能比较绝对值或声称同时发生。",

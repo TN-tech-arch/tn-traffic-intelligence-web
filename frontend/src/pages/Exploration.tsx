@@ -1,71 +1,276 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Switch, Tabs, Tag, Tooltip, message } from 'antd'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Alert, Button, Card, Collapse, DatePicker, Select, Switch, Tabs, Tag, Tooltip, message,
+} from 'antd'
+import { InfoCircleOutlined } from '@ant-design/icons'
+import dayjs, { Dayjs } from 'dayjs'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
-import { ModuleHeader, PaneHead, ThreePane, EmptyState } from '../components/Panes'
+import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import MapView, { BLUE_PALETTE, colorScale, type MapEntry } from '../components/MapView'
-import { BarChart, LineChart } from '../components/Charts'
+import { AcfChart, HourlyChart, LineChart, WeekdayChart } from '../components/Charts'
+import InsightCard, { type InsightPayload } from '../components/InsightCard'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 
-interface SourcesPayload {
-  sources: Array<{ key: string; source_id: string; display_name: string; unit_label: string; native_frequency: string; series_region_count: number; gis_region_count: number }>
-  totals: { sources: number; series_regions: number; gis_regions: number; no_data_regions: number }
+interface SourceRow {
+  key: string
+  source_id: string
+  display_name: string
+  unit_label: string
+  native_frequency: string
+  native_frequency_minutes: number
+  series_region_count: number
+  gis_region_count: number
+  time_start?: string
+  time_end?: string
 }
 
-const FREQUENCIES = [
-  { value: 'native', label: '原生频率' },
-  { value: '30min', label: '30 分钟' },
-  { value: '60min', label: '1 小时' },
-  { value: '1day', label: '1 天' },
-]
+interface RegionRow {
+  region_id: string
+  display_name: string
+  has_timeseries: boolean
+}
+
+interface M1Config {
+  source_key: string
+  region_ids: string[]
+  frequency: string
+  aggregation: 'mean' | 'sum'
+  time_start: string | null
+  time_end: string | null
+  start_index: number
+  window_points: number
+  acf_max_lag: number
+  day_start_hour: number
+  day_end_hour: number
+  max_regions: number
+  insight_region_id: string | null
+}
+
+const DEFAULT_CONFIG: M1Config = {
+  source_key: 'milano',
+  region_ids: [],
+  frequency: 'native',
+  aggregation: 'mean',
+  time_start: null,
+  time_end: null,
+  start_index: 0,
+  window_points: 1008,
+  acf_max_lag: 0,
+  day_start_hour: 6,
+  day_end_hour: 18,
+  max_regions: 6,
+  insight_region_id: null,
+}
+
+function DateField({
+  id,
+  label,
+  value,
+  issues,
+  onChange,
+  disabledDate,
+  help,
+}: {
+  id: string
+  label: string
+  value: string | null
+  issues: Issue[]
+  onChange: (value: string | null) => void
+  disabledDate: (current: Dayjs) => boolean
+  help: string
+}) {
+  const errors = issues.filter((i) => i.severity === 'error')
+  const warnings = issues.filter((i) => i.severity === 'warning')
+  const inputId = `field-${id}`
+  return (
+    <div className={`tn-field${errors.length ? ' has-error' : ''}${!errors.length && warnings.length ? ' has-warning' : ''}`} data-field={id}>
+      <label className="tn-field-label" htmlFor={inputId}>
+        {label}
+        <Tooltip title={help}>
+          <button
+            type="button"
+            aria-label={`${label} 帮助信息`}
+            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#5b7095', padding: 0 }}
+          >
+            <InfoCircleOutlined />
+          </button>
+        </Tooltip>
+      </label>
+      <DatePicker
+        id={inputId}
+        showTime={{ format: 'HH:mm' }}
+        format="YYYY-MM-DD HH:mm"
+        style={{ width: '100%' }}
+        size="small"
+        value={value ? dayjs(value) : null}
+        disabledDate={disabledDate}
+        status={errors.length ? 'error' : warnings.length ? 'warning' : undefined}
+        aria-invalid={errors.length > 0}
+        aria-describedby={errors.length ? `${inputId}-error` : undefined}
+        onChange={(next: Dayjs | null) => onChange(next ? next.format('YYYY-MM-DD HH:mm:ss') : null)}
+      />
+      {errors.map((item) => (
+        <div className="tn-error-text" id={`${inputId}-error`} key={item.code + item.path} role="alert">
+          <span aria-hidden="true">✕</span>
+          <span>
+            {item.message}
+            {item.suggestion ? <div>{item.suggestion}</div> : null}
+          </span>
+        </div>
+      ))}
+      {warnings.map((item) => (
+        <div className="tn-warning-text" key={item.code + item.path}>
+          <span aria-hidden="true">⚠</span>
+          <span>{item.message}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function formatSpan(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return '—'
+  const minutes = seconds / 60
+  if (minutes < 90) return `${minutes.toFixed(0)} 分钟`
+  const hours = minutes / 60
+  if (hours < 36) return `${hours.toFixed(1)} 小时`
+  return `${(hours / 24).toFixed(1)} 天`
+}
 
 export default function Exploration() {
-  const [sources, setSources] = useState<SourcesPayload['sources']>([])
-  const [config, setConfig] = useState<Record<string, unknown>>({
-    source_key: 'milano',
-    region_ids: [],
-    frequency: 'native',
-    aggregation: 'mean',
-    max_regions: 6,
-    start_index: 0,
-    window_points: 1008,
-  })
-  const [regions, setRegions] = useState<Array<{ region_id: string; display_name: string; has_timeseries: boolean }>>([])
+  const [messageApi, contextHolder] = message.useMessage()
+  const [sources, setSources] = useState<SourceRow[]>([])
+  const [regions, setRegions] = useState<RegionRow[]>([])
+  const [sourceMeta, setSourceMeta] = useState<any>(null)
   const [geojson, setGeojson] = useState<any>(null)
-  const [spatialIndex, setSpatialIndex] = useState<number>(0)
-  const [temporal, setTemporal] = useState<any>(null)
+  const [config, setConfig] = useState<M1Config>({ ...DEFAULT_CONFIG })
+  const [lastEdit, setLastEdit] = useState<'date' | 'index'>('date')
+  const [result, setResult] = useState<any>(null)
   const [spatial, setSpatial] = useState<any>(null)
-  const [compare, setCompare] = useState<any>(null)
+  const [sliceIndex, setSliceIndex] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [serverIssues, setServerIssues] = useState<Issue[]>([])
+  const [errorIssues, setErrorIssues] = useState<Issue[]>([])
+  const [computedKey, setComputedKey] = useState<string | null>(null)
   const [tab, setTab] = useState('temporal')
   const [showLabels, setShowLabels] = useState(true)
-  const [messageApi, contextHolder] = message.useMessage()
+  const [advancedOpen, setAdvancedOpen] = useState<string[]>([])
+  const requestSeq = useRef(0)
 
   const schema: FieldSpec[] = useMemo(
     () => [
-      { key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'], help_zh: '选择要分析的一个地点数据集。', suggestion_zh: '三个来源单位不同，不能直接比较绝对值。', default: 'milano' },
-      { key: 'region_ids', label_zh: '区域（可多选对比）', type: 'array', enum: regions.map((r) => r.region_id), enum_labels: regions.map((r) => `${r.region_id}${r.has_timeseries ? '' : ' (No Data)'}`), default: [], required: false, help_zh: '在地图上点选区域；No Data 区域没有时序数据。', suggestion_zh: '最多可选 6 个区域用于对比。' },
-      { key: 'frequency', label_zh: '时间分辨率', type: 'enum', enum: ['native', '30min', '60min', '1day'], enum_labels: FREQUENCIES.map((f) => f.label), default: 'native', help_zh: '必须是原生频率的整数倍。', suggestion_zh: '探索分析建议先用原生频率。' },
-      { key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'], enum_labels: ['均值 mean', '求和 sum'], default: 'mean', help_zh: 'sum 为桶内求和，mean 为桶内平均；源单位未确认，不代表物理总量。', suggestion_zh: '原生频率下该参数无影响。' },
-      { key: 'start_index', label_zh: '起始时间点', type: 'integer', min: 0, default: 0, help_zh: '分析窗口起点（按重采样后的点数计）。', suggestion_zh: '0 表示从最早时间点开始。' },
-      { key: 'window_points', label_zh: '窗口点数', type: 'integer', min: 8, max: 100000, default: 1008, help_zh: '分析窗口包含的时间点数。', suggestion_zh: '10 分钟频率下 144 点约为一天，1008 点约为一周。' },
-      { key: 'max_regions', label_zh: '最多对比区域数', type: 'integer', min: 1, max: 12, default: 6, level: 'advanced', help_zh: '多区域对比上限，避免图表过载。', suggestion_zh: '默认 6。' },
+      {
+        key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'],
+        enum_labels: sources.map((s) => `${s.display_name}（${s.native_frequency}）`),
+        default: 'milano', help_zh: '选择要分析的一个地点数据集。',
+        suggestion_zh: '三个来源单位不同，不能直接比较绝对数值。',
+      },
+      {
+        key: 'region_ids', label_zh: '区域（可多选对比）', type: 'array',
+        enum: regions.map((r) => r.region_id),
+        enum_labels: regions.map((r) => `${r.region_id}${r.has_timeseries ? '' : '（No Data）'}`),
+        default: [], required: false,
+        help_zh: '在地图上点选区域，或用下拉框搜索；最多可同时对比 6 个区域。',
+        suggestion_zh: 'No Data 区域没有时序数据，不能用于分析。',
+      },
+      {
+        key: 'frequency', label_zh: '时间分辨率', type: 'enum',
+        enum: ['native', '30min', '60min', '1day'], enum_labels: ['原生频率', '30 分钟', '1 小时', '1 天'],
+        default: 'native',
+        help_zh: '时间重采样：把原始观测聚合成更粗的桶（sum=桶内求和，mean=桶内平均）。' +
+                 '它与“日内小时画像的跨日期平均”是两件事：前者改变时间点，后者只是按时钟小时分组统计。',
+        suggestion_zh: '探索分析建议先用原生频率，避免丢失细节。',
+      },
+      {
+        key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'],
+        enum_labels: ['均值 mean', '求和 sum'], default: 'mean',
+        help_zh: '重采样时每个时间桶的合并方式。mean 为桶内样本平均，sum 为桶内样本求和；' +
+                 '源单位未确认时，sum 不代表物理总量。',
+        suggestion_zh: '原生频率下该参数无影响。',
+      },
+      {
+        key: 'start_index', label_zh: '起始索引（高级）', type: 'integer', min: 0, default: 0,
+        help_zh: '按重采样后的时间点数计算的起点，与上方日期时间双向同步。',
+        suggestion_zh: '普通使用直接选日期时间即可。',
+      },
+      {
+        key: 'window_points', label_zh: '窗口点数（高级）', type: 'integer', min: 2, max: 200000,
+        default: 1008,
+        help_zh: '从起始索引开始的连续点数。10 分钟频率下 1008 点＝7 天；15 分钟频率下 1008 点＝10.5 天。',
+        suggestion_zh: '通常直接用日期时间范围更方便。',
+      },
+      {
+        key: 'acf_max_lag', label_zh: 'ACF 最大滞后（Max Lag）', type: 'integer', min: 0, max: 5000,
+        default: 0,
+        help_zh: '自相关最多算到第几个滞后步；0＝自动。Lag 是同一序列内部“向后错几步”的步数，' +
+                 '不是只使用这么多时间点。10 分钟频率：Lag 6=1 小时、Lag 144=24 小时、Lag 1008=7 天；' +
+                 '15 分钟频率：Lag 4=1 小时、Lag 96=24 小时、Lag 672=7 天。',
+        suggestion_zh: '看日周期至少覆盖 24 小时；看周周期需要覆盖 7 天且至少两周观测。',
+      },
+      {
+        key: 'day_start_hour', label_zh: '白天起始小时', type: 'integer', min: 0, max: 23, default: 6,
+        help_zh: '昼夜对比中“白天”的起始小时。', suggestion_zh: '默认 06:00。',
+      },
+      {
+        key: 'day_end_hour', label_zh: '白天结束小时', type: 'integer', min: 1, max: 24, default: 18,
+        help_zh: '昼夜对比中“白天”的结束小时（不含该小时）。', suggestion_zh: '默认到 18:00 结束。',
+      },
+      {
+        key: 'max_regions', label_zh: '最多对比区域数', type: 'integer', min: 1, max: 12, default: 6,
+        help_zh: '多区域对比上限，避免图表过载。', suggestion_zh: '默认 6。',
+      },
     ],
-    [regions],
+    [sources, regions],
+  )
+
+  const validationValues = useMemo(
+    () => ({
+      ...config,
+      // In index mode the dates are cleared so the server resolves from indices;
+      // in date mode both are present and the dates take precedence. Keeping the
+      // index fields populated avoids phantom "required" errors while the
+      // Advanced section is collapsed.
+      time_start: lastEdit === 'date' ? config.time_start : null,
+      time_end: lastEdit === 'date' ? config.time_end : null,
+    }),
+    [config, lastEdit],
   )
 
   const { fieldIssues, errors, warnings, valid } = useGroupValidation({
     specs: schema,
-    values: config,
+    values: validationValues as any,
     pathPrefix: 'm1',
-    remote: { kind: 'm1', values: config, context: { available_regions: regions.map((r) => r.region_id) } },
+    remote: {
+      kind: 'm1',
+      values: validationValues,
+      context: { available_regions: regions.map((r) => r.region_id) },
+    },
   })
+
+  const requestPayload = useMemo(() => {
+    const base = {
+      source_key: config.source_key,
+      region_ids: config.region_ids,
+      frequency: config.frequency,
+      aggregation: config.aggregation,
+      acf_max_lag: config.acf_max_lag,
+      day_start_hour: config.day_start_hour,
+      day_end_hour: config.day_end_hour,
+      max_regions: config.max_regions,
+      insight_region_id: config.insight_region_id,
+    }
+    return lastEdit === 'date'
+      ? { ...base, time_start: config.time_start, time_end: config.time_end }
+      : { ...base, start_index: config.start_index, window_points: config.window_points }
+  }, [config, lastEdit])
+
+  const requestKey = useMemo(() => JSON.stringify(requestPayload), [requestPayload])
+  const stale = computedKey !== null && computedKey !== requestKey
 
   const loadSources = useCallback(() => {
     api
-      .get<SourcesPayload>(ENDPOINTS.sources)
+      .get<any>(ENDPOINTS.sources)
       .then((data) => setSources(data.sources))
       .catch((err) => messageApi.error(`数据源读取失败：${err.message}`))
   }, [messageApi])
@@ -73,62 +278,149 @@ export default function Exploration() {
   useEffect(loadSources, [loadSources])
 
   useEffect(() => {
-    const key = config.source_key as string
+    const key = config.source_key
     if (!key) return
     api
       .get<any>(ENDPOINTS.regions(key))
       .then((data) => {
         setRegions(data.regions)
+        setSourceMeta(data.source)
+        const firstValid = data.valid_region_ids?.[0] ?? data.regions.find((r: RegionRow) => r.has_timeseries)?.region_id
+        setConfig((prev) => {
+          const keep = prev.region_ids.filter((id) => data.regions.some((r: RegionRow) => r.region_id === id))
+          const regionIds = keep.length ? keep : firstValid ? [firstValid] : []
+          const start = data.source?.time_start ? dayjs(data.source.time_start) : null
+          const end = data.source?.time_end ? dayjs(data.source.time_end) : null
+          const nativeMinutes = Number(data.source?.native_frequency_minutes ?? 10)
+          const weekEnd = start ? start.add(7, 'day').subtract(nativeMinutes, 'minute') : null
+          const defaultEnd = weekEnd && end ? (weekEnd.isBefore(end) ? weekEnd : end) : end
+          return {
+            ...prev,
+            region_ids: regionIds,
+            insight_region_id: regionIds[0] ?? null,
+            // switching source always moves to that source's own default window,
+            // otherwise stale dates would fall outside the new data bounds
+            time_start: start ? start.format('YYYY-MM-DD HH:mm:ss') : null,
+            time_end: defaultEnd ? defaultEnd.format('YYYY-MM-DD HH:mm:ss') : null,
+          }
+        })
         setGeojson(null)
-        api.get<any>(ENDPOINTS.geometry(key)).then(setGeojson)
-        setConfig((prev) => (prev.region_ids as string[]).length ? prev : { ...prev, region_ids: [data.valid_region_ids?.[0] ?? data.regions[0]?.region_id] })
-        setSpatialIndex(0)
+        api.get<any>(ENDPOINTS.geometry(key)).then(setGeojson).catch(() => undefined)
       })
       .catch(() => undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.source_key])
 
-  useEffect(() => {
-    if (!spatial?.regions?.length) return
-    setConfig((prev) => ({ ...prev, start_index: spatial.time_index }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spatial?.time_index])
-
-  const runAnalysis = async () => {
-    if (!valid) {
-      messageApi.error('存在未修正的参数错误，请先查看输入框下方的提示。')
-      return
-    }
-    setLoading(true)
-    setServerIssues([])
-    try {
-      const [temporalResult, spatialResult] = await Promise.all([
-        api.post<any>(ENDPOINTS.temporal, config),
-        api.post<any>(ENDPOINTS.spatial, { ...config, time_index: spatialIndex }),
-      ])
-      setTemporal(temporalResult)
-      setSpatial(spatialResult)
-      api
-        .post<any>(ENDPOINTS.compare, { source_keys: ['milano', 'trentino', 'zte'], frequency: '60min', aggregation: 'mean' })
-        .then(setCompare)
-        .catch(() => setCompare(null))
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setServerIssues(err.issues)
-        messageApi.error(`请求被后端拒绝：${err.message}`)
-      } else {
-        messageApi.error(String(err))
+  const runAnalysis = useCallback(
+    async (force = false) => {
+      if (!config.region_ids.length) return
+      if (!valid) {
+        messageApi.error('存在参数错误，请先修正字段下方提示的问题。')
+        return
       }
-    } finally {
-      setLoading(false)
-    }
+      const payload = requestPayload
+      const key = JSON.stringify(payload)
+      const seq = ++requestSeq.current
+      setLoading(true)
+      setErrorIssues([])
+      try {
+        const spatialPayload = {
+          ...payload,
+          time_index: sliceIndex,
+        }
+        const [temporal, spatialData] = await Promise.all([
+          api.post<any>(ENDPOINTS.temporal, payload),
+          api.post<any>(ENDPOINTS.spatial, spatialPayload),
+        ])
+        if (seq !== requestSeq.current) return // ignore stale responses
+        setResult(temporal)
+        setSpatial(spatialData)
+        setComputedKey(key)
+        const range = temporal.range
+        if (lastEdit === 'date') {
+          setConfig((prev) => ({
+            ...prev,
+            start_index: range.start_index,
+            window_points: range.points,
+          }))
+        } else {
+          setConfig((prev) => ({
+            ...prev,
+            time_start: range.start_at,
+            time_end: range.end_at,
+          }))
+        }
+      } catch (err) {
+        if (seq !== requestSeq.current) return
+        if (err instanceof ApiError) {
+          setErrorIssues(err.issues)
+          messageApi.error(`分析被拒绝：${err.message}`)
+        } else {
+          messageApi.error(String(err))
+        }
+      } finally {
+        if (seq === requestSeq.current) setLoading(false)
+      }
+    },
+    [config.region_ids.length, messageApi, requestPayload, sliceIndex, lastEdit, valid],
+  )
+
+  useEffect(() => {
+    if (!config.region_ids.length) return
+    if (computedKey === requestKey && !loading) return
+    const timer = window.setTimeout(() => {
+      runAnalysis()
+    }, 600)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestKey, config.region_ids.length])
+
+  useEffect(() => {
+    if (!spatial) return
+    setSliceIndex((prev) => Math.min(prev, Math.max(0, (result?.range?.total_points ?? 1) - 1)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result?.range?.total_points])
+
+  // The map slice is deliberately independent from the analysis range: moving it
+  // only refetches the spatial snapshot, never the temporal statistics/insights.
+  const spatialSeq = useRef(0)
+  useEffect(() => {
+    if (!computedKey || !config.region_ids.length) return
+    const seq = ++spatialSeq.current
+    const timer = window.setTimeout(async () => {
+      try {
+        const payload = { ...JSON.parse(computedKey), time_index: sliceIndex }
+        const data = await api.post<any>(ENDPOINTS.spatial, payload)
+        if (seq === spatialSeq.current) setSpatial(data)
+      } catch {
+        /* keep the previous snapshot; the analysis itself is unaffected */
+      }
+    }, 180)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sliceIndex, computedKey])
+
+  const bounds = useMemo(() => {
+    const start = sourceMeta?.time_start ? dayjs(sourceMeta.time_start) : null
+    const end = sourceMeta?.time_end ? dayjs(sourceMeta.time_end) : null
+    return { start, end }
+  }, [sourceMeta])
+
+  const disabledDate = useCallback(
+    (current: Dayjs) => {
+      if (!current) return false
+      if (bounds.start && current.endOf('day').isBefore(bounds.start.startOf('day'))) return true
+      if (bounds.end && current.startOf('day').isAfter(bounds.end.endOf('day'))) return true
+      return false
+    },
+    [bounds],
+  )
+
+  const updateConfig = (patch: Partial<M1Config>, edit?: 'date' | 'index') => {
+    setConfig((prev) => ({ ...prev, ...patch }))
+    if (edit) setLastEdit(edit)
   }
 
-  useEffect(() => {
-    if (config.source_key && config.region_ids) runAnalysis()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.source_key, config.frequency, config.aggregation, config.window_points, spatialIndex])
-
-  const selected = (config.region_ids as string[]) ?? []
   const toggleRegion = (regionId: string) => {
     const region = regions.find((r) => r.region_id === regionId)
     if (region && !region.has_timeseries) {
@@ -136,34 +428,75 @@ export default function Exploration() {
       return
     }
     setConfig((prev) => {
-      const current = (prev.region_ids as string[]) ?? []
-      const max = Number(prev.max_regions ?? 6)
-      if (current.includes(regionId)) return { ...prev, region_ids: current.filter((r) => r !== regionId) }
-      if (current.length >= max) {
-        messageApi.warning(`最多对比 ${max} 个区域（可在 Advanced 中调整上限）。`)
+      const current = prev.region_ids
+      if (current.includes(regionId)) {
+        const next = current.filter((r) => r !== regionId)
+        return { ...prev, region_ids: next, insight_region_id: next[0] ?? null }
+      }
+      if (current.length >= prev.max_regions) {
+        messageApi.warning(`最多对比 ${prev.max_regions} 个区域（可在高级设置中调整上限）。`)
         return prev
       }
-      return { ...prev, region_ids: [...current, regionId] }
+      const next = [...current, regionId]
+      return { ...prev, region_ids: next, insight_region_id: prev.insight_region_id ?? regionId }
     })
   }
+
+  const selected = config.region_ids
+  const source = sources.find((s) => s.key === config.source_key)
+  const range = result?.range
+  const primaryId = result?.primary_region_id ?? config.insight_region_id
+  const primaryStats = result?.statistics?.find((s: any) => s.region_id === primaryId)
+  const primaryHourly = result?.hourly?.find((h: any) => h.region_id === primaryId)
+  const primaryWeekday = result?.weekday?.find((w: any) => w.region_id === primaryId)
+  const insights = result?.insights
 
   const spatialValues: MapEntry[] = useMemo(() => {
     if (!spatial) return []
     return spatial.regions.map((item: any) => ({
       region_id: item.region_id,
       value: item.value,
+      label: item.region_id,
       has_timeseries: true,
     }))
   }, [spatial])
 
-  const bounds = useMemo(() => {
+  const colorBounds = useMemo(() => {
     const values = spatialValues.map((v) => v.value).filter((v): v is number => v !== null)
     if (!values.length) return { min: 0, max: 1 }
     return { min: Math.min(...values), max: Math.max(...values) }
   }, [spatialValues])
 
-  const source = sources.find((s) => s.key === config.source_key)
-  const notes = temporal?.notes ?? []
+  const seriesChart = useMemo(() => {
+    if (!result?.series?.length) return { x: [], series: [] as any[] }
+    const chartSeries = result.series.map((item: any, index: number) => ({
+      name: item.region_id,
+      data: item.values,
+      color: BLUE_PALETTE[index % BLUE_PALETTE.length],
+    }))
+    if (primaryId && result.trend_line?.length) {
+      const primary = result.series.find((s: any) => s.region_id === primaryId)
+      if (primary) {
+        const line = new Array(primary.values.length).fill(null)
+        result.trend_line.forEach((point: any) => {
+          if (point.index < line.length) line[point.index] = point.value
+        })
+        chartSeries.push({ name: `${primaryId} 趋势拟合`, data: line, color: '#D98F00' })
+      }
+    }
+    return { x: result.series[0].timestamps, series: chartSeries }
+  }, [result, primaryId])
+
+  const hourlyInsight: InsightPayload | null = insights?.hourly ?? null
+  const weekdayInsight: InsightPayload | null = insights?.weekday ?? null
+  const acfInsight: InsightPayload | null = insights?.acf_trend ?? null
+
+  const regionOptions = regions
+    .filter((r) => config.region_ids.includes(r.region_id))
+    .map((r) => ({ value: r.region_id, label: r.region_id }))
+
+  const maxLagSpec = schema.find((s) => s.key === 'acf_max_lag')!
+  const acfInfo = result?.acf
 
   return (
     <div>
@@ -172,7 +505,11 @@ export default function Exploration() {
         module="Module 1"
         title="Exploratory Traffic Analysis"
         description="GIS 区域、时序、空间与跨地点模式分析（真实数据，无模拟统计）"
-        datasetInfo={source ? `${source.display_name} · ${source.unit_label} · ${source.native_frequency}` : ''}
+        datasetInfo={
+          source
+            ? `${source.display_name} · ${source.unit_label} · 原生 ${source.native_frequency}`
+            : ''
+        }
       />
       {errors.length > 0 ? (
         <Alert
@@ -183,13 +520,22 @@ export default function Exploration() {
           description={errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join('；')}
         />
       ) : null}
-      {serverIssues.length > 0 ? (
+      {errorIssues.length > 0 ? (
         <Alert
           type="error"
           showIcon
           style={{ marginBottom: 10 }}
-          message="后端拒绝了本次请求（结构化字段错误）"
-          description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')}
+          message="后端拒绝了本次分析请求（结构化字段错误，未生成任何结果）"
+          description={errorIssues.map((i) => `${i.path}: ${i.message}`).join('；')}
+        />
+      ) : null}
+      {stale || loading ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message={loading ? '正在按当前参数重新计算…' : '参数已修改，等待重新计算'}
+          description="为保证图表与自动结论一致，旧结果会先变暗显示；计算完成后会整体替换（不会出现图表已更新而文字仍是旧数据的情况）。"
         />
       ) : null}
       <ThreePane
@@ -201,43 +547,152 @@ export default function Exploration() {
                 <Button
                   size="small"
                   onClick={() => {
+                    const start = bounds.start
+                    const end = bounds.end
+                    const nativeMinutes = Number(sourceMeta?.native_frequency_minutes ?? 10)
+                    const weekEnd = start ? start.add(7, 'day').subtract(nativeMinutes, 'minute') : null
+                    const defaultEnd = weekEnd && end ? (weekEnd.isBefore(end) ? weekEnd : end) : end
                     setConfig({
-                      source_key: 'milano',
-                      region_ids: [],
-                      frequency: 'native',
-                      aggregation: 'mean',
-                      max_regions: 6,
-                      start_index: 0,
-                      window_points: 1008,
+                      ...DEFAULT_CONFIG,
+                      source_key: config.source_key,
+                      region_ids: selected.length ? selected : config.region_ids,
+                      insight_region_id: config.insight_region_id,
+                      time_start: start ? start.format('YYYY-MM-DD HH:mm:ss') : null,
+                      time_end: defaultEnd ? defaultEnd.format('YYYY-MM-DD HH:mm:ss') : null,
                     })
-                    setSpatialIndex(0)
+                    setLastEdit('date')
+                    setResult(null)
+                    setComputedKey(null)
                   }}
                 >
                   Reset 配置
                 </Button>
               }
             />
-            {visibleFields(schema, config).map((spec) => (
-              <ParamField
-                key={spec.key}
-                spec={spec}
-                value={config[spec.key]}
-                issues={fieldIssues(spec.key)}
-                path={`m1.${spec.key}`}
-                onChange={(key, value) => setConfig((prev) => ({ ...prev, [key]: value }))}
-                disabledReason={fieldDisabledReason(spec, config)}
-                compact
-              />
-            ))}
-            <div className="tn-muted">
-              当前已选 {selected.length} 个区域；在地图上点击区域可加入 / 取消对比。
+            {visibleFields(schema, validationValues as any)
+              .filter((spec) => ['source_key', 'region_ids', 'frequency', 'aggregation'].includes(spec.key))
+              .map((spec) => (
+                <ParamField
+                  key={spec.key}
+                  spec={spec}
+                  value={(config as any)[spec.key]}
+                  issues={fieldIssues(spec.key)}
+                  path={`m1.${spec.key}`}
+                  onChange={(key, value) => {
+                    if (key === 'region_ids') {
+                      const next = (value as string[]) ?? []
+                      updateConfig({ region_ids: next, insight_region_id: next[0] ?? null })
+                    } else {
+                      updateConfig({ [key]: value } as Partial<M1Config>)
+                    }
+                  }}
+                  disabledReason={fieldDisabledReason(spec, config as any)}
+                  compact
+                />
+              ))}
+
+            <div className="tn-section-title" style={{ marginTop: 10 }}>
+              Analysis Time Range
             </div>
-            <Button type="primary" block onClick={runAnalysis} loading={loading} style={{ marginTop: 10 }} disabled={!valid}>
-              运行分析
-            </Button>
-            <Button block onClick={() => setConfig((prev) => ({ ...prev, region_ids: [] }))} style={{ marginTop: 6 }}>
-              清空区域选择
-            </Button>
+            <DateField
+              id="m1.time_start"
+              label="开始日期时间（含边界）"
+              value={config.time_start}
+              issues={fieldIssues('time_start')}
+              disabledDate={disabledDate}
+              help="所有统计、图表与自动结论的起点。与结束时间共同决定使用的真实观测；边界按重采样后的时间桶起点、闭区间处理。"
+              onChange={(value) => updateConfig({ time_start: value }, 'date')}
+            />
+            <DateField
+              id="m1.time_end"
+              label="结束日期时间（含边界）"
+              value={config.time_end}
+              issues={fieldIssues('time_end')}
+              disabledDate={disabledDate}
+              help="分析范围的终点（含该时刻的时间桶）。不能超过数据源的真实结束时间。"
+              onChange={(value) => updateConfig({ time_end: value }, 'date')}
+            />
+            <div className="tn-range-summary">
+              <div>
+                <strong>数据可用范围：</strong>
+                {bounds.start?.format('YYYY-MM-DD HH:mm') ?? '—'} ～ {bounds.end?.format('YYYY-MM-DD HH:mm') ?? '—'}
+              </div>
+              {range ? (
+                <>
+                  <div>
+                    <strong>实际起点：</strong>
+                    {range.start_at ?? '—'}
+                  </div>
+                  <div>
+                    <strong>最后一个观测：</strong>
+                    {range.end_at ?? '—'}
+                  </div>
+                  <div>
+                    <strong>时间跨度：</strong>
+                    {range.span_label} · <strong>采样间隔：</strong>
+                    {range.interval_minutes} 分钟
+                  </div>
+                  <div>
+                    <strong>选中时间点：</strong>
+                    {range.points} 个（重采样后） · <strong>有效观测：</strong>
+                    {range.valid_points?.[primaryId] ?? 0} 个
+                  </div>
+                  <div className="tn-muted">
+                    边界：{range.boundary}；原始采样间隔 {range.native_interval_minutes} 分钟
+                    {range.interval_minutes !== range.native_interval_minutes
+                      ? `，重采样后每点代表 ${range.interval_minutes} 分钟`
+                      : ''}
+                  </div>
+                </>
+              ) : (
+                <div className="tn-muted">选择日期时间后显示实际解析结果。</div>
+              )}
+            </div>
+
+            <Collapse
+              size="small"
+              style={{ marginTop: 10 }}
+              activeKey={advancedOpen}
+              onChange={(key) => setAdvancedOpen(key as string[])}
+              items={[
+                {
+                  key: 'advanced',
+                  label: 'Advanced Settings（索引、昼夜划分、对比上限）',
+                  children: (
+                    <>
+                      <div className="tn-hint" style={{ marginBottom: 8 }}>
+                        日期时间与这里的索引双向同步，指向同一批真实观测。修改索引后会自动换算回日期时间。
+                      </div>
+                      {['start_index', 'window_points', 'day_start_hour', 'day_end_hour', 'max_regions'].map((key) => {
+                        const spec = schema.find((s) => s.key === key)!
+                        return (
+                          <ParamField
+                            key={key}
+                            spec={spec}
+                            value={(config as any)[key]}
+                            issues={fieldIssues(key)}
+                            path={`m1.${key}`}
+                            onChange={(field, value) => updateConfig({ [field]: value } as Partial<M1Config>, 'index')}
+                            compact
+                          />
+                        )
+                      })}
+                    </>
+                  ),
+                },
+              ]}
+            />
+
+            <div className="tn-inline" style={{ marginTop: 10 }}>
+              <Button type="primary" block onClick={() => runAnalysis(true)} loading={loading} disabled={!valid}>
+                运行分析
+              </Button>
+            </div>
+            <div className="tn-inline" style={{ marginTop: 6 }}>
+              <Button block onClick={() => updateConfig({ region_ids: [], insight_region_id: null })}>
+                清空区域选择
+              </Button>
+            </div>
             {warnings.map((w) => (
               <div className="tn-warning-text" key={w.path + w.code}>
                 ⚠ {w.message}
@@ -249,11 +704,7 @@ export default function Exploration() {
           <>
             <PaneHead
               title="GIS & Temporal Visualization"
-              extra={
-                <span className="tn-muted">
-                  {spatial?.time_at ? `空间截面：${spatial.time_at}` : '加载中'}
-                </span>
-              }
+              extra={<span className="tn-muted">{spatial?.time_at ? `空间截面：${spatial.time_at}` : '加载中'}</span>}
             />
             <MapView
               geojson={geojson}
@@ -262,9 +713,11 @@ export default function Exploration() {
               onToggle={toggleRegion}
               showLabels={showLabels}
               labelFor={(entry, regionId) => entry?.label ?? regionId}
-              colorFor={(entry) => colorScale(entry?.value ?? null, bounds.min, bounds.max, BLUE_PALETTE)}
+              colorFor={(entry) => colorScale(entry?.value ?? null, colorBounds.min, colorBounds.max, BLUE_PALETTE)}
               formatTooltip={(entry, regionId) =>
-                `${entry?.label ?? regionId}: ${entry?.value === null || entry?.value === undefined ? 'No Data' : entry.value.toFixed(2)}${source ? ` (${source.unit_label})` : ''}`
+                `${entry?.label ?? regionId}: ${entry?.value === null || entry?.value === undefined ? 'No Data' : entry.value.toFixed(2)}${
+                  source ? ` (${source.unit_label})` : ''
+                }`
               }
               legend={
                 <>
@@ -275,7 +728,7 @@ export default function Exploration() {
                   <span>高</span>
                   <span className="tn-legend-swatch" style={{ background: '#c9d3e2' }} />
                   <span>No Data</span>
-                  <span>· 点击区域加入对比；点击地图空白处取消高亮</span>
+                  <span>· 点击区域加入对比</span>
                 </>
               }
             />
@@ -287,39 +740,38 @@ export default function Exploration() {
               <span className="tn-muted">地图颜色 = 当前时间截面该区域的真实观测值（越深越大）</span>
             </div>
             <div className="tn-inline" style={{ marginTop: 8 }}>
-              <Tooltip title="在整段时间轴里挑一个时刻。地图和 Spatial Analysis 会显示该时刻各区域的真实值，用来观察同一时刻不同区域的差异。">
+              <Tooltip title="只控制地图显示哪一个具体时刻，不会改变右侧统计与自动结论使用的 Analysis Time Range。">
                 <span className="tn-muted">时间截面位置 ⓘ</span>
               </Tooltip>
               <input
                 type="range"
                 min={0}
-                max={Math.max(0, (temporal?.total_points ?? 1) - 1)}
-                value={spatialIndex}
-                onChange={(event) => setSpatialIndex(Number(event.target.value))}
+                max={Math.max(0, (range?.total_points ?? 1) - 1)}
+                value={sliceIndex}
+                onChange={(event) => setSliceIndex(Number(event.target.value))}
                 style={{ flex: 1 }}
                 aria-label="时间截面位置"
               />
-              <span className="tn-muted">
-                {spatial?.time_at ?? `index ${spatialIndex}`}
-              </span>
+              <span className="tn-muted">{spatial?.time_at ?? `index ${sliceIndex}`}</span>
             </div>
             <div className="tn-hint" style={{ marginTop: 6 }}>
-              「时间截面」= 从整条时间轴中选<strong>一个时刻</strong>，看这一刻所有区域的取值快照。
-              拖动滑块 → 地图重新着色、Spatial Analysis 的排名与分布同步更新；右侧曲线仍显示上方设置的整个分析窗口。
+              「时间截面」= 从整条时间轴中选<strong>一个时刻</strong>，看这一刻所有区域的取值快照；它只影响地图与
+              Spatial Analysis。右侧统计、日内规律、工作日/周末与 ACF 仍使用左侧选择的分析时间范围。
             </div>
             <Card size="small" title="多区域时序曲线（真实观测）" style={{ marginTop: 10 }}>
-              <LineChart
-                loading={loading && !temporal}
-                empty={!temporal}
-                height={240}
-                yName={source?.unit_label}
-                x={temporal?.series?.[0]?.timestamps ?? []}
-                series={(temporal?.series ?? []).map((item: any, index: number) => ({
-                  name: item.region_id,
-                  data: item.values,
-                  color: BLUE_PALETTE[index % BLUE_PALETTE.length],
-                }))}
-              />
+              <div className={stale ? 'tn-stale' : undefined}>
+                <LineChart
+                  loading={loading && !result}
+                  empty={!result}
+                  height={240}
+                  yName={source?.unit_label}
+                  x={seriesChart.x}
+                  series={seriesChart.series}
+                />
+              </div>
+              <div className="tn-muted" style={{ marginTop: 4 }}>
+                橙色虚线为分析对象（{primaryId ?? '—'}）在当前时间范围内的线性趋势拟合；仅描述该区间，不代表未来。
+              </div>
             </Card>
           </>
         }
@@ -333,123 +785,154 @@ export default function Exploration() {
                 key: 'temporal',
                 label: 'Temporal Analysis',
                 children: (
-                  <div className="tn-stack">
-                    <Card
-                      size="small"
-                      title={
-                        <span className="tn-inline">
-                          统计摘要（当前分析窗口）
-                          <Tooltip
-                            title={
-                              <div style={{ maxWidth: 320, lineHeight: 1.7 }}>
-                                均值：窗口内所有有效观测的平均值（源单位）
-                                <br />峰值：窗口内最大值（对应时刻见曲线）
-                                <br />P95：95% 分位值，95% 的观测不超过它，比峰值更稳健
-                                <br />CV：变异系数 = 标准差 ÷ 均值，越大表示相对波动越剧烈
-                                <br />零值：观测恰好为 0 的点数（ZTE 的真实零值会保留，不当作缺失）
-                              </div>
-                            }
-                          >
-                            <Tag color="blue" style={{ cursor: 'help' }}>
-                              各列含义 ⓘ
-                            </Tag>
-                          </Tooltip>
-                        </span>
-                      }
-                    >
-                      {temporal?.statistics?.length ? (
+                  <div className={stale ? 'tn-stale' : undefined}>
+                    <div className="tn-inline" style={{ marginBottom: 8 }}>
+                      <span className="tn-muted">分析对象</span>
+                      <Select
+                        size="small"
+                        style={{ width: 170 }}
+                        value={primaryId ?? undefined}
+                        options={regionOptions}
+                        onChange={(value) => updateConfig({ insight_region_id: value })}
+                      />
+                      <span className="tn-muted">（自动结论针对该区域；上方曲线可对比多区域）</span>
+                    </div>
+
+                    <Card size="small" title="统计摘要（当前分析时间范围）">
+                      {result?.statistics?.length ? (
                         <table style={{ width: '100%', fontSize: 11.5 }}>
                           <thead>
                             <tr style={{ color: '#5b7095', textAlign: 'left' }}>
                               <th>区域</th>
                               <th>均值</th>
-                              <th>峰值</th>
+                              <th>最大</th>
+                              <th>最小</th>
+                              <th>标准差</th>
                               <th>P95</th>
                               <th>CV</th>
                               <th>零值</th>
+                              <th>有效点</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {temporal.statistics.map((row: any) => (
+                            {result.statistics.map((row: any) => (
                               <tr key={row.region_id} style={{ borderTop: '1px dashed #e3ebf6' }}>
                                 <td>{row.region_id}</td>
                                 <td>{row.mean?.toFixed(2) ?? '—'}</td>
                                 <td>{row.max?.toFixed(2) ?? '—'}</td>
+                                <td>{row.min?.toFixed(2) ?? '—'}</td>
+                                <td>{row.std?.toFixed(2) ?? '—'}</td>
                                 <td>{row.p95?.toFixed(2) ?? '—'}</td>
                                 <td>{row.cv?.toFixed(3) ?? '—'}</td>
                                 <td>{row.zero_points}</td>
+                                <td>{row.valid_points}</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       ) : (
-                        <EmptyState text="选择一个区域后显示真实统计量。" />
+                        <EmptyState text="选择区域后显示真实统计量。" />
                       )}
                       <div className="tn-hint" style={{ marginTop: 8 }}>
-                        这些数字只统计 <strong>上方「窗口点数」所覆盖的时间段</strong>，且只使用真实观测；
-                        缺失点不参与计算，也不会被当成 0。
+                        全部指标只统计当前 Analysis Time Range 内的有效观测：均值、最大/最小、标准差、P95
+                        （95% 分位）、CV（标准差÷均值）、零值（真实 0）、有效点数。缺失点不参与，也不当作 0。
                       </div>
                     </Card>
-                    <Card size="small" title="日内小时画像">
-                      <div className="tn-hint" style={{ marginBottom: 6 }}>
-                        把窗口内所有观测按<strong>一天中的第几小时</strong>分组求平均：看每天几点高、几点低。
-                        横轴 0:00–23:00，纵轴为源单位的平均值。
+
+                    <Card size="small" title="流量时间序列（当前范围）" style={{ marginTop: 10 }}>
+                      <LineChart height={180} x={seriesChart.x} series={seriesChart.series} yName={source?.unit_label} empty={!result} />
+                      <div className="tn-muted">
+                        有效观测：{primaryStats?.valid_points ?? 0} / {range?.points ?? 0} 个时间点
+                        {primaryStats?.peak_at ? ` · 峰值出现在 ${primaryStats.peak_at}` : ''}
                       </div>
-                      <LineChart
-                        height={200}
-                        x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
-                        series={(temporal?.intraday_profiles ?? []).map((profile: any, index: number) => ({
-                          name: profile.region_id,
-                          data: profile.hourly_mean,
-                          color: BLUE_PALETTE[index % BLUE_PALETTE.length],
-                        }))}
-                        empty={!temporal?.intraday_profiles?.length}
+                    </Card>
+
+                    <Card size="small" title="日内小时画像（Hourly Profile）" style={{ marginTop: 10 }}>
+                      <div className="tn-hint" style={{ marginBottom: 6 }}>
+                        把当前时间范围内所有观测按「一天中的第几小时」分组求平均，得到典型日内模式；
+                        这不是某一天的原始曲线。某个小时没有有效观测时显示为断点（No Data）。
+                      </div>
+                      <HourlyChart
+                        regions={(result?.hourly ?? []).map((h: any) => ({ region_id: h.region_id, hours: h.hours }))}
                       />
                     </Card>
-                    <Card size="small" title="周内模式与工作日/周末">
-                      {(temporal?.weekly_profiles ?? []).map((profile: any) => (
-                        <div key={profile.region_id} className="tn-muted">
-                          {profile.region_id}：工作日均值 {profile.weekday_mean?.toFixed(2) ?? '—'}，周末均值{' '}
-                          {profile.weekend_mean?.toFixed(2) ?? '—'}，比值 {profile.weekday_weekend_ratio?.toFixed(3) ?? '—'}
+                    <InsightCard title="Hourly Pattern Insights" insights={hourlyInsight} loading={loading} />
+
+                    <Card size="small" title="工作日 vs 周末（Weekday vs Weekend）" style={{ marginTop: 12 }}>
+                      <div className="tn-hint" style={{ marginBottom: 6 }}>
+                        只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，分别按 0–23 小时求平均。
+                        若范围内没有周末（或没有工作日），对应曲线显示为 No Data，不会借用范围外的数据。
+                      </div>
+                      {primaryWeekday ? (
+                        <>
+                          <WeekdayChart
+                            weekday={primaryWeekday.weekday.profile}
+                            weekend={primaryWeekday.weekend.profile}
+                          />
+                          <div className="tn-muted">
+                            工作日：{primaryWeekday.weekday.valid_dates} 个有效日期 / {primaryWeekday.weekday.samples} 个观测；
+                            周末：{primaryWeekday.weekend.valid_dates} 个有效日期 / {primaryWeekday.weekend.samples} 个观测。
+                          </div>
+                        </>
+                      ) : (
+                        <EmptyState text="暂无数据。" />
+                      )}
+                    </Card>
+                    <InsightCard title="Weekday vs Weekend Insights" insights={weekdayInsight} loading={loading} />
+
+                    <Card size="small" title="ACF 与趋势（ACF & Trend）" style={{ marginTop: 12 }}>
+                      <div className="tn-hint" style={{ marginBottom: 6 }}>
+                        ACF（自相关）衡量序列与自身滞后 k 步的相关程度；Lag 是“向后错几步”，不是只用 k 个点。
+                        灰色虚线为 ±95% 白噪声置信带，用于判断相关是否明显偏离 0。
+                      </div>
+                      <div className="tn-range-summary" style={{ marginBottom: 8 }}>
+                        <div>
+                          <strong>计算范围：</strong>
+                          {acfInfo?.start_at ?? range?.start_at ?? '—'} ～ {acfInfo?.end_at ?? range?.end_at ?? '—'}
                         </div>
-                      ))}
-                      <LineChart
-                        height={190}
-                        x={['周一', '周二', '周三', '周四', '周五', '周六', '周日']}
-                        series={(temporal?.weekly_profiles ?? []).map((profile: any, index: number) => ({
-                          name: profile.region_id,
-                          data: profile.weekly_mean,
-                          color: BLUE_PALETTE[index % BLUE_PALETTE.length],
-                        }))}
-                        empty={!temporal?.weekly_profiles?.length}
+                        <div>
+                          <strong>有效样本：</strong>
+                          {acfInfo?.valid_points ?? 0} 个 · <strong>采样间隔：</strong>
+                          {acfInfo?.interval_minutes ?? range?.interval_minutes ?? '—'} 分钟 ·{' '}
+                          <strong>Max Lag：</strong>
+                          {acfInfo?.max_lag ?? '—'}
+                        </div>
+                      </div>
+                      <ParamField
+                        spec={maxLagSpec}
+                        value={config.acf_max_lag}
+                        issues={fieldIssues('acf_max_lag')}
+                        path="m1.acf_max_lag"
+                        onChange={(_key, value) => updateConfig({ acf_max_lag: Number(value) || 0 })}
+                        compact
                       />
-                      <div className="tn-hint" style={{ marginTop: 6 }}>
-                        {temporal?.weekly_note ??
-                          '周内模式基于完整序列计算（不受显示窗口限制），因此周一到周日都有真实均值。'}
-                        比值 &gt; 1 表示工作日平均更高；≈1 表示工作日与周末差异很小。
-                      </div>
-                    </Card>
-                    <Card size="small" title="自相关 ACF 与趋势（实际算法支持）">
-                      <div className="tn-hint" style={{ marginBottom: 6 }}>
-                        ACF（自相关）：横轴是滞后步数 k，纵轴是「当前值与 k 步之前的值的相关系数」。
-                        接近 1 表示序列有很强的惯性/周期；在 0 附近表示与过去没有明显线性关系；
-                        负值表示反向。曲线缓慢衰减说明该区域适合用历史窗口做预测。
-                      </div>
-                      <LineChart
-                        height={180}
-                        x={(temporal?.acf?.lags ?? []).map((lag: number) => String(lag))}
-                        series={[{ name: 'ACF', data: temporal?.acf?.values ?? [] }]}
-                        empty={!temporal?.acf?.lags?.length}
+                      <AcfChart
+                        lags={result?.acf?.lags ?? []}
+                        values={result?.acf?.values ?? []}
+                        ci={result?.acf?.ci ?? []}
+                        intervalMinutes={result?.acf?.interval_minutes ?? 10}
                       />
                       <div className="tn-muted">
-                        {temporal?.acf?.note ?? `线性趋势斜率 ${temporal?.trend?.slope?.toFixed(4) ?? '—'}（每点变化量）`}
-                      </div>
-                      <div className="tn-hint" style={{ marginTop: 6 }}>
-                        趋势斜率用最小二乘线性回归估计：正值表示窗口内整体在上升，负值表示下降，数值是每个时间点的平均变化量。
+                        {result?.trend?.available
+                          ? `线性趋势：${result.trend.direction_label}；斜率 ${result.trend.slope_per_hour?.toFixed(4)} / 小时` +
+                            (result.trend.r2 !== null && result.trend.r2 !== undefined ? `；R²=${result.trend.r2.toFixed(3)}` : '')
+                          : '有效样本不足，无法估计趋势。'}
                       </div>
                     </Card>
-                    {notes.map((line: string) => (
-                      <div className="tn-muted" key={line}>
+                    <InsightCard title="ACF & Trend Insights" insights={acfInsight} loading={loading} />
+
+                    {(result?.warnings ?? []).length ? (
+                      <div style={{ marginTop: 8 }}>
+                        {result.warnings.map((line: string) => (
+                          <div className="tn-warning-text" key={line}>
+                            <span aria-hidden="true">⚠</span>
+                            <span>{line}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {(result?.notes ?? []).map((line: string) => (
+                      <div className="tn-muted" key={line} style={{ marginTop: 4 }}>
                         · {line}
                       </div>
                     ))}
@@ -460,52 +943,67 @@ export default function Exploration() {
                 key: 'spatial',
                 label: 'Spatial Analysis',
                 children: (
-                  <div className="tn-stack">
-                    <div className="tn-hint">
-                      这一页把「当前时间截面」横向切开，比较同一时刻不同区域：
-                      上图看最高的 12 个区域，中图看所有区域取值的分布，下图看最低的区域。
-                      拖动左侧时间截面滑块即可看到不同时刻的空间差异。
-                    </div>
-                    <Card size="small" title={`当前时间截面空间强度（${spatial?.time_at ?? '—'}）`}>
-                      <div className="tn-muted">
-                        有效区域 {spatial?.summary?.regions_with_value ?? 0} · 缺失{' '}
-                        {spatial?.summary?.regions_missing ?? 0} · 均值 {spatial?.summary?.mean?.toFixed(2) ?? '—'} · 标准差{' '}
-                        {spatial?.summary?.std?.toFixed(2) ?? '—'}
+                  <div className={stale ? 'tn-stale' : undefined}>
+                    <div className="tn-stack">
+                      <div className="tn-hint">
+                        这一页把「当前时间截面」横向切开比较区域：图 1 为最高 12 个区域，图 2 为所有区域取值分布，
+                        图 3 为最低 6 个区域。拖动左侧时间截面滑块即可切换时刻。
+                        {range ? ` 范围内逐区域均值（range_mean）也在数据中提供，使用 ${range.start_at} ～ ${range.end_at}。` : ''}
                       </div>
-                      <BarChart
-                        horizontal
-                        height={300}
-                        categories={(spatial?.ranking ?? []).slice(0, 12).map((item: any) => item.region_id)}
-                        values={(spatial?.ranking ?? []).slice(0, 12).map((item: any) => item.value)}
-                      />
-                      <div className="tn-hint" style={{ marginTop: 6 }}>
-                        图 1：该时刻取值最高的 12 个区域（横条越长表示该时刻流量越大），按区域 ID 标注。
-                      </div>
-                    </Card>
-                    <Card size="small" title="区域差异分布">
-                      <BarChart
-                        height={200}
-                        categories={(spatial?.summary?.distribution ?? []).map(
-                          (bin: any) => `${bin.bin_start.toFixed(0)}~${bin.bin_end.toFixed(0)}`,
-                        )}
-                        values={(spatial?.summary?.distribution ?? []).map((bin: any) => bin.count)}
-                        color="#12A67A"
-                      />
-                      <div className="tn-hint" style={{ marginTop: 6 }}>
-                        图 2：把所有区域在该时刻的取值按数值区间分箱，柱高 = 落在该区间的区域个数。
-                        可看整体是「普遍接近」还是「少数区域特别高」。
-                      </div>
-                    </Card>
-                    <Card size="small" title="最低区域（同截面）">
-                      {(spatial?.bottom ?? []).slice(0, 6).map((item: any) => (
-                        <div key={item.region_id} className="tn-muted">
-                          {item.region_id}: {item.value?.toFixed(2)}
+                      <Card size="small" title={`当前时间截面空间强度（${spatial?.time_at ?? '—'}）`}>
+                        <div className="tn-muted">
+                          有效区域 {spatial?.summary?.regions_with_value ?? 0} · 缺失 {spatial?.summary?.regions_missing ?? 0} ·
+                          均值 {spatial?.summary?.mean?.toFixed(2) ?? '—'} · 标准差 {spatial?.summary?.std?.toFixed(2) ?? '—'}
                         </div>
-                      ))}
-                      <div className="tn-hint" style={{ marginTop: 6 }}>
-                        图 3：同一时刻取值最低的 6 个区域，与图 1 一起构成该截面的两端对比。
-                      </div>
-                    </Card>
+                        <LineChart
+                          height={260}
+                          x={(spatial?.ranking ?? []).slice(0, 12).map((item: any) => item.region_id)}
+                          series={[
+                            {
+                              name: '当前截面值',
+                              data: (spatial?.ranking ?? []).slice(0, 12).map((item: any) => item.value),
+                              type: 'bar',
+                              color: '#2467E8',
+                            },
+                          ]}
+                        />
+                        <div className="tn-hint" style={{ marginTop: 6 }}>
+                          图 1：该时刻取值最高的 12 个区域（条形越长表示该时刻流量越大）。
+                        </div>
+                      </Card>
+                      <Card size="small" title="区域差异分布">
+                        <LineChart
+                          height={200}
+                          x={(spatial?.summary?.distribution ?? []).map(
+                            (bin: any) => `${bin.bin_start.toFixed(0)}~${bin.bin_end.toFixed(0)}`,
+                          )}
+                          series={[
+                            {
+                              name: '区域数',
+                              data: (spatial?.summary?.distribution ?? []).map((bin: any) => bin.count),
+                              type: 'bar',
+                              color: '#12A67A',
+                            },
+                          ]}
+                        />
+                        <div className="tn-hint" style={{ marginTop: 6 }}>
+                          图 2：把所有区域在该时刻的取值按数值区间分箱，柱高＝落在该区间的区域个数。
+                        </div>
+                      </Card>
+                      <Card size="small" title="最低区域（同截面）">
+                        {(spatial?.bottom ?? []).slice(0, 6).map((item: any) => (
+                          <div key={item.region_id} className="tn-muted">
+                            {item.region_id}: {item.value?.toFixed(2)}
+                            {item.range_mean !== null && item.range_mean !== undefined
+                              ? `（范围内均值 ${item.range_mean.toFixed(2)}）`
+                              : ''}
+                          </div>
+                        ))}
+                        <div className="tn-hint" style={{ marginTop: 6 }}>
+                          图 3：同一时刻最低的 6 个区域，与图 1 构成两端对比。
+                        </div>
+                      </Card>
+                    </div>
                   </div>
                 ),
               },
@@ -514,43 +1012,10 @@ export default function Exploration() {
                 label: 'Multi-City Comparison',
                 children: (
                   <div className="tn-stack">
-                    {(compare?.disclaimers ?? []).map((line: string) => (
+                    {(compareDisclaimers.length ? compareDisclaimers : []).map((line: string) => (
                       <Alert key={line} type="warning" showIcon message={line} />
                     ))}
-                    <Card size="small" title="归一化形状比较（z-score，禁用原始值同量纲比较）">
-                      <LineChart
-                        height={220}
-                        x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
-                        series={(compare?.sources ?? []).map((item: any) => ({
-                          name: item.display_name,
-                          data: item.hourly_shape_z,
-                        }))}
-                        empty={!compare?.sources?.length}
-                      />
-                      <div className="tn-muted">
-                        归一化方式：{compare?.normalisation ?? 'z-score'}
-                      </div>
-                      <div className="tn-hint" style={{ marginTop: 6 }}>
-                        读图方法：每条线是「该来源自己 24 小时均值曲线」再做 z-score。
-                        <strong>0 线 = 该来源自身的平均小时水平</strong>；正值表示该小时高于它自己的平均，负值表示低于。
-                        三个来源的单位与绝对量级不同（ZTE 是 4G 下行流量，数值大几个数量级），
-                        所以这里只比较「形状」——例如高峰出现在哪些小时、波动幅度谁更大，不能比较绝对高低。
-                      </div>
-                    </Card>
-                    {(compare?.sources ?? []).map((item: any) => (
-                      <Card size="small" key={item.source_key} title={item.display_name}>
-                        <div className="tn-muted">
-                          单位：{item.unit_label}
-                          <br />
-                          观测时段：{item.time_start} → {item.time_end}（{item.points} 点 @ {item.native_frequency_minutes} 分钟）
-                          <br />
-                          变异系数 CV：{item.cv?.toFixed(3) ?? '—'}
-                        </div>
-                        <Tooltip title="不同来源的时间范围不重叠，只能比较归一化形状">
-                          <Tag color="orange">时间与单位免责声明</Tag>
-                        </Tooltip>
-                      </Card>
-                    ))}
+                    <MultiCityPanel frequency="60min" aggregation="mean" />
                   </div>
                 ),
               },
@@ -559,5 +1024,54 @@ export default function Exploration() {
         }
       />
     </div>
+  )
+}
+
+const compareDisclaimers = [
+  '三个来源的单位不一致且观测时段不重叠（Milano/Trentino 为 2013-11~2014-01，ZTE 为 2024-07~08），只能比较归一化后的形状，不能比较绝对值或声称同时发生。',
+  'ZTE 为 4G 下行流量，不是道路车辆流量。',
+]
+
+function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggregation: string }) {
+  const [data, setData] = useState<any>(null)
+  useEffect(() => {
+    api
+      .post<any>(ENDPOINTS.compare, { source_keys: ['milano', 'trentino', 'zte'], frequency, aggregation })
+      .then(setData)
+      .catch(() => setData(null))
+  }, [frequency, aggregation])
+  return (
+    <>
+      <Card size="small" title="归一化形状比较（z-score，禁用原始值同量纲比较）">
+        <LineChart
+          height={220}
+          x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
+          series={(data?.sources ?? []).map((item: any) => ({
+            name: item.display_name,
+            data: item.hourly_shape_z,
+          }))}
+          empty={!data?.sources?.length}
+        />
+        <div className="tn-muted">归一化方式：{data?.normalisation ?? 'z-score'}</div>
+        <div className="tn-hint" style={{ marginTop: 6 }}>
+          每条线是该来源自身 24 小时均值曲线再做 z-score：<strong>0 线＝该来源自身的平均小时水平</strong>，
+          正值表示该小时高于自身平均。三个来源量级差几个数量级，因此只比较“形状”（高峰在几点、波动谁更大）。
+        </div>
+      </Card>
+      {(data?.sources ?? []).map((item: any) => (
+        <Card size="small" key={item.source_key} title={item.display_name}>
+          <div className="tn-muted">
+            单位：{item.unit_label}
+            <br />
+            观测时段：{item.time_start} → {item.time_end}（{item.points} 点 @ {item.native_frequency_minutes} 分钟）
+            <br />
+            变异系数 CV：{item.cv?.toFixed(3) ?? '—'}
+          </div>
+          <Tag color="orange" style={{ marginTop: 6 }}>
+            时间与单位免责声明
+          </Tag>
+        </Card>
+      ))}
+    </>
   )
 }

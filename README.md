@@ -17,6 +17,9 @@
 * `All Models` 是批量编排（1 个 Batch ID → 12 个 Experiment ID），不是第 13 种算法。
 * Dataset ID → Experiment ID / Batch ID → Evaluation ID 全链路真实持久化。
 * 所有可编辑参数实时校验，错误显示在输入框下方，Warning 与 Error 分离，后端不可绕过。
+* Module 1 支持**日期时间范围**（与高级索引双向同步）、统一时间口径，并为
+  日内小时画像、工作日/周末、ACF 与趋势三张图**自动生成可解释结论**（真实统计规则，非固定文案；
+  详见 `docs/M1_ANALYSIS.md`）。
 
 ## 2. 交付物
 

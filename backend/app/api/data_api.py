@@ -77,6 +77,10 @@ def regions(source_key: str = Query(...), has_timeseries: bool | None = None) ->
             "display_name": source["display_name"],
             "unit_label": source["unit_label"],
             "native_frequency": source["native_frequency"],
+            "native_frequency_minutes": source["native_frequency_minutes"],
+            "time_start": source["time_start"],
+            "time_end": source["time_end"],
+            "time_point_count": source["time_point_count"],
         },
         "regions": rows,
         "counts": {

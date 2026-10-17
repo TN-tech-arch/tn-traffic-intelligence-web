@@ -79,6 +79,7 @@ export default function ParamField({
         <Select
           id={inputId}
           {...(spec.type === 'array' ? { mode: 'multiple' as const } : {})}
+          {...(spec.type === 'array' ? { showSearch: true, optionFilterProp: 'label' } : {})}
           size={compact ? 'small' : 'middle'}
           style={style}
           value={value as never}

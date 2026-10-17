@@ -35,6 +35,9 @@
 | M5 held-out Test 公平评价与排名 | Verified | 同一 Dataset/H/Test 锚点；不兼容组合被阻挡或降级为警告 |
 | M5 指标（MAE/RMSE/sMAPE/R²）与边界 | Verified | 手工样例单测；sMAPE 0/0 记 0；常量真值 R²=N/A |
 | M5 四视图 + 三 Tab + 历史管理 + CSV 导出 | Verified | 浏览器测试 + `/{id}/export` |
+| M1 日期时间范围 + 双向索引同步 + 统一时间口径 | Verified | `test_m1_time_range.py`（11 项）、`test_m1_api.py`、浏览器 `check_m1_insights.mjs` |
+| M1 三张图自动分析（Hourly / Weekday / ACF & Trend） | Verified | `test_m1_insights.py`（26 项）+ 截图 `data/screenshots/12-m1-insights.png` |
+| M1 ACF Max Lag、置信带与周期检测 | Verified | 构造正弦序列检出 24h 周期；白噪声不产生周期结论；覆盖不足时说明原因 |
 | 全参数实时校验（前端字段下方 + 后端强制） | Verified | `ui_check.mjs` + `test_api.py` 负向测试（dropout=1.5、L=0、d_model/n_heads） |
 | 结构化错误（path/code/severity/message/suggestion/request_id） | Verified | main.py 异常处理器；失败无副作用（事务 + 临时目录） |
 | 品牌资产（SVG/ICO/横幅、无卡通人物） | Verified | `frontend/public/brand/*`；UI 测试断言无头像资源 |

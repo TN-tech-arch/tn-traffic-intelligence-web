@@ -57,6 +57,16 @@ X_i = [v[t] … v[t+L-1]]      Y_i = [v[t+L] … v[t+L+H-1]]      next start = t
 * **目标从不插值**：只要某个 Y 目标不是真实观测，该窗口无效。
 * 窗口索引以「候选区间 + 有效性位图」持久化，工件小且可完全复现。
 
+### 3.1b Module 1 时间范围与自动分析（`services/time_range.py`、`services/insights.py`）
+
+* `resolve_range()` 把日期时间与重采样后的索引统一解析为**一个闭区间**（`searchsorted` 左右边界），
+  返回实际起点、最后一个观测、点数、跨度、采样间隔与边界截断信息；日期与索引两种输入共享同一套校验。
+* `services/stats.py:temporal_analysis()` 只切片一次，统计、时序、Hourly、Weekday、ACF、Trend 与
+  Insights 全部从该切片计算，保证图表与文字一致。
+* `services/insights.py` 是无副作用的纯函数集合（峰值检测、昼夜对比、工作日/周末、ACF、去趋势周期检测、
+  线性趋势），每条结论都返回 `metrics` 供前端展开详情，并可被单元测试用构造序列直接验证。
+* 中央地图的 `time_index` 独立于分析范围，只触发 Spatial 快照刷新。
+
 ### 3.2 缩放（`windows.fit_scaler / apply_scaler / inverse_scaler`）
 
 按区域、仅用训练段已观测样本拟合；评价阶段逆变换回源单位后再算指标。

@@ -157,3 +157,31 @@ def valid_region_ids(source_key: str) -> list[str]:
 def region_series_raw(source_key: str, region_id: str) -> tuple[np.ndarray, np.ndarray]:
     src = load_series(source_key)
     return src.timestamps, src.values[:, src.region_index(region_id)]
+
+
+_AXIS_CACHE: dict[tuple[str, str], np.ndarray] = {}
+
+
+def resample_axis(source_key: str, frequency: str) -> np.ndarray:
+    """Bucket start timestamps for a source/frequency (cached, values independent).
+
+    This is the single time axis used both by date<->index conversion and by the
+    resampler, so the UI and the analyser can never disagree about which
+    observations belong to a range.
+    """
+    cache_key = (source_key, frequency)
+    cached = _AXIS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    src = load_series(source_key)
+    native_minutes = int(src.data["native_frequency_minutes"])
+    target_minutes = resolve_frequency_minutes(native_minutes, frequency)
+    ratio = max(1, target_minutes // native_minutes)
+    usable = (src.timestamps.size // ratio) * ratio
+    axis = src.timestamps[:usable:ratio].astype("int64")
+    _AXIS_CACHE[cache_key] = axis
+    return axis
+
+
+def clear_axis_cache() -> None:
+    _AXIS_CACHE.clear()

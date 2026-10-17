@@ -145,6 +145,9 @@ def invalidate_cache(source_key: str | None = None) -> None:
         _CACHE.clear()
     else:
         _CACHE.pop(source_key, None)
+    from app.services.series import clear_axis_cache
+
+    clear_axis_cache()
 
 
 def _to_epoch_seconds(series: pd.Series) -> np.ndarray:

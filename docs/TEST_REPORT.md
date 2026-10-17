@@ -18,7 +18,7 @@
 ```powershell
 cd backend
 ..\.venv\Scripts\python.exe -m pytest tests -q
-# 55 passed, 2 warnings in 23.90s
+# 101 passed, 2 warnings in 58.44s
 ```
 
 | 测试文件 | 覆盖内容 | 结果 |
@@ -28,6 +28,9 @@ cd backend
 | `test_validation.py` | 恰好 12 算法、dropout 越界、dropout 边界 0/1、L=0/S=0、比例之和、Transformer 整除、Epochs 大是 Warning、batch_size 大于样本是 Warning、ARIMA trend 与 d 兼容、非数字/非整数、Ward+非欧氏、DBSCAN eps>0、至少两个特征、M1 区域上限与未知区域、M5 Scope 冲突、All Models 逐算法报告 | 15 passed |
 | `test_adapters.py` | 10 个常规适配器在真实 pytorch/statsmodels/sklearn 上产出有限 `[N,H]`；两个 Foundation 在真实权重上 Zero-shot 且 `no_epochs=true`；未知 checkpoint 必须报错而不偷偷换权重 | 10 passed + 2 passed（Foundation 真实权重） |
 | `test_api.py` | 健康检查、数据基线断言、注册表 12 条、GIS 162 多边形与 14 No Data、L=0 返回字段级错误、比例非法阻止 Build 且不产生 Dataset、**绕过前端的 dropout=1.5 被 422 拒绝且不创建 Experiment**、Transformer 整除 422、未知 Dataset 404、批次逐算法预检、评价缺实验校验、被引用数据集删除 409、schema 可机读 | 14 passed |
+| `test_m1_time_range.py` | 10/15 分钟日期→点数（7 天 1008 vs 672）、重采样点数、索引→日期、开始晚于结束、越界拒绝、边界截断警告、空范围拒绝、非法日期、短范围警告、昼夜小时校验 | 11 passed |
+| `test_m1_insights.py` | 小时均值与样本数、缺失小时 No Data、单峰/多峰/平稳/并列最高、昼夜与零分母、工作日/周末（含只有工作日、只有周末）、最大差异、高峰间隔、正弦周期检出、白噪声不误报、Max Lag 不足、跨度不足、Lag 时长换算、趋势单位、低 R² 不下结论 | 26 passed |
+| `test_m1_api.py` | 日期范围驱动全部统计、Insights 与统计数值一致、只有工作日时周末无假曲线、日期顺序/越界 422、Max Lag 截断警告、Max Lag 改变结果、Spatial 同时给出截面值与范围均值 | 7 passed |
 
 ## 2. 端到端真实链路（HTTP + Worker）
 
@@ -160,3 +163,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\test_install.ps1
 | 跨城图蓝绿线为何在 0 以上（实为 bug） | 前端原先错误地绘制了**原始小时均值**（与 z-score 标签不符），已改为绘制 `hourly_shape_z`；并解释 0 线 = 该来源自身平均小时水平 | API/浏览器实测：Milano z 范围 −1.72..1.10，原始最大值 9.17e3；ZTE 原始 1.69e7，三者现在同图可比形状 |
 
 重新执行回归：`pytest 55 passed`、`ui_check.mjs 35/35 passed`、`e2e_smoke.py ALL E2E STEPS PASSED`。
+
+## 9. Module 1 时间范围与自动分析（增量改造）
+
+### 9.1 自动化测试
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m pytest tests -q      # 101 passed
+
+cd ..\frontend
+node tests\check_m1_insights.mjs                    # 日期/索引同步 + 三个 Insights
+node tests\ui_check.mjs                             # 35/35，其他模块未回归
+```
+
+### 9.2 真实数据观测（Milano / ADRIANO，2013-11-01 → 2013-11-08，1008 点）
+
+| 输出 | 实测值 |
+|---|---|
+| 范围解析 | 起点 2013-11-01 00:00:00，最后观测 2013-11-07 23:50:00，1008 点，跨度 7.0 天，间隔 10 分钟 |
+| 统计摘要 | 均值 6,062.99，最大 10,905.07，最小 2,027.67，P95 8,073.60，CV 0.275 |
+| Hourly Insights | 高峰 18:00–19:00（7,634.99，+27.8%）；低谷 04:00–05:00（3,323.73，−56.5%）；单峰型；白天比夜间高 15.8% |
+| Weekday Insights | 工作日平均 6,181.60、周末 5,461.95，按共同小时口径工作日高 13.2%；两组高峰均 18:00；最大差异 08:00（工作日 6,461.43 vs 周末 3,973.01） |
+| ACF Insights | Lag 1–3 平均 ACF 0.959；Lag 74（12.3 小时）ACF −0.525；日周期 Lag 144 ACF 0.899（high） |
+| 趋势 | +12.02 / 小时（288.50 / 天），R²=0.129 → 界面明确提示“解释力有限，仅描述区间” |
+| 日期改为 14 天 | 点数 2016，所有统计与 Insights 同步变化（高峰值 7,813.95） |
+| 索引改为 144 | 开始日期自动同步为 2013-11-02 00:00（双向一致） |
+| 只有工作日（11-04 → 11-08） | 周末样本 = 0、曲线全 No Data，并提示“没有有效周末数据，无法完整比较” |
+| Max Lag 不足（24） | 日周期候选返回“只覆盖约 4 小时/未覆盖 24 小时”，不生成周期结论 |
+
+### 9.3 截图
+
+* `data/screenshots/12-m1-insights.png`：日期范围、三张图与三个 Insights 卡片（真实数值）。
+* `data/screenshots/13-m1-insights-full.png`：整页长截图，包含 ACF 置信带与展开区域。

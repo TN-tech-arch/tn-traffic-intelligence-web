@@ -333,6 +333,15 @@ M1_SCHEMA: list[dict[str, Any]] = [
     {"key": "region_ids", "label": "Regions", "label_zh": "区域", "type": "array", "default": [],
      "help_zh": "可在地图上点选多个区域进行对比（最多 6 个）。",
      "suggestion_zh": "单区域分析时只选一个。", "required": False},
+    {"key": "time_start", "label": "Start Date & Time", "label_zh": "开始日期时间", "type": "string",
+     "default": "", "required": False,
+     "help_zh": "分析时间范围的起点（含边界，按重采样后的时间桶起点计）。"
+                "与结束时间一起决定所有统计、图表与自动结论使用哪些观测。",
+     "suggestion_zh": "格式 YYYY-MM-DD HH:mm:ss；不能早于数据起点，也不能晚于结束时间。"},
+    {"key": "time_end", "label": "End Date & Time", "label_zh": "结束日期时间", "type": "string",
+     "default": "", "required": False,
+     "help_zh": "分析时间范围的终点（含边界）。所有图表只使用该闭区间内的真实观测。",
+     "suggestion_zh": "格式 YYYY-MM-DD HH:mm:ss；不能超过数据终点。"},
     {"key": "frequency", "label": "Temporal Resolution", "label_zh": "时间分辨率", "type": "enum",
      "default": "native", "enum": ["native", "30min", "60min", "1day"],
      "help_zh": "原生频率或聚合后的频率（必须是原生频率的整数倍）。",
@@ -344,12 +353,29 @@ M1_SCHEMA: list[dict[str, Any]] = [
     {"key": "max_regions", "label": "Max Compare Regions", "label_zh": "最多对比区域数", "type": "integer",
      "default": 6, "min": 1, "max": 12, "level": "advanced",
      "help_zh": "多区域对比上限，避免图表过载。", "suggestion_zh": "默认 6。"},
-    {"key": "start_index", "label": "Start Index", "label_zh": "起始时间点", "type": "integer",
-     "default": 0, "min": 0, "help_zh": "时间窗起始点索引（按重采样后的点数计）。",
-     "suggestion_zh": "0 表示从最早时间点开始。"},
-    {"key": "window_points", "label": "Window Points", "label_zh": "窗口点数", "type": "integer",
-     "default": 288, "min": 8, "max": 100000,
-     "help_zh": "分析窗口包含的时间点数。", "suggestion_zh": "10 分钟频率下 144 点约为一天。"},
+    {"key": "start_index", "label": "Start Index", "label_zh": "起始索引（高级）", "type": "integer",
+     "default": 0, "min": 0, "level": "advanced",
+     "help_zh": "按重采样后的时间点数计算的起点索引，与日期时间选择双向同步。",
+     "suggestion_zh": "普通使用建议直接用日期时间选择；索引用于精确复现。"},
+    {"key": "window_points", "label": "Window Points", "label_zh": "窗口点数（高级）", "type": "integer",
+     "default": 1008, "min": 2, "max": 200000, "level": "advanced",
+     "help_zh": "从起始索引开始连续取多少个重采样时间点。10 分钟频率下 1008 点＝7 天，"
+                "15 分钟频率下 1008 点＝10.5 天。",
+     "suggestion_zh": "默认 1008 点；也可直接用日期时间范围指定。"},
+    {"key": "acf_max_lag", "label": "Max Lag", "label_zh": "ACF 最大滞后步数", "type": "integer",
+     "default": 0, "min": 0, "max": 5000,
+     "help_zh": "自相关图最多计算到第几个滞后步。0 表示自动（按数据长度选择，最多覆盖一个周周期）。"
+                "10 分钟频率下 Lag 6＝1 小时、Lag 144＝24 小时、Lag 1008＝7 天；"
+                "15 分钟频率下 Lag 4＝1 小时、Lag 96＝24 小时、Lag 672＝7 天。",
+     "suggestion_zh": "检查日周期至少需要覆盖 24 小时的 Lag；检查周周期需要 7 天的 Lag 与至少两周的观测。"},
+    {"key": "day_start_hour", "label": "Day Start Hour", "label_zh": "白天起始小时", "type": "integer",
+     "default": 6, "min": 0, "max": 23, "level": "advanced",
+     "help_zh": "昼夜对比中“白天”的起始小时（0–23）。默认从 06:00 开始。",
+     "suggestion_zh": "默认 6 点；必须小于结束小时。"},
+    {"key": "day_end_hour", "label": "Day End Hour", "label_zh": "白天结束小时", "type": "integer",
+     "default": 18, "min": 1, "max": 24, "level": "advanced",
+     "help_zh": "昼夜对比中“白天”的结束小时（不含该小时）。默认到 18:00 结束。",
+     "suggestion_zh": "默认 18 点。"},
 ]
 
 M2_SCHEMA: list[dict[str, Any]] = [
@@ -622,6 +648,58 @@ def validate_m1(values: dict[str, Any], *, available_regions: list[str] | None =
     if isinstance(start_index, int) and isinstance(window_points, int) and window_points < 2:
         issues.append(error("m1.window_points", "WINDOW_TOO_SHORT",
                             "窗口点数至少为 2。", "请增大窗口点数。", window_points))
+    day_start = coerced.get("day_start_hour")
+    day_end = coerced.get("day_end_hour")
+    if isinstance(day_start, int) and isinstance(day_end, int) and day_start >= day_end:
+        issues.append(error("m1.day_end_hour", "DAY_RANGE",
+                            f"白天结束小时必须大于起始小时（当前 {day_start} → {day_end}）。",
+                            "例如白天 06:00–18:00 表示 start=6, end=18。", day_end))
+    # Real time range resolution (date <-> index, data bounds, empty ranges).
+    source_key = values.get("source_key")
+    frequency = values.get("frequency") or "native"
+    if source_key:
+        from app.services.time_range import resolve_range
+
+        try:
+            resolved = resolve_range(
+                source_key,
+                frequency,
+                time_start=values.get("time_start"),
+                time_end=values.get("time_end"),
+                start_index=values.get("start_index"),
+                window_points=values.get("window_points"),
+            )
+            seen = {(i["path"], i["code"]) for i in issues}
+            for issue in resolved.issues:
+                key = (issue["path"], issue["code"])
+                if key not in seen:
+                    issues.append(issue)
+                    seen.add(key)
+            interval = resolved.interval_minutes or 10
+            day_lag = max(1, 1440 // max(1, interval))
+            max_lag = coerced.get("acf_max_lag")
+            if isinstance(max_lag, int) and 0 < max_lag < day_lag:
+                issues.append(warning(
+                    "m1.acf_max_lag", "LAG_BELOW_DAY",
+                    f"Max Lag={max_lag} 只覆盖约 {max_lag * interval / 60:.1f} 小时，"
+                    "无法检查 24 小时日周期。",
+                    f"如需检查日周期，请将 Max Lag 设为至少 {day_lag}（24 小时）。", max_lag))
+            if isinstance(max_lag, int) and max_lag > max(2, resolved.points - 2):
+                issues.append(warning(
+                    "m1.acf_max_lag", "LAG_CLAMPED",
+                    f"Max Lag={max_lag} 超过当前序列可支持的范围（{resolved.points} 个点），"
+                    "计算时会被截断。",
+                    f"请将 Max Lag 设为不超过 {max(2, resolved.points - 2)}。", max_lag))
+            if resolved.points and resolved.span_seconds < 86400:
+                issues.append(warning(
+                    "m1.time_end", "SHORT_RANGE",
+                    f"所选范围仅约 {resolved.span_seconds / 3600:.1f} 小时，"
+                    "日内规律与工作日/周末比较的代表性有限。",
+                    "建议至少覆盖若干完整天（7 天更佳）。", resolved.points))
+        except Exception as exc:  # unknown source etc. is reported elsewhere
+            issues.append(warning("m1.time_start", "RANGE_CHECK_FAILED",
+                                  f"时间范围暂时无法校验：{exc}",
+                                  "请确认数据源已导入。", None))
     return issues
 
 
