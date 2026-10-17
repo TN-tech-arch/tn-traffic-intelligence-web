@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Card, DatePicker, Modal, Popover, Select, Switch, Tabs, Tag, Tooltip, message,
+  Alert, Button, Card, DatePicker, Modal, Select, Switch, Tabs, Tag, message,
 } from 'antd'
-import { InfoCircleOutlined } from '@ant-design/icons'
 import dayjs, { Dayjs } from 'dayjs'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
@@ -10,6 +9,7 @@ import ParamField from '../components/ParamField'
 import MapView, { BLUE_PALETTE, colorScale, type MapEntry } from '../components/MapView'
 import { AcfChart, HourlyChart, LineChart, WeekdayChart } from '../components/Charts'
 import InsightCard, { type InsightPayload } from '../components/InsightCard'
+import HelpTip from '../components/HelpTip'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 
@@ -88,15 +88,7 @@ function DateField({
     <div className={`tn-field${errors.length ? ' has-error' : ''}${!errors.length && warnings.length ? ' has-warning' : ''}`} data-field={id}>
       <label className="tn-field-label" htmlFor={inputId}>
         {label}
-        <Tooltip title={help}>
-          <button
-            type="button"
-            aria-label={`${label} 帮助信息`}
-            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#5b7095', padding: 0 }}
-          >
-            <InfoCircleOutlined />
-          </button>
-        </Tooltip>
+        <HelpTip title={help} detail="格式 YYYY-MM-DD HH:mm:ss · 含边界" label={label} />
       </label>
       <DatePicker
         id={inputId}
@@ -182,7 +174,7 @@ export default function Exploration() {
         enum: regions.map((r) => r.region_id),
         enum_labels: regions.map((r) => `${r.region_id}${r.has_timeseries ? '' : '（No Data）'}`),
         default: [], required: false,
-        help_zh: '在地图上点选区域，或用下拉框搜索；可同时选择的数量上限由上方的 Max Comparison Regions 决定。',
+        help_zh: '在地图上点选区域，或用下拉框搜索；最多可同时选择 12 个区域。',
         suggestion_zh: 'No Data 区域没有时序数据，不能用于分析。',
       },
       {
@@ -740,20 +732,11 @@ export default function Exploration() {
             <div className="tn-inline" style={{ marginTop: 8 }}>
               <span className="tn-field-label" style={{ marginBottom: 0 }}>
                 时间截面（Time Slice）
-                <Popover
-                  placement="top"
-                  trigger={['hover', 'click']}
-                  content={
-                    <div style={{ maxWidth: 340, fontSize: 12, lineHeight: 1.7 }}>
-                      Time Slice 仅决定 GIS 地图当前展示哪个时间截面的流量，
-                      <strong>不改变整个 Analysis Time Range 内的统计计算范围</strong>。
-                      滑块被限制在当前分析范围内；修改日期范围后，若原截面落在新范围之外，
-                      会自动切换到新范围内的第一个有效时间点。
-                    </div>
-                  }
-                >
-                  <InfoCircleOutlined aria-label="时间截面帮助" style={{ color: '#5b7095', cursor: 'help' }} />
-                </Popover>
+                <HelpTip
+                  title="Time Slice 仅决定 GIS 地图当前展示哪个时间截面的流量，不改变整个 Analysis Time Range 内的统计计算范围。"
+                  detail="滑块被限制在当前分析范围内；修改日期范围后若原截面越界，会自动回到范围内的第一个有效时刻。"
+                  label="时间截面"
+                />
               </span>
               <input
                 type="range"
@@ -868,17 +851,11 @@ export default function Exploration() {
                     <div className="tn-analysis-target">
                       <label className="tn-field-label" htmlFor="analysis-target">
                         分析对象（Analysis Target）
-                        <Tooltip
-                          title={
-                            <div style={{ maxWidth: 320, lineHeight: 1.6 }}>
-                              工作日/周末对比与 ACF &amp; Trend 的图表和自动结论只针对这一个区域；
-                              日内小时画像同时显示左侧已选的全部区域。
-                              切换不会改变左侧选择，也不会改变中央的多区域统计。
-                            </div>
-                          }
-                        >
-                          <InfoCircleOutlined aria-label="分析对象帮助" style={{ color: '#5b7095' }} />
-                        </Tooltip>
+                        <HelpTip
+                          title="工作日/周末对比与 ACF & Trend 的图表和自动结论只针对这一个区域；日内小时画像同时显示左侧已选的全部区域。"
+                          detail="切换不会改变左侧选择，也不会改变中央的多区域统计。"
+                          label="分析对象"
+                        />
                       </label>
                       <Select
                         id="analysis-target"
@@ -908,19 +885,11 @@ export default function Exploration() {
                                   <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                                     日内小时画像（Hourly Profile）
                                     <span className="tn-inline" style={{ gap: 6 }}>
-                                      <Popover
-                                        placement="top"
-                                        trigger={['hover', 'click']}
-                                        content={
-                                          <div style={{ maxWidth: 320, lineHeight: 1.7, fontSize: 12 }}>
-                                            把当前时间范围内所有观测按「一天中的第几小时」分组求平均，
-                                            得到典型日内模式；这不是某一天的原始曲线。
-                                            某个小时没有有效观测时显示为断点（No Data），不会补 0。
-                                          </div>
-                                        }
-                                      >
-                                        <InfoCircleOutlined aria-label="Hourly Profile 方法说明" style={{ color: '#5b7095' }} />
-                                      </Popover>
+                                      <HelpTip
+                                        title="把当前时间范围内所有观测按「一天中的第几小时」分组求平均，得到典型日内模式；这不是某一天的原始曲线。"
+                                        detail="某个小时没有有效观测时显示为断点（No Data），不会补 0。"
+                                        label="Hourly Profile 方法说明"
+                                      />
                                       <Button size="small" type="link" onClick={() => setExpanded('hourly')}>
                                         放大查看
                                       </Button>
@@ -956,19 +925,11 @@ export default function Exploration() {
                                   <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                                     工作日 vs 周末
                                     <span className="tn-inline" style={{ gap: 6 }}>
-                                      <Popover
-                                        placement="top"
-                                        trigger={['hover', 'click']}
-                                        content={
-                                          <div style={{ maxWidth: 320, lineHeight: 1.7, fontSize: 12 }}>
-                                            只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，
-                                            分别按 0–23 小时求平均。若范围内没有周末（或没有工作日），
-                                            对应曲线显示为 No Data，不会借用范围外的数据。
-                                          </div>
-                                        }
-                                      >
-                                        <InfoCircleOutlined aria-label="Weekday vs Weekend 方法说明" style={{ color: '#5b7095' }} />
-                                      </Popover>
+                                      <HelpTip
+                                        title="只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，分别按 0–23 小时求平均。"
+                                        detail="范围内没有周末（或工作日）时对应曲线显示为 No Data，不会借用范围外的数据。"
+                                        label="Weekday vs Weekend 方法说明"
+                                      />
                                       <Button size="small" type="link" onClick={() => setExpanded('weekday')}>
                                         放大查看
                                       </Button>
@@ -1010,19 +971,11 @@ export default function Exploration() {
                                   <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                                     ACF 与趋势
                                     <span className="tn-inline" style={{ gap: 6 }}>
-                                      <Popover
-                                        placement="top"
-                                        trigger={['hover', 'click']}
-                                        content={
-                                          <div style={{ maxWidth: 340, lineHeight: 1.7, fontSize: 12 }}>
-                                            ACF（自相关）衡量序列与自身滞后 k 步的相关程度；
-                                            Lag 是“向后错几步”，不是只用 k 个点。
-                                            灰色虚线为 ±95% 白噪声置信带，用于判断相关是否明显偏离 0。
-                                          </div>
-                                        }
-                                      >
-                                        <InfoCircleOutlined aria-label="ACF 方法说明" style={{ color: '#5b7095' }} />
-                                      </Popover>
+                                      <HelpTip
+                                        title="ACF（自相关）衡量序列与自身滞后 k 步的相关程度；Lag 是“向后错几步”，不是只用 k 个点。"
+                                        detail="灰色虚线为 ±95% 白噪声置信带，用于判断相关是否明显偏离 0。"
+                                        label="ACF 方法说明"
+                                      />
                                       <Button size="small" type="link" onClick={() => setExpanded('acf')}>
                                         放大查看
                                       </Button>

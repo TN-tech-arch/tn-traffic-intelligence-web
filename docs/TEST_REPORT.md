@@ -319,3 +319,24 @@ node tests\ui_check.mjs           # 35/35
 * ACF 的 Auto 开关与"实际生效 Max Lag"合并为蓝底控制块，开关与标题字号放大。
 * 回归：`check_m1_layout 27/27`、`check_m1_fixes 12/12`、`ui_check 35/35`。
 * 分析对象移回 Temporal Analysis 顶部（日内小时画像上方），其余保持不变。
+
+## 15. 参数帮助统一为悬停式深色 Tooltip（2026-10-17 第六轮）
+
+* 自研 `HelpTip` 组件：`trigger` 为 hover + focus，悬停延迟 200ms，移开 50ms 后关闭；
+  通过共享 Context 保证**同一时间只有一个**帮助 Tooltip。
+* 样式：深色底 `#1F2430`、白色正文、浅灰次要文字、8px 圆角、最大宽度 300px；
+  默认显示在 ⓘ 右侧，空间不足自动调整，实测不超出视口。
+* 覆盖范围：左侧全部参数、日期选择、时间截面、分析对象，以及三张图的方法说明；
+  旧的白底 Tooltip 与点击式 Popover 已全部移除。
+
+```powershell
+cd frontend
+node tests\check_help_tooltips.mjs   # 10/10
+node tests\check_m1_layout.mjs       # 27/27
+node tests\check_m1_fixes.mjs        # 12/12
+node tests\ui_check.mjs              # 35/35（含 M2–M5 回归）
+```
+
+实测：悬停显示 1 个 Tooltip，背景 `rgb(31, 36, 48)`、文字 `rgb(255, 255, 255)`；
+移到第二个图标时仍只有 1 个且内容切换；鼠标移开与焦点移走均关闭；点击不会留下常驻说明。
+截图：`data/screenshots/30-m1-hover-tooltip.png`。

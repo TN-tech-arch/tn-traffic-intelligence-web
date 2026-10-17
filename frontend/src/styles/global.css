@@ -392,6 +392,51 @@ body {
   font-weight: 600;
 }
 
+/* Unified parameter help: dark tooltip, white text, light grey secondary text */
+.tn-help-trigger {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: 2px;
+  color: #5b7095;
+  cursor: help;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.tn-help-trigger:focus-visible {
+  outline: 2px solid #2467e8;
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.tn-help-tooltip .ant-tooltip-inner {
+  background: #1f2430 !important;
+  color: #ffffff !important;
+  border-radius: 8px !important;
+  padding: 9px 11px !important;
+  font-size: 12px !important;
+  line-height: 1.65 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28) !important;
+}
+
+.tn-help-tooltip .ant-tooltip-arrow::before {
+  background: #1f2430 !important;
+}
+
+.tn-help-content {
+  max-width: 276px;
+  color: #ffffff;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.tn-help-secondary {
+  margin-top: 5px;
+  color: #c3cadb;
+  font-size: 11.5px;
+}
+
 .tn-range-summary {
   background: #ffffff;
   border: 1px solid #e3ebf6;

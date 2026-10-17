@@ -1,7 +1,8 @@
-import { Checkbox, Input, Popover, Select, Tooltip } from 'antd'
-import { InfoCircleOutlined, WarningOutlined } from '@ant-design/icons'
+import { Checkbox, Input, Select } from 'antd'
+import { WarningOutlined } from '@ant-design/icons'
 import type { Issue } from '../api/client'
 import type { FieldSpec } from '../validation/engine'
+import HelpTip from './HelpTip'
 
 interface Props {
   spec: FieldSpec
@@ -15,18 +16,21 @@ interface Props {
   compact?: boolean
 }
 
-export function fieldHelp(spec: FieldSpec): string {
+function fieldDetail(spec: FieldSpec): string[] {
   const parts: string[] = []
-  if (spec.help_zh) parts.push(spec.help_zh)
-  if (spec.unit_zh) parts.push(`单位：${spec.unit_zh}`)
   const bounds: string[] = []
   if (spec.min !== undefined && spec.min !== null) bounds.push(`${spec.exclusive_min ? '>' : '≥'} ${spec.min}`)
   if (spec.max !== undefined && spec.max !== null) bounds.push(`${spec.exclusive_max ? '<' : '≤'} ${spec.max}`)
-  if (bounds.length) parts.push(`合法范围：${bounds.join(' 且 ')}`)
-  else if (spec.type === 'enum') parts.push(`可选值：${(spec.enum ?? []).map(String).join(' / ')}`)
-  parts.push(`默认值：${String(spec.default ?? '—')}`)
+  const facts: string[] = []
+  if (spec.unit_zh) facts.push(`单位：${spec.unit_zh}`)
+  if (bounds.length) facts.push(`范围：${bounds.join(' 且 ')}`)
+  else if (spec.type === 'enum') facts.push(`可选：${(spec.enum ?? []).map(String).join(' / ')}`)
+  const def = spec.default
+  const hasDefault = def !== undefined && def !== null && def !== '' && !(Array.isArray(def) && def.length === 0)
+  if (hasDefault) facts.push(`默认：${Array.isArray(def) ? def.join(', ') : String(def)}`)
+  parts.push(facts.join(' · '))
   if (spec.suggestion_zh) parts.push(`建议：${spec.suggestion_zh}`)
-  return parts.join('　')
+  return parts
 }
 
 export default function ParamField({
@@ -47,7 +51,6 @@ export default function ParamField({
   const describedBy = [
     errors.length ? `${inputId}-error` : null,
     warnings.length ? `${inputId}-warning` : null,
-    `${inputId}-help`,
   ]
     .filter(Boolean)
     .join(' ')
@@ -145,25 +148,17 @@ export default function ParamField({
       <label className="tn-field-label" htmlFor={inputId}>
         {spec.label_zh ?? spec.label ?? spec.key}
         {spec.level === 'advanced' ? <span className="tn-muted">（Advanced）</span> : null}
-        <Tooltip title="参数说明（单位 / 范围 / 默认值 / 建议）">
-          <Popover
-            title={`${spec.label_zh ?? spec.key} 说明`}
-            content={
-              <div style={{ maxWidth: 320, fontSize: 12, lineHeight: 1.6 }} id={`${inputId}-help`}>
-                {fieldHelp(spec)}
-              </div>
-            }
-            trigger="click"
-          >
-            <button
-              type="button"
-              aria-label={`${spec.label_zh ?? spec.key} 帮助信息`}
-              style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#5b7095', padding: 0 }}
-            >
-              <InfoCircleOutlined />
-            </button>
-          </Popover>
-        </Tooltip>
+        <HelpTip
+          title={spec.help_zh || `${spec.label_zh ?? spec.key} 参数说明`}
+          detail={
+            <>
+              {fieldDetail(spec).map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+            </>
+          }
+          label={spec.label_zh ?? spec.label ?? spec.key}
+        />
         {disabledReason ? <span className="tn-muted">· {disabledReason}</span> : null}
       </label>
       {renderControl()}

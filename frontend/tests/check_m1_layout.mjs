@@ -72,7 +72,7 @@ check(
 )
 check('7 中央时序不再有橙色拟合线/图例', !centerText.includes('趋势拟合'), 'fitted line removed')
 check('8 中央统计包含范围与样本说明', /参与区域 \d+/.test(centerText) && centerText.includes('有效样本'), 'range note present')
-check('9 GIS 蓝色说明框已删除，改为 ⓘ', (await page.locator('.tn-hint').count()) === 0 && (await page.locator('[aria-label="时间截面帮助"]').count()) === 1, 'no hint boxes, one help icon')
+check('9 GIS 蓝色说明框已删除，改为 ⓘ', (await page.locator('.tn-hint').count()) === 0 && (await page.locator('[aria-label="时间截面 帮助信息"]').count()) === 1, 'no hint boxes, one help icon')
 check('10 地图图例、滑块、区域名称开关仍在', centerText.includes('No Data') && centerText.includes('Time Slice') && centerText.includes('在地图上显示区域名称'), 'map controls intact')
 
 // --------------------------------------------------------- right pane ----
