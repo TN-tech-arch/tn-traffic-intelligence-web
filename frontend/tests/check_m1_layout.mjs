@@ -79,10 +79,10 @@ check('10 地图图例、滑块、区域名称开关仍在', centerText.includes
 const infoPane = page.locator('.tn-three-pane > section').nth(2)
 const infoText = await infoPane.innerText()
 check(
-  '11 Analysis Target 位于日内小时画像之后、工作日对比之前',
+  '11 Analysis Target 位于日内小时画像上方',
   infoText.indexOf('Temporal Analysis') >= 0 &&
-    infoText.indexOf('分析对象（Analysis Target）') > infoText.indexOf('日内小时画像') &&
-    infoText.indexOf('分析对象（Analysis Target）') < infoText.indexOf('工作日 vs 周末'),
+    infoText.indexOf('分析对象（Analysis Target）') > infoText.indexOf('Temporal Analysis') &&
+    infoText.indexOf('分析对象（Analysis Target）') < infoText.indexOf('日内小时画像'),
   infoText.slice(0, 80).replace(/\n/g, ' '),
 )
 check('12 右侧不再有统计摘要/时序图', !infoText.includes('统计摘要') && !infoText.includes('流量时间序列'), 'no duplicated stats/series')

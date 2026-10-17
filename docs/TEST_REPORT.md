@@ -318,3 +318,4 @@ node tests\ui_check.mjs           # 35/35
 * 多区域统计摘要的范围说明改为紧跟卡片标题（标题 → 说明 → 表格 → Insights）。
 * ACF 的 Auto 开关与"实际生效 Max Lag"合并为蓝底控制块，开关与标题字号放大。
 * 回归：`check_m1_layout 27/27`、`check_m1_fixes 12/12`、`ui_check 35/35`。
+* 分析对象移回 Temporal Analysis 顶部（日内小时画像上方），其余保持不变。

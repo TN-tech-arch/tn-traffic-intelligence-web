@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Button, Card, DatePicker, Modal, Popover, Select, Switch, Tabs, Tag, Tooltip, message,
 } from 'antd'
@@ -865,6 +865,37 @@ export default function Exploration() {
                 label: '时间分析（Temporal Analysis）',
                 children: (
                   <div className={stale ? 'tn-stale' : undefined}>
+                    <div className="tn-analysis-target">
+                      <label className="tn-field-label" htmlFor="analysis-target">
+                        分析对象（Analysis Target）
+                        <Tooltip
+                          title={
+                            <div style={{ maxWidth: 320, lineHeight: 1.6 }}>
+                              工作日/周末对比与 ACF &amp; Trend 的图表和自动结论只针对这一个区域；
+                              日内小时画像同时显示左侧已选的全部区域。
+                              切换不会改变左侧选择，也不会改变中央的多区域统计。
+                            </div>
+                          }
+                        >
+                          <InfoCircleOutlined aria-label="分析对象帮助" style={{ color: '#5b7095' }} />
+                        </Tooltip>
+                      </label>
+                      <Select
+                        id="analysis-target"
+                        size="small"
+                        style={{ width: '100%' }}
+                        value={primaryId ?? undefined}
+                        options={regionOptions}
+                        placeholder="请先在左侧选择区域"
+                        disabled={!regionOptions.length}
+                        onChange={(value) => updateConfig({ insight_region_id: value })}
+                      />
+                      <div className="tn-muted" style={{ marginTop: 4 }}>
+                        {primaryId
+                          ? `${primaryId} · ${source?.display_name ?? '—'} · ${range?.start_at ?? '—'} → ${range?.end_at ?? '—'}`
+                          : '当前没有有效区域，请先在左侧选择。'}
+                      </div>
+                    </div>
                     <div className="tn-stack" style={{ marginTop: 8 }}>{[
                         {
                           key: 'hourly',
@@ -1063,45 +1094,10 @@ export default function Exploration() {
                             </div>
                           ),
                         },
-                      ].map((section, index) => (
-                        <Fragment key={section.key}>
-                          <section aria-label={section.label}>
-                            {section.children}
-                          </section>
-                          {index === 0 ? (
-                            <div className="tn-analysis-target">
-                              <label className="tn-field-label" htmlFor="analysis-target">
-                                分析对象（Analysis Target）
-                                <Tooltip
-                                  title={
-                                    <div style={{ maxWidth: 320, lineHeight: 1.6 }}>
-                                      工作日/周末对比与 ACF &amp; Trend 的图表和自动结论只针对这一个区域；
-                                      上方日内小时画像同时显示左侧已选的全部区域。
-                                      切换不会改变左侧选择，也不会改变中央的多区域统计。
-                                    </div>
-                                  }
-                                >
-                                  <InfoCircleOutlined aria-label="分析对象帮助" style={{ color: '#5b7095' }} />
-                                </Tooltip>
-                              </label>
-                              <Select
-                                id="analysis-target"
-                                size="small"
-                                style={{ width: '100%' }}
-                                value={primaryId ?? undefined}
-                                options={regionOptions}
-                                placeholder="请先在左侧选择区域"
-                                disabled={!regionOptions.length}
-                                onChange={(value) => updateConfig({ insight_region_id: value })}
-                              />
-                              <div className="tn-muted" style={{ marginTop: 4 }}>
-                                {primaryId
-                                  ? `${primaryId} · ${source?.display_name ?? '—'} · ${range?.start_at ?? '—'} → ${range?.end_at ?? '—'}`
-                                  : '当前没有有效区域，请先在左侧选择。'}
-                              </div>
-                            </div>
-                          ) : null}
-                        </Fragment>
+                      ].map((section) => (
+                        <section key={section.key} aria-label={section.label}>
+                          {section.children}
+                        </section>
                       ))}
                     </div>
 

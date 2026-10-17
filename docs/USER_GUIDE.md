@@ -53,7 +53,7 @@
 
 布局：Module 1 的三栏比例为 **Configuration 25% / GIS+时序 40% / Analysis 35%**。
 右侧是三个一级 Tab（Temporal / Spatial / Multi-City）。
-**分析对象（Analysis Target）位于日内小时画像之后、工作日对比之前**（单选，选项仅来自左侧已选区域，
+**分析对象（Analysis Target）位于 Temporal Analysis 最上方、日内小时画像之前**（单选，选项仅来自左侧已选区域，
 默认第一个，带 ⓘ）；Spatial Analysis 与 Multi-City Comparison 不显示该控件。
 Temporal 内部**不再有二级 Tab**，而是按顺序纵向排列：
 
