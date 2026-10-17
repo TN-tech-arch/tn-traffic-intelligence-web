@@ -352,11 +352,12 @@ node tests\ui_check.mjs              # 35/35（含 M2–M5 回归）
 | 时间截面 | 拖动滑块后最高区域由 DUOMO 变为 BUENOS AIRES，Insights 同步更新 |
 | Insights | High/Low/Spatial Distribution 三组均含真实数值与可靠性说明 |
 | 放大 | 三张图均可放大，弹窗内保留对应 Insights |
+| 方法说明 | 三张图标题右侧均有 ⓘ，悬停显示黑底说明（`rgb(31,36,48)`），与时间分析图一致 |
 
 ```powershell
 cd backend; ..\.venv\Scripts\python.exe -m pytest tests -q   # 128 passed
 cd ..\frontend
-node tests\check_m1_spatial.mjs    # 10/10
+node tests\check_m1_spatial.mjs    # 12/12
 node tests\check_m1_layout.mjs     # 27/27
 node tests\check_m1_fixes.mjs      # 12/12
 node tests\check_help_tooltips.mjs # 10/10

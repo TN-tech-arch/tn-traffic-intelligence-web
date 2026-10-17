@@ -45,6 +45,23 @@ check(
 const charts = panel.locator('.echarts-for-react')
 check('3 三张空间图都在当前页面', (await charts.count()) === 3, `${await charts.count()} charts`)
 
+const helpIcons = await panel.locator('section[aria-label] .ant-card-head .tn-help-trigger').count()
+check('3b 三张图各有 ⓘ 方法说明', helpIcons === 3, `${helpIcons} help icons`)
+if (helpIcons) {
+  await panel.locator('section[aria-label="Top 12 Regions"] .tn-help-trigger').first().hover()
+  await page.waitForTimeout(450)
+  const tip = page.locator('.tn-help-tooltip:visible .ant-tooltip-inner')
+  const text = (await tip.count()) ? await tip.first().innerText() : ''
+  const bg = (await tip.count()) ? await tip.first().evaluate((n) => getComputedStyle(n).backgroundColor) : ''
+  check(
+    '3c 悬停显示黑底说明',
+    text.includes('前 12') && bg === 'rgb(31, 36, 48)',
+    `${bg} | ${text.slice(0, 50).replace(/\n/g, ' ')}`,
+  )
+  await page.mouse.move(1500, 1200)
+  await page.waitForTimeout(300)
+}
+
 const insightTitles = await panel.locator('.tn-insight-card').evaluateAll((nodes) =>
   nodes.map((n) => n.innerText.split('\n')[0]),
 )

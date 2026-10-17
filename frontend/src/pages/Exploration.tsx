@@ -1093,9 +1093,16 @@ export default function Exploration() {
                           title={
                             <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                               Top 12 Regions（最高流量区域）
-                              <Button size="small" type="link" onClick={() => setExpandedSpatial('top')}>
-                                放大查看
-                              </Button>
+                              <span className="tn-inline" style={{ gap: 6 }}>
+                                <HelpTip
+                                  title="使用当前数据源全部有时序区域在 GIS 当前时间截面的真实观测值，按数值从高到低取前 12 个；并列时按区域 ID 排序。"
+                                  detail="No Data 不参与排名；点击条形可在中央地图定位（不改变左侧多选与中央统计）。"
+                                  label="Top 12 说明"
+                                />
+                                <Button size="small" type="link" onClick={() => setExpandedSpatial('top')}>
+                                  放大查看
+                                </Button>
+                              </span>
                             </span>
                           }
                         >
@@ -1123,9 +1130,16 @@ export default function Exploration() {
                           title={
                             <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                               Bottom 6 Regions（最低流量区域）
-                              <Button size="small" type="link" onClick={() => setExpandedSpatial('bottom')}>
-                                放大查看
-                              </Button>
+                              <span className="tn-inline" style={{ gap: 6 }}>
+                                <HelpTip
+                                  title="按当前截面的真实值从低到高取 6 个有效区域；真实 0 值正常参与排名，No Data 不参与。"
+                                  detail="Tooltip 中的 Range Mean 是所选日期范围内的平均值，与当前截面值是两个不同口径。"
+                                  label="Bottom 6 说明"
+                                />
+                                <Button size="small" type="link" onClick={() => setExpandedSpatial('bottom')}>
+                                  放大查看
+                                </Button>
+                              </span>
                             </span>
                           }
                         >
@@ -1155,9 +1169,16 @@ export default function Exploration() {
                           title={
                             <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                               Regional Value Distribution（区域数值分布）
-                              <Button size="small" type="link" onClick={() => setExpandedSpatial('dist')}>
-                                放大查看
-                              </Button>
+                              <span className="tn-inline" style={{ gap: 6 }}>
+                                <HelpTip
+                                  title="把当前截面全部有效区域按流量值等宽分箱，柱高表示落入该区间的区域数量。"
+                                  detail="分箱左闭右开、最后一个区间含右端点；各区间计数之和等于有效区域总数，No Data 不参与。"
+                                  label="区域分布说明"
+                                />
+                                <Button size="small" type="link" onClick={() => setExpandedSpatial('dist')}>
+                                  放大查看
+                                </Button>
+                              </span>
                             </span>
                           }
                         >
