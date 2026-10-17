@@ -139,6 +139,16 @@ function formatSpan(seconds: number | null | undefined): string {
   return `${(hours / 24).toFixed(1)} 天`
 }
 
+function ChartMeta({ range, validPoints }: { range: any; validPoints: number | null | undefined }) {
+  if (!range) return null
+  return (
+    <div className="tn-muted" style={{ marginBottom: 4 }}>
+      范围 {range.start_at} → {range.end_at} · {range.points} 个时间点 · 有效样本 {validPoints ?? '—'} · 间隔{' '}
+      {range.interval_minutes} 分钟
+    </div>
+  )
+}
+
 export default function Exploration() {
   const [messageApi, contextHolder] = message.useMessage()
   const [sources, setSources] = useState<SourceRow[]>([])
@@ -799,6 +809,7 @@ export default function Exploration() {
                     </div>
 
                     <Card size="small" title="统计摘要（当前分析时间范围）">
+                      <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
                       {result?.statistics?.length ? (
                         <table style={{ width: '100%', fontSize: 11.5 }}>
                           <thead>
@@ -840,6 +851,7 @@ export default function Exploration() {
                     </Card>
 
                     <Card size="small" title="流量时间序列（当前范围）" style={{ marginTop: 10 }}>
+                      <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
                       <LineChart height={180} x={seriesChart.x} series={seriesChart.series} yName={source?.unit_label} empty={!result} />
                       <div className="tn-muted">
                         有效观测：{primaryStats?.valid_points ?? 0} / {range?.points ?? 0} 个时间点
@@ -848,6 +860,7 @@ export default function Exploration() {
                     </Card>
 
                     <Card size="small" title="日内小时画像（Hourly Profile）" style={{ marginTop: 10 }}>
+                      <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
                       <div className="tn-hint" style={{ marginBottom: 6 }}>
                         把当前时间范围内所有观测按「一天中的第几小时」分组求平均，得到典型日内模式；
                         这不是某一天的原始曲线。某个小时没有有效观测时显示为断点（No Data）。
@@ -859,6 +872,7 @@ export default function Exploration() {
                     <InsightCard title="Hourly Pattern Insights" insights={hourlyInsight} loading={loading} />
 
                     <Card size="small" title="工作日 vs 周末（Weekday vs Weekend）" style={{ marginTop: 12 }}>
+                      <ChartMeta range={range} validPoints={primaryWeekday ? primaryWeekday.weekday.samples + primaryWeekday.weekend.samples : null} />
                       <div className="tn-hint" style={{ marginBottom: 6 }}>
                         只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，分别按 0–23 小时求平均。
                         若范围内没有周末（或没有工作日），对应曲线显示为 No Data，不会借用范围外的数据。
