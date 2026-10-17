@@ -39,12 +39,10 @@ for (const title of Object.keys(subTabByInsight)) {
   console.log(text.split('\n').slice(0, 12).join('\n'))
 }
 
-// advanced indexes exist and are synced with the dates
-await page.locator('.ant-collapse-header:has-text("Advanced Settings")').first().click()
-await page.waitForTimeout(600)
-const startIndex = await page.locator('[data-field="m1.start_index"] input').inputValue()
-const windowPoints = await page.locator('[data-field="m1.window_points"] input').inputValue()
-console.log(`\nadvanced indices: start=${startIndex} points=${windowPoints}`)
+// Advanced Settings must be gone from the UI (index parameters stay internal)
+const advancedEntry = await page.locator('text=Advanced Settings').count()
+const indexInputs = await page.locator('[data-field="m1.start_index"] input, [data-field="m1.window_points"] input').count()
+console.log(`\nadvanced settings entry: ${advancedEntry}, visible index inputs: ${indexInputs}`)
 
 // change the END date via the picker (still after the start) and verify the range follows
 const endInput = page.locator('[data-field="m1.time_end"] input').first()
@@ -53,20 +51,19 @@ await endInput.fill('2013-11-14 23:50')
 await page.keyboard.press('Enter')
 await page.waitForTimeout(6000)
 const summaryAfter = await page.locator('.tn-range-summary').first().innerText()
-const startAfter = await page.locator('[data-field="m1.start_index"] input').inputValue()
-console.log('after end-date change:', summaryAfter.split('\n').slice(0, 4).join(' | '), '| start_index =', startAfter)
+console.log('after end-date change:', summaryAfter.split('\n').slice(0, 4).join(' | '))
 
 const hourlyAfter = await page.locator('.tn-insight-card:has-text("Hourly Pattern Insights")').first().innerText()
 console.log('\nhourly insight after change:', hourlyAfter.split('\n').slice(0, 4).join(' / '))
 
-// change the advanced index and verify the dates are converted back
-const indexInput = page.locator('[data-field="m1.start_index"] input').first()
-await indexInput.click({ clickCount: 3 })
-await indexInput.fill('144')
-await page.keyboard.press('Tab')
+// move the start date and confirm the analysis follows (central stats update)
+const startInput2 = page.locator('[data-field="m1.time_start"] input').first()
+await startInput2.click()
+await startInput2.fill('2013-11-09 00:00')
+await page.keyboard.press('Enter')
 await page.waitForTimeout(6000)
-const startDateAfterIndex = await page.locator('[data-field="m1.time_start"] input').first().inputValue()
-console.log('\nafter index=144 -> start date:', startDateAfterIndex)
+const summaryMoved = await page.locator('.tn-range-summary').first().innerText()
+console.log('\nafter start-date change:', summaryMoved.split('\n').slice(0, 3).join(' | '))
 
 await page.screenshot({ path: path.join(SHOTS, '12-m1-insights.png'), fullPage: true })
 await page.setViewportSize({ width: 1600, height: 2400 })

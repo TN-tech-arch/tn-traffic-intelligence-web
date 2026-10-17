@@ -411,6 +411,16 @@ body {
   transition: opacity 0.2s ease;
 }
 
+.tn-analysis-target {
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--tn-line);
+  margin-bottom: 6px;
+}
+
+.tn-analysis-target .tn-field-label {
+  margin-bottom: 4px;
+}
+
 .tn-stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

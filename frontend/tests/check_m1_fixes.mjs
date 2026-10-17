@@ -43,7 +43,7 @@ const slider = page.locator('input[type="range"]').first()
 const sliderMin = Number(await slider.getAttribute('min'))
 const sliderMax = Number(await slider.getAttribute('max'))
 const sliderValue = Number(await slider.inputValue())
-const sliceRow = await page.locator('.tn-inline:has-text("时间截面位置")').first().innerText()
+const sliceRow = await page.locator('.tn-inline:has-text("Time Slice")').first().innerText()
 check(
   '1a 滑块范围与当前分析范围一致',
   sliderMin >= 141 && sliderMax > sliderMin,
@@ -59,7 +59,7 @@ check(
 // move the slider to the last instant and verify it stays in range
 await slider.fill(String(sliderMax))
 await page.waitForTimeout(2500)
-const lastRow = await page.locator('.tn-inline:has-text("时间截面位置")').first().innerText()
+const lastRow = await page.locator('.tn-inline:has-text("Time Slice")').first().innerText()
 check('1d 滑到末端仍显示分析范围内时间', lastRow.includes('2013-11-15'), lastRow.replace(/\n/g, ' '))
 
 // 2. Auto / manual Max Lag

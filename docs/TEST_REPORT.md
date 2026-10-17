@@ -232,3 +232,28 @@ node tests\ui_check.mjs            # 35/35（含 M2–M5 回归）
 
 截图：`15-m1-layout-modal.png`（放大视图）、`16-m1-layout-1600.png`（25/40/35）、
 `17-m1-layout-1200.png`（两栏）、`18-m1-layout-900.png`（单栏）。
+
+## 11. Module 1 最终整合版（2026-10-17 第二轮）
+
+| 检查 | 实测 |
+|---|---|
+| 左侧 | 无 Advanced Settings / 无可见索引输入；Max Comparison Regions 紧跟 Regions；日期与范围摘要保留 |
+| 中央顺序 | 地图 → 多区域时序（无橙色拟合线）→ 多区域统计摘要 → Statistical Summary Insights |
+| 中央统计 | 2–3 个区域时逐行展示独立统计；切换 Analysis Target 后表格文本完全一致；多区域 Insights 出现“最高/最低”比较 |
+| 右侧 | 顶部 Analysis Target（仅已选区域）+ 三个一级 Tab + 三个二级 Tab；无统计摘要、无重复时序图 |
+| 二级 Tab | 每次只显示 1 张图 + 1 组 Insights；切换后 Insights 数值随 target 改变（ADRIANO 7,634.99 → BRERA 43,378.01） |
+| 放大查看 | 模态框含 480px 图表与同一份 Insights |
+| 响应式 | 1200px 两栏 / 900px 单栏，横向溢出 0px |
+| 控制台 | 无未预期错误 |
+
+```powershell
+cd backend; ..\.venv\Scripts\python.exe -m pytest tests -q   # 116 passed
+cd ..\frontend
+node tests\check_m1_layout.mjs    # 26/26
+node tests\check_m1_fixes.mjs     # 12/12
+node tests\ui_check.mjs           # 35/35
+node tests\check_m1_insights.mjs  # 三个 Insights + 日期联动，无错误
+```
+
+截图：`23-m1-left-config.png`、`24-m1-center-multi-region.png`、
+`25-m1-right-hourly.png`、`26-m1-right-weekday.png`、`27-m1-right-acf.png`、`28-m1-integrated-full.png`。

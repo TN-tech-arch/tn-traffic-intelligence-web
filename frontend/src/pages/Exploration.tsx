@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Card, Collapse, DatePicker, Modal, Select, Switch, Tabs, Tag, Tooltip, message,
+  Alert, Button, Card, DatePicker, Modal, Popover, Select, Switch, Tabs, Tag, Tooltip, message,
 } from 'antd'
 import { InfoCircleOutlined } from '@ant-design/icons'
 import dayjs, { Dayjs } from 'dayjs'
@@ -168,7 +168,6 @@ export default function Exploration() {
   const [subTab, setSubTab] = useState('hourly')
   const [expanded, setExpanded] = useState<null | 'hourly' | 'weekday' | 'acf'>(null)
   const [showLabels, setShowLabels] = useState(true)
-  const [advancedOpen, setAdvancedOpen] = useState<string[]>([])
   const requestSeq = useRef(0)
 
   const schema: FieldSpec[] = useMemo(
@@ -186,6 +185,13 @@ export default function Exploration() {
         default: [], required: false,
         help_zh: '在地图上点选区域，或用下拉框搜索；最多可同时对比 6 个区域。',
         suggestion_zh: 'No Data 区域没有时序数据，不能用于分析。',
+      },
+      {
+        key: 'max_regions', label_zh: '最多对比区域数（Max Comparison Regions）', type: 'integer',
+        min: 1, max: 12, default: 6,
+        help_zh: '允许同时选择并对比的区域数量上限（1–12）。调小上限时不会自动删除已选区域，' +
+                 '需要手动取消多余区域后才能重新运行分析。',
+        suggestion_zh: '默认 6；区域越多地图与时序图越密集。',
       },
       {
         key: 'frequency', label_zh: '时间分辨率', type: 'enum',
@@ -228,10 +234,6 @@ export default function Exploration() {
       {
         key: 'day_end_hour', label_zh: '白天结束小时', type: 'integer', min: 1, max: 24, default: 18,
         help_zh: '昼夜对比中“白天”的结束小时（不含该小时）。', suggestion_zh: '默认到 18:00 结束。',
-      },
-      {
-        key: 'max_regions', label_zh: '最多对比区域数', type: 'integer', min: 1, max: 12, default: 6,
-        help_zh: '多区域对比上限，避免图表过载。', suggestion_zh: '默认 6。',
       },
     ],
     [sources, regions],
@@ -396,6 +398,16 @@ export default function Exploration() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestKey, config.region_ids.length, valid])
 
+  useEffect(() => {
+    if (config.region_ids.length) return
+    // No valid target left: never keep showing a previous region's analysis.
+    setResult(null)
+    setSpatial(null)
+    setComputedKey(null)
+    setErrorIssues([])
+    setSliceIndex(0)
+  }, [config.region_ids.length])
+
   const sliceMin = result?.range?.start_index ?? 0
   const sliceMax = Math.max(sliceMin, (result?.range?.end_index ?? 1) - 1)
   const sliceValue = Math.min(Math.max(sliceIndex, sliceMin), sliceMax)
@@ -456,7 +468,11 @@ export default function Exploration() {
       const current = prev.region_ids
       if (current.includes(regionId)) {
         const next = current.filter((r) => r !== regionId)
-        return { ...prev, region_ids: next, insight_region_id: next[0] ?? null }
+        const keep =
+          prev.insight_region_id && next.includes(prev.insight_region_id)
+            ? prev.insight_region_id
+            : next[0] ?? null
+        return { ...prev, region_ids: next, insight_region_id: keep }
       }
       if (current.length >= prev.max_regions) {
         messageApi.warning(`最多对比 ${prev.max_regions} 个区域（可在高级设置中调整上限）。`)
@@ -498,23 +514,16 @@ export default function Exploration() {
       name: item.region_id,
       data: item.values,
       color: BLUE_PALETTE[index % BLUE_PALETTE.length],
+      width: item.region_id === primaryId ? 2.4 : 1.1,
+      opacity: item.region_id === primaryId ? 1 : 0.55,
     }))
-    if (primaryId && result.trend_line?.length) {
-      const primary = result.series.find((s: any) => s.region_id === primaryId)
-      if (primary) {
-        const line = new Array(primary.values.length).fill(null)
-        result.trend_line.forEach((point: any) => {
-          if (point.index < line.length) line[point.index] = point.value
-        })
-        chartSeries.push({ name: `${primaryId} 趋势拟合`, data: line, color: '#D98F00' })
-      }
-    }
     return { x: result.series[0].timestamps, series: chartSeries }
   }, [result, primaryId])
 
   const hourlyInsight: InsightPayload | null = insights?.hourly ?? null
   const weekdayInsight: InsightPayload | null = insights?.weekday ?? null
   const acfInsight: InsightPayload | null = insights?.acf_trend ?? null
+  const summaryInsight: InsightPayload | null = insights?.summary ?? null
 
   const regionOptions = regions
     .filter((r) => config.region_ids.includes(r.region_id))
@@ -597,7 +606,7 @@ export default function Exploration() {
               }
             />
             {visibleFields(schema, validationValues as any)
-              .filter((spec) => ['source_key', 'region_ids', 'frequency', 'aggregation'].includes(spec.key))
+              .filter((spec) => ['source_key', 'region_ids', 'max_regions', 'frequency', 'aggregation'].includes(spec.key))
               .map((spec) => (
                 <ParamField
                   key={spec.key}
@@ -608,7 +617,11 @@ export default function Exploration() {
                   onChange={(key, value) => {
                     if (key === 'region_ids') {
                       const next = (value as string[]) ?? []
-                      updateConfig({ region_ids: next, insight_region_id: next[0] ?? null })
+                      const keep =
+                        config.insight_region_id && next.includes(config.insight_region_id)
+                          ? config.insight_region_id
+                          : next[0] ?? null
+                      updateConfig({ region_ids: next, insight_region_id: keep })
                     } else {
                       updateConfig({ [key]: value } as Partial<M1Config>)
                     }
@@ -617,6 +630,15 @@ export default function Exploration() {
                   compact
                 />
               ))}
+            {selected.length > (config.max_regions ?? 6) ? (
+              <div className="tn-warning-text">
+                <span aria-hidden="true">⚠</span>
+                <span>
+                  已选择 {selected.length} 个区域，超过“最多对比区域数”上限 {config.max_regions}。
+                  系统不会自动删除已选区域，请先取消多余区域或将上限调大。
+                </span>
+              </div>
+            ) : null}
 
             <div className="tn-section-title" style={{ marginTop: 10 }}>
               Analysis Time Range
@@ -676,40 +698,6 @@ export default function Exploration() {
               )}
             </div>
 
-            <Collapse
-              size="small"
-              style={{ marginTop: 10 }}
-              activeKey={advancedOpen}
-              onChange={(key) => setAdvancedOpen(key as string[])}
-              items={[
-                {
-                  key: 'advanced',
-                  label: 'Advanced Settings（索引、昼夜划分、对比上限）',
-                  children: (
-                    <>
-                      <div className="tn-hint" style={{ marginBottom: 8 }}>
-                        日期时间与这里的索引双向同步，指向同一批真实观测。修改索引后会自动换算回日期时间。
-                      </div>
-                      {['start_index', 'window_points', 'day_start_hour', 'day_end_hour', 'max_regions'].map((key) => {
-                        const spec = schema.find((s) => s.key === key)!
-                        return (
-                          <ParamField
-                            key={key}
-                            spec={spec}
-                            value={(config as any)[key]}
-                            issues={fieldIssues(key)}
-                            path={`m1.${key}`}
-                            onChange={(field, value) => updateConfig({ [field]: value } as Partial<M1Config>, 'index')}
-                            compact
-                          />
-                        )
-                      })}
-                    </>
-                  ),
-                },
-              ]}
-            />
-
             <div className="tn-inline" style={{ marginTop: 10 }}>
               <Button type="primary" block onClick={() => runAnalysis(true)} loading={loading} disabled={!valid}>
                 运行分析
@@ -767,9 +755,23 @@ export default function Exploration() {
               <span className="tn-muted">地图颜色 = 当前时间截面该区域的真实观测值（越深越大）</span>
             </div>
             <div className="tn-inline" style={{ marginTop: 8 }}>
-              <Tooltip title="只控制地图显示哪一个具体时刻，不会改变右侧统计与自动结论使用的 Analysis Time Range。">
-                <span className="tn-muted">时间截面位置 ⓘ</span>
-              </Tooltip>
+              <span className="tn-field-label" style={{ marginBottom: 0 }}>
+                Time Slice（时间截面）
+                <Popover
+                  placement="top"
+                  trigger={['hover', 'click']}
+                  content={
+                    <div style={{ maxWidth: 340, fontSize: 12, lineHeight: 1.7 }}>
+                      Time Slice 仅决定 GIS 地图当前展示哪个时间截面的流量，
+                      <strong>不改变整个 Analysis Time Range 内的统计计算范围</strong>。
+                      滑块被限制在当前分析范围内；修改日期范围后，若原截面落在新范围之外，
+                      会自动切换到新范围内的第一个有效时间点。
+                    </div>
+                  }
+                >
+                  <InfoCircleOutlined aria-label="Time Slice 帮助" style={{ color: '#5b7095', cursor: 'help' }} />
+                </Popover>
+              </span>
               <input
                 type="range"
                 min={sliceMin}
@@ -780,16 +782,6 @@ export default function Exploration() {
                 aria-label="时间截面位置"
               />
               <span className="tn-muted">{spatial?.time_at ?? `index ${sliceValue}`}</span>
-            </div>
-            <div className="tn-hint" style={{ marginTop: 6 }}>
-              「时间截面」= 从整条时间轴中选<strong>一个时刻</strong>，看这一刻所有区域的取值快照；它只影响地图与
-              Spatial Analysis。右侧统计、日内规律、工作日/周末与 ACF 仍使用左侧选择的分析时间范围。
-              {range ? (
-                <div style={{ marginTop: 4 }}>
-                  截面被限制在分析范围内：{range.start_at} ～ {range.end_at}
-                  （index {range.start_index}–{Math.max(range.start_index, range.end_index - 1)}）。
-                </div>
-              ) : null}
             </div>
             <Card size="small" title="多区域时序曲线（真实观测）" style={{ marginTop: 10 }}>
               <div className={stale ? 'tn-stale' : undefined}>
@@ -803,13 +795,114 @@ export default function Exploration() {
                 />
               </div>
               <div className="tn-muted" style={{ marginTop: 4 }}>
-                橙色虚线为分析对象（{primaryId ?? '—'}）在当前时间范围内的线性趋势拟合；仅描述该区间，不代表未来。
+                当前分析对象（{primaryId ?? '—'}）以更粗的曲线显示；其余已选区域保持可见。
+              </div>
+            </Card>
+
+            <Card size="small" title="多区域统计摘要（Multi-Region Statistical Summary）" style={{ marginTop: 10 }}>
+              <div className={stale ? 'tn-stale' : undefined}>
+                {result?.statistics?.length ? (
+                  <>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', minWidth: 520, fontSize: 11 }}>
+                        <thead>
+                          <tr style={{ color: '#5b7095', textAlign: 'left' }}>
+                            <th style={{ whiteSpace: 'nowrap' }}>区域</th>
+                            <th style={{ whiteSpace: 'nowrap' }}>均值</th>
+                            <th style={{ whiteSpace: 'nowrap' }}>最大</th>
+                            <th style={{ whiteSpace: 'nowrap' }}>最小</th>
+                            <th style={{ whiteSpace: 'nowrap' }}>标准差</th>
+                            <th style={{ whiteSpace: 'nowrap' }}>P95</th>
+                            <th style={{ whiteSpace: 'nowrap' }}>CV</th>
+                            <th style={{ whiteSpace: 'nowrap' }}>零值</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {result.statistics.map((row: any) => {
+                            const noData = !(row.valid_points > 0)
+                            const display = regions.find((r) => r.region_id === row.region_id)?.display_name
+                            const cell = (value: any, digits = 2) =>
+                              noData ? 'No Data' : value === null || value === undefined ? 'N/A' : Number(value).toFixed(digits)
+                            return (
+                              <tr
+                                key={row.region_id}
+                                style={{
+                                  borderTop: '1px dashed #e3ebf6',
+                                  background: row.region_id === primaryId ? '#eef5ff' : undefined,
+                                }}
+                              >
+                                <td style={{ whiteSpace: 'nowrap' }}>
+                                  <strong>{row.region_id}</strong>
+                                  {display && display !== row.region_id ? (
+                                    <div className="tn-muted">{display}</div>
+                                  ) : null}
+                                  <div className="tn-muted">有效点 {row.valid_points}</div>
+                                </td>
+                                <td>{cell(row.mean)}</td>
+                                <td>{cell(row.max)}</td>
+                                <td>{cell(row.min)}</td>
+                                <td>{cell(row.std)}</td>
+                                <td>{cell(row.p95)}</td>
+                                <td>{cell(row.cv, 3)}</td>
+                                <td>{noData ? 'No Data' : row.zero_points}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="tn-muted" style={{ marginTop: 6 }}>
+                      {source?.display_name} · 参与区域 {result.statistics.length} · 范围 {range?.start_at} →{' '}
+                      {range?.end_at} · 每点 {range?.interval_minutes ?? '—'} 分钟 · 有效样本{' '}
+                      {Math.min(...result.statistics.map((s: any) => s.valid_points ?? 0))}–
+                      {Math.max(...result.statistics.map((s: any) => s.valid_points ?? 0))} · 单位{' '}
+                      {source?.unit_label}
+                    </div>
+                    <InsightCard title="Statistical Summary Insights" insights={summaryInsight} loading={loading} />
+                  </>
+                ) : (
+                  <EmptyState text="选择区域后显示多区域真实统计量。" />
+                )}
               </div>
             </Card>
           </>
         }
         info={
-          <Tabs
+          config.region_ids.length === 0 ? (
+            <EmptyState text="请先在左侧选择至少一个有效区域；右侧将只针对所选 Analysis Target 显示单区域时间规律。" />
+          ) : (
+          <>
+            <div className="tn-analysis-target">
+              <label className="tn-field-label" htmlFor="analysis-target">
+                Analysis Target（分析对象）
+                <Tooltip
+                  title={
+                    <div style={{ maxWidth: 320, lineHeight: 1.6 }}>
+                      右侧三张时间分析图与自动结论只针对这一个区域。
+                      选项来自左侧已选择的区域；切换不会改变左侧选择，也不会改变中央的多区域统计。
+                    </div>
+                  }
+                >
+                  <InfoCircleOutlined aria-label="Analysis Target 帮助" style={{ color: '#5b7095' }} />
+                </Tooltip>
+              </label>
+              <Select
+                id="analysis-target"
+                size="small"
+                style={{ width: '100%' }}
+                value={primaryId ?? undefined}
+                options={regionOptions}
+                placeholder="请先在左侧选择区域"
+                disabled={!regionOptions.length}
+                onChange={(value) => updateConfig({ insight_region_id: value })}
+              />
+              <div className="tn-muted" style={{ marginTop: 4 }}>
+                {primaryId
+                  ? `${primaryId} · ${source?.display_name ?? '—'} · ${range?.start_at ?? '—'} → ${range?.end_at ?? '—'}`
+                  : '当前没有有效区域，请先在左侧选择。'}
+              </div>
+            </div>
+            <Tabs
             className="tn-tabs-tight"
             activeKey={tab}
             onChange={setTab}
@@ -819,62 +912,6 @@ export default function Exploration() {
                 label: 'Temporal Analysis',
                 children: (
                   <div className={stale ? 'tn-stale' : undefined}>
-                    <div className="tn-inline" style={{ marginBottom: 8 }}>
-                      <span className="tn-muted">分析对象</span>
-                      <Select
-                        size="small"
-                        style={{ width: 170 }}
-                        value={primaryId ?? undefined}
-                        options={regionOptions}
-                        onChange={(value) => updateConfig({ insight_region_id: value })}
-                      />
-                      <span className="tn-muted">（自动结论针对该区域；上方曲线可对比多区域）</span>
-                    </div>
-
-                    <Card size="small" title="统计摘要（当前分析时间范围）">
-                      <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
-                      {result?.statistics?.length ? (
-                        <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', minWidth: 430, fontSize: 11 }}>
-                          <thead>
-                            <tr style={{ color: '#5b7095', textAlign: 'left' }}>
-                              <th style={{ whiteSpace: 'nowrap' }}>区域</th>
-                              <th style={{ whiteSpace: 'nowrap' }}>均值</th>
-                              <th style={{ whiteSpace: 'nowrap' }}>最大</th>
-                              <th style={{ whiteSpace: 'nowrap' }}>最小</th>
-                              <th style={{ whiteSpace: 'nowrap' }}>标准差</th>
-                              <th style={{ whiteSpace: 'nowrap' }}>P95</th>
-                              <th style={{ whiteSpace: 'nowrap' }}>CV</th>
-                              <th style={{ whiteSpace: 'nowrap' }}>零值</th>
-                              <th style={{ whiteSpace: 'nowrap' }}>有效点</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {result.statistics.map((row: any) => (
-                              <tr key={row.region_id} style={{ borderTop: '1px dashed #e3ebf6' }}>
-                                <td>{row.region_id}</td>
-                                <td>{row.mean?.toFixed(2) ?? '—'}</td>
-                                <td>{row.max?.toFixed(2) ?? '—'}</td>
-                                <td>{row.min?.toFixed(2) ?? '—'}</td>
-                                <td>{row.std?.toFixed(2) ?? '—'}</td>
-                                <td>{row.p95?.toFixed(2) ?? '—'}</td>
-                                <td>{row.cv?.toFixed(3) ?? '—'}</td>
-                                <td>{row.zero_points}</td>
-                                <td>{row.valid_points}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        </div>
-                      ) : (
-                        <EmptyState text="选择区域后显示真实统计量。" />
-                      )}
-                      <div className="tn-hint" style={{ marginTop: 8 }}>
-                        全部指标只统计当前 Analysis Time Range 内的有效观测：均值、最大/最小、标准差、P95
-                        （95% 分位）、CV（标准差÷均值）、零值（真实 0）、有效点数。缺失点不参与，也不当作 0。
-                      </div>
-                    </Card>
-
                     <Tabs
                       className="tn-tabs-tight tn-subtabs"
                       style={{ marginTop: 10 }}
@@ -891,17 +928,28 @@ export default function Exploration() {
                                 title={
                                   <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                                     日内小时画像（Hourly Profile）
-                                    <Button size="small" type="link" onClick={() => setExpanded('hourly')}>
-                                      放大查看
-                                    </Button>
+                                    <span className="tn-inline" style={{ gap: 6 }}>
+                                      <Popover
+                                        placement="top"
+                                        trigger={['hover', 'click']}
+                                        content={
+                                          <div style={{ maxWidth: 320, lineHeight: 1.7, fontSize: 12 }}>
+                                            把当前时间范围内所有观测按「一天中的第几小时」分组求平均，
+                                            得到典型日内模式；这不是某一天的原始曲线。
+                                            某个小时没有有效观测时显示为断点（No Data），不会补 0。
+                                          </div>
+                                        }
+                                      >
+                                        <InfoCircleOutlined aria-label="Hourly Profile 方法说明" style={{ color: '#5b7095' }} />
+                                      </Popover>
+                                      <Button size="small" type="link" onClick={() => setExpanded('hourly')}>
+                                        放大查看
+                                      </Button>
+                                    </span>
                                   </span>
                                 }
                               >
                                 <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
-                                <div className="tn-hint" style={{ marginBottom: 6 }}>
-                                  把当前时间范围内所有观测按「一天中的第几小时」分组求平均，得到典型日内模式；
-                                  这不是某一天的原始曲线。某个小时没有有效观测时显示为断点（No Data）。
-                                </div>
                                 <HourlyChart
                                   regions={(result?.hourly ?? []).map((h: any) => ({ region_id: h.region_id, hours: h.hours }))}
                                 />
@@ -920,9 +968,24 @@ export default function Exploration() {
                                 title={
                                   <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                                     工作日 vs 周末
-                                    <Button size="small" type="link" onClick={() => setExpanded('weekday')}>
-                                      放大查看
-                                    </Button>
+                                    <span className="tn-inline" style={{ gap: 6 }}>
+                                      <Popover
+                                        placement="top"
+                                        trigger={['hover', 'click']}
+                                        content={
+                                          <div style={{ maxWidth: 320, lineHeight: 1.7, fontSize: 12 }}>
+                                            只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，
+                                            分别按 0–23 小时求平均。若范围内没有周末（或没有工作日），
+                                            对应曲线显示为 No Data，不会借用范围外的数据。
+                                          </div>
+                                        }
+                                      >
+                                        <InfoCircleOutlined aria-label="Weekday vs Weekend 方法说明" style={{ color: '#5b7095' }} />
+                                      </Popover>
+                                      <Button size="small" type="link" onClick={() => setExpanded('weekday')}>
+                                        放大查看
+                                      </Button>
+                                    </span>
                                   </span>
                                 }
                               >
@@ -930,10 +993,6 @@ export default function Exploration() {
                                   range={range}
                                   validPoints={primaryWeekday ? primaryWeekday.weekday.samples + primaryWeekday.weekend.samples : null}
                                 />
-                                <div className="tn-hint" style={{ marginBottom: 6 }}>
-                                  只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，分别按 0–23 小时求平均。
-                                  若范围内没有周末（或没有工作日），对应曲线显示为 No Data，不会借用范围外的数据。
-                                </div>
                                 {primaryWeekday ? (
                                   <>
                                     <WeekdayChart
@@ -963,16 +1022,27 @@ export default function Exploration() {
                                 title={
                                   <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
                                     ACF 与趋势
-                                    <Button size="small" type="link" onClick={() => setExpanded('acf')}>
-                                      放大查看
-                                    </Button>
+                                    <span className="tn-inline" style={{ gap: 6 }}>
+                                      <Popover
+                                        placement="top"
+                                        trigger={['hover', 'click']}
+                                        content={
+                                          <div style={{ maxWidth: 340, lineHeight: 1.7, fontSize: 12 }}>
+                                            ACF（自相关）衡量序列与自身滞后 k 步的相关程度；
+                                            Lag 是“向后错几步”，不是只用 k 个点。
+                                            灰色虚线为 ±95% 白噪声置信带，用于判断相关是否明显偏离 0。
+                                          </div>
+                                        }
+                                      >
+                                        <InfoCircleOutlined aria-label="ACF 方法说明" style={{ color: '#5b7095' }} />
+                                      </Popover>
+                                      <Button size="small" type="link" onClick={() => setExpanded('acf')}>
+                                        放大查看
+                                      </Button>
+                                    </span>
                                   </span>
                                 }
                               >
-                                <div className="tn-hint" style={{ marginBottom: 6 }}>
-                                  ACF（自相关）衡量序列与自身滞后 k 步的相关程度；Lag 是“向后错几步”，不是只用 k 个点。
-                                  灰色虚线为 ±95% 白噪声置信带，用于判断相关是否明显偏离 0。
-                                </div>
                                 <div className="tn-range-summary" style={{ marginBottom: 8 }}>
                                   <div>
                                     <strong>计算范围：</strong>
@@ -1147,7 +1217,9 @@ export default function Exploration() {
                 ),
               },
             ]}
-          />
+            />
+          </>
+          )
         }
       />
 

@@ -222,6 +222,13 @@ def temporal_analysis(payload: dict[str, Any]) -> dict[str, Any]:
         "hourly": hourly_out[primary_index]["insights"],
         "weekday": weekday_out[primary_index]["insights"],
         "acf_trend": acf_trend_insight,
+        "summary": insight_engine.summary_insights(
+            stats_out,
+            points=resolved.points,
+            span_label=insight_engine.duration_label(resolved.span_seconds / 60),
+            interval_minutes=interval,
+            unit_label=source["unit_label"],
+        ),
     }
 
     trend_line: list[dict[str, Any]] = []

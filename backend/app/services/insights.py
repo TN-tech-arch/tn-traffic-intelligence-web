@@ -328,6 +328,146 @@ def hourly_insights(
 # ---------------------------------------------------------------------------
 
 
+def summary_insights(
+    statistics: list[dict[str, Any]],
+    *,
+    points: int,
+    span_label: str,
+    interval_minutes: int,
+    unit_label: str = "",
+) -> dict[str, Any]:
+    """Multi-region statistical comparison (never a blend of several regions).
+
+    Used by the central Statistical Summary. With a single selected region it
+    deliberately produces a single-region description instead of a fake ranking.
+    """
+    available = [
+        s for s in statistics
+        if (s.get("valid_points") or 0) > 0 and s.get("mean") is not None
+    ]
+    details = [
+        {
+            "label": s["region_id"],
+            "value": f"均值 {fmt_num(s.get('mean'))} · 标准差 {fmt_num(s.get('std'))} · "
+                     f"P95 {fmt_num(s.get('p95'))} · CV {s.get('cv'):.3f}" if s.get("cv") is not None
+            else f"均值 {fmt_num(s.get('mean'))} · 有效点 {s.get('valid_points')}",
+        }
+        for s in statistics
+    ]
+    details.append(
+        {"label": "统计范围", "value": f"{span_label} · {points} 个时间点 · {interval_minutes} 分钟/点"}
+    )
+    if unit_label:
+        details.append({"label": "单位", "value": unit_label})
+    if not available:
+        return {
+            "available": False,
+            "items": [item("no_data", "多区域统计", "当前所选区域在该时间范围内都没有有效观测。", level="warning")],
+            "warnings": ["没有可用数据。"],
+            "details": details,
+            "reliability": {"level": "none", "notes": ["所有已选区域均为 No Data。"]},
+        }
+    missing = [s for s in statistics if s not in available]
+    warnings: list[str] = []
+    items: list[dict[str, Any]] = []
+    if len(available) == 1:
+        only = available[0]
+        items.append(
+            item(
+                "single",
+                "单区域概况",
+                f"当前只选择了 1 个有效区域（{only['region_id']}）：平均 {fmt_num(only['mean'])}，"
+                f"最大 {fmt_num(only.get('max'))}，最小 {fmt_num(only.get('min'))}，"
+                f"P95 {fmt_num(only.get('p95'))}"
+                + (f"，CV {only['cv']:.3f}" if only.get("cv") is not None else "")
+                + "。如需区域间比较，请再选择至少一个区域。",
+                metrics={"region_id": only["region_id"], "mean": only["mean"], "cv": only.get("cv")},
+            )
+        )
+    else:
+        ranked = sorted(available, key=lambda s: s["mean"], reverse=True)
+        high, low = ranked[0], ranked[-1]
+        gap = relative_change(high["mean"], low["mean"])
+        items.append(
+            item(
+                "level",
+                "平均流量对比",
+                f"平均流量最高的是 {high['region_id']}（{fmt_num(high['mean'])}），"
+                f"最低的是 {low['region_id']}（{fmt_num(low['mean'])}）"
+                + (f"，两者相差 {gap:.1f}%。" if gap is not None else "；其中一组均值为 0，未计算百分比。"),
+                metrics={"highest": high["region_id"], "lowest": low["region_id"], "gap_pct": gap},
+            )
+        )
+        with_cv = [s for s in available if s.get("cv") is not None]
+        if len(with_cv) >= 2:
+            most = max(with_cv, key=lambda s: s["cv"])
+            least = min(with_cv, key=lambda s: s["cv"])
+            items.append(
+                item(
+                    "volatility",
+                    "波动程度",
+                    f"相对波动最大的是 {most['region_id']}（CV={most['cv']:.3f}，"
+                    f"标准差 {fmt_num(most.get('std'))}），最小的是 {least['region_id']}（CV={least['cv']:.3f}）。"
+                    "CV 越大表示相对波动越剧烈。",
+                    metrics={"most_volatile": most["region_id"], "cv_max": most["cv"],
+                             "least_volatile": least["region_id"], "cv_min": least["cv"]},
+                )
+            )
+        with_p95 = [s for s in available if s.get("p95") is not None]
+        if len(with_p95) >= 2:
+            p95_high = max(with_p95, key=lambda s: s["p95"])
+            p95_low = min(with_p95, key=lambda s: s["p95"])
+            p95_gap = relative_change(p95_high["p95"], p95_low["p95"])
+            items.append(
+                item(
+                    "p95",
+                    "高位水平（P95）",
+                    f"P95 最高的是 {p95_high['region_id']}（{fmt_num(p95_high['p95'])}），"
+                    f"最低的是 {p95_low['region_id']}（{fmt_num(p95_low['p95'])}）"
+                    + (f"，相差 {p95_gap:.1f}%。" if p95_gap is not None else "。"),
+                    metrics={"highest": p95_high["region_id"], "lowest": p95_low["region_id"],
+                             "gap_pct": p95_gap},
+                )
+            )
+    thinnest = min(available, key=lambda s: s.get("valid_points") or 0)
+    coverage = (thinnest.get("valid_points") or 0) / points if points else 0
+    reliability_level = "high"
+    notes = [f"{len(available)} 个有效区域参与统计（共选择 {len(statistics)} 个）。"]
+    if missing:
+        notes.append("以下区域没有有效观测：" + "、".join(s["region_id"] for s in missing[:6]))
+        warnings.append(f"{len(missing)} 个已选区域在当前范围没有有效观测，未参与排名。")
+        reliability_level = "medium"
+    if coverage < 0.5:
+        warnings.append(
+            f"区域 {thinnest['region_id']} 的有效观测覆盖率仅 {coverage * 100:.0f}%，对比结论需谨慎。"
+        )
+        reliability_level = "low" if coverage < 0.2 else "medium"
+    counts = [s.get("valid_points") or 0 for s in available]
+    if counts and max(counts) >= 4 * max(1, min(counts)):
+        warnings.append("各区域的有效样本数量差异较大，区域间比较可能受覆盖不均衡影响。")
+        if reliability_level == "high":
+            reliability_level = "medium"
+    notes.append(
+        f"最新样本覆盖：最少 {thinnest['region_id']} {thinnest.get('valid_points')} 点"
+        f"（{coverage * 100:.0f}%），统计窗口 {points} 点。"
+    )
+    return {
+        "available": True,
+        "items": items[:4],
+        "warnings": warnings,
+        "details": details,
+        "reliability": {"level": reliability_level, "notes": notes},
+        "summary": {
+            "regions_compared": len(available),
+            "regions_selected": len(statistics),
+            "highest_mean": available[0]["region_id"] if len(available) == 1 else
+            max(available, key=lambda s: s["mean"])["region_id"],
+            "lowest_mean": available[0]["region_id"] if len(available) == 1 else
+            min(available, key=lambda s: s["mean"])["region_id"],
+        },
+    }
+
+
 def weekday_profiles(values: np.ndarray, hours: np.ndarray, weekdays: np.ndarray, dates: np.ndarray) -> dict[str, Any]:
     finite = np.isfinite(values)
     out: dict[str, Any] = {}

@@ -28,12 +28,12 @@ export function LineChart({
       { type: 'inside', throttle: 60 },
       { type: 'slider', height: 16, bottom: 24 },
     ],
-    series: series.map((item) => ({
+    series: series.map((item: any) => ({
       name: item.name,
       type: item.type ?? 'line',
       showSymbol: false,
       connectNulls: false,
-      lineStyle: { width: 1.4, color: item.color },
+      lineStyle: { width: item.width ?? 1.4, color: item.color, opacity: item.opacity ?? 1 },
       itemStyle: { color: item.color },
       data: item.data,
     })),
