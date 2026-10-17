@@ -303,3 +303,12 @@ node tests\check_m1_layout.mjs    # 27/27
 node tests\check_m1_fixes.mjs     # 12/12
 node tests\ui_check.mjs           # 35/35
 ```
+
+## 14. Module 1 说明文字位置与格式（2026-10-17 第五轮）
+
+| 反馈 | 处理 | 验证 |
+|---|---|---|
+| 多区域统计的范围说明位置 | 从表格与 Insights 之间移到整块最下方（表格 → Insights → 范围/样本脚注） | 截图 `24-m1-center-multi-region.png` |
+| ACF 计算信息框格式 | 去掉浅色边框/背景，改为与日内、工作日图下方一致的纯文本行（计算范围 · 有效样本 · 间隔 · Max Lag；实际生效 Max Lag 同行说明） | 截图 `25-m1-right-temporal-stacked.png` |
+
+回归：`pytest 116 passed`、`check_m1_layout 27/27`、`check_m1_fixes 12/12`、`ui_check 35/35`。

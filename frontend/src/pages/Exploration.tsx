@@ -834,14 +834,14 @@ export default function Exploration() {
                         </tbody>
                       </table>
                     </div>
-                    <div className="tn-muted" style={{ marginTop: 6 }}>
-                      {source?.display_name} · 参与区域 {result.statistics.length} · 范围 {range?.start_at} →{' '}
+                    <InsightCard title="Statistical Summary Insights" insights={summaryInsight} loading={loading} />
+                    <div className="tn-muted" style={{ marginTop: 8 }}>
+                      数据源 {source?.display_name} · 参与区域 {result.statistics.length} · 范围 {range?.start_at} →{' '}
                       {range?.end_at} · 每点 {range?.interval_minutes ?? '—'} 分钟 · 有效样本{' '}
                       {Math.min(...result.statistics.map((s: any) => s.valid_points ?? 0))}–
                       {Math.max(...result.statistics.map((s: any) => s.valid_points ?? 0))} · 单位{' '}
                       {source?.unit_label}
                     </div>
-                    <InsightCard title="Statistical Summary Insights" insights={summaryInsight} loading={loading} />
                   </>
                 ) : (
                   <EmptyState text="选择区域后显示多区域真实统计量。" />
@@ -999,18 +999,12 @@ export default function Exploration() {
                                   </span>
                                 }
                               >
-                                <div className="tn-range-summary" style={{ marginBottom: 8 }}>
-                                  <div>
-                                    <strong>计算范围：</strong>
-                                    {acfInfo?.start_at ?? range?.start_at ?? '—'} ～ {acfInfo?.end_at ?? range?.end_at ?? '—'}
-                                  </div>
-                                  <div>
-                                    <strong>有效样本：</strong>
-                                    {acfInfo?.valid_points ?? 0} 个 · <strong>采样间隔：</strong>
-                                    {acfInfo?.interval_minutes ?? range?.interval_minutes ?? '—'} 分钟 ·{' '}
-                                    <strong>Max Lag：</strong>
-                                    {acfInfo?.max_lag ?? '—'}
-                                  </div>
+                                <div className="tn-muted" style={{ marginBottom: 6 }}>
+                                  计算范围 {acfInfo?.start_at ?? range?.start_at ?? '—'} →{' '}
+                                  {acfInfo?.end_at ?? range?.end_at ?? '—'} · 有效样本{' '}
+                                  {acfInfo?.valid_points ?? 0} · 间隔{' '}
+                                  {acfInfo?.interval_minutes ?? range?.interval_minutes ?? '—'} 分钟 · Max Lag{' '}
+                                  {acfInfo?.max_lag ?? '—'}
                                 </div>
                                 <div className="tn-inline" style={{ marginBottom: 6 }}>
                                   <Switch
@@ -1031,12 +1025,9 @@ export default function Exploration() {
                                   </span>
                                 </div>
                                 {autoLag ? (
-                                  <div className="tn-range-summary" style={{ marginBottom: 6 }}>
-                                    <div>
-                                      <strong>实际生效 Max Lag：</strong>
-                                      {acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
-                                    </div>
-                                    <div className="tn-muted">自动值由当前时间点数与采样间隔决定；0 表示 Auto。</div>
+                                  <div className="tn-muted" style={{ marginBottom: 6 }}>
+                                    实际生效 Max Lag：{acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
+                                    （自动值由时间点数与采样间隔决定；0 表示 Auto）
                                   </div>
                                 ) : (
                                   <ParamField
@@ -1272,14 +1263,10 @@ export default function Exploration() {
           ) : null}
           {expanded === 'acf' ? (
             <>
-              <div className="tn-range-summary">
-                <div>
-                  <strong>计算范围：</strong>
-                  {acfInfo?.start_at ?? range?.start_at ?? '—'} ～ {acfInfo?.end_at ?? range?.end_at ?? '—'} ·{' '}
-                  <strong>有效样本：</strong>
-                  {acfInfo?.valid_points ?? 0} · <strong>Max Lag：</strong>
-                  {acfInfo?.max_lag ?? '—'} 步（约 {acfInfo?.max_lag_label ?? '—'}）
-                </div>
+              <div className="tn-muted">
+                计算范围 {acfInfo?.start_at ?? range?.start_at ?? '—'} →{' '}
+                {acfInfo?.end_at ?? range?.end_at ?? '—'} · 有效样本 {acfInfo?.valid_points ?? 0} · Max Lag{' '}
+                {acfInfo?.max_lag ?? '—'} 步（约 {acfInfo?.max_lag_label ?? '—'}）
               </div>
               <AcfChart
                 height={480}
