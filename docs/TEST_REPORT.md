@@ -340,3 +340,27 @@ node tests\ui_check.mjs              # 35/35（含 M2–M5 回归）
 实测：悬停显示 1 个 Tooltip，背景 `rgb(31, 36, 48)`、文字 `rgb(255, 255, 255)`；
 移到第二个图标时仍只有 1 个且内容切换；鼠标移开与焦点移走均关闭；点击不会留下常驻说明。
 截图：`data/screenshots/30-m1-hover-tooltip.png`。
+
+## 16. Spatial Analysis 整合（2026-10-17 第七轮）
+
+| 检查 | 实测 |
+|---|---|
+| 统计范围 | Milano 当前截面 **88** 个有效区域（与左侧只选 1 个区域无关） |
+| 排名 | Top 12 从高到低、Bottom 6 从低到高，并列按 region_id 稳定排序 |
+| 分布 | 9 个等宽区间，计数之和 = 88；末区间包含右端点 |
+| 联动 | 点击 DUOMO 条形 → 中央地图定位（面板显示“地图已定位 DUOMO”） |
+| 时间截面 | 拖动滑块后最高区域由 DUOMO 变为 BUENOS AIRES，Insights 同步更新 |
+| Insights | High/Low/Spatial Distribution 三组均含真实数值与可靠性说明 |
+| 放大 | 三张图均可放大，弹窗内保留对应 Insights |
+
+```powershell
+cd backend; ..\.venv\Scripts\python.exe -m pytest tests -q   # 128 passed
+cd ..\frontend
+node tests\check_m1_spatial.mjs    # 10/10
+node tests\check_m1_layout.mjs     # 27/27
+node tests\check_m1_fixes.mjs      # 12/12
+node tests\check_help_tooltips.mjs # 10/10
+node tests\ui_check.mjs            # 35/35
+```
+
+截图：`data/screenshots/32-m1-spatial-analysis.png`。

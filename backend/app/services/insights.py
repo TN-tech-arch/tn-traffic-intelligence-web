@@ -468,6 +468,335 @@ def summary_insights(
     }
 
 
+# ---------------------------------------------------------------------------
+# Spatial Analysis (top / bottom / distribution at one time slice)
+# ---------------------------------------------------------------------------
+
+
+def _spatial_block(items: list[dict[str, Any]], warnings: list[str], details: list[dict[str, Any]],
+                   level: str = "high") -> dict[str, Any]:
+    return {
+        "available": bool(items),
+        "items": items[:4],
+        "warnings": warnings,
+        "details": details,
+        "reliability": {"level": level, "notes": []},
+    }
+
+
+def spatial_insights(
+    *,
+    entries: list[dict[str, Any]],
+    top: list[dict[str, Any]],
+    bottom: list[dict[str, Any]],
+    bins: list[dict[str, Any]],
+    stats: dict[str, Any],
+    time_at: str | None,
+    no_data_count: int,
+    unit_label: str = "",
+) -> dict[str, Any]:
+    """Insights for the three spatial charts (all valid regions at one slice)."""
+    valid = [e for e in entries if e.get("value") is not None]
+    n = len(valid)
+    lower_unit = (unit_label or "").lower()
+    if "traffic volume" in lower_unit:
+        short_unit = "源单位"
+    elif "4g" in lower_unit:
+        short_unit = "4G 下行单位"
+    else:
+        short_unit = unit_label or ""
+    unit = f"（{short_unit}）" if short_unit else ""
+    empty = {
+        "high": {
+            "available": False,
+            "items": [item("no_data", "高流量区域", "当前时间截面没有有效区域观测，无法生成排名。", level="warning")],
+            "warnings": ["当前截面所有区域均为 No Data。"],
+            "details": [],
+            "reliability": {"level": "none", "notes": ["有效区域为 0。"]},
+        },
+        "low": {
+            "available": False,
+            "items": [item("no_data", "低流量区域", "当前时间截面没有有效区域观测，无法生成排名。", level="warning")],
+            "warnings": ["当前截面所有区域均为 No Data。"],
+            "details": [],
+            "reliability": {"level": "none", "notes": ["有效区域为 0。"]},
+        },
+        "distribution": {
+            "available": False,
+            "items": [item("no_data", "空间分布", "当前时间截面没有有效区域观测，无法分箱。", level="warning")],
+            "warnings": ["当前截面所有区域均为 No Data。"],
+            "details": [],
+            "reliability": {"level": "none", "notes": ["有效区域为 0。"]},
+        },
+    }
+    if n == 0 or not top:
+        return empty
+
+    mean = stats.get("mean")
+    std = stats.get("std")
+    median = stats.get("median")
+    zeros = sum(1 for e in valid if e["value"] == 0)
+    highest, lowest = top[0], bottom[0]
+    total = sum(e["value"] for e in valid)
+    high_items: list[dict[str, Any]] = []
+    low_items: list[dict[str, Any]] = []
+    dist_items: list[dict[str, Any]] = []
+    high_warnings: list[str] = []
+    low_warnings: list[str] = []
+    dist_warnings: list[str] = []
+    high_details: list[dict[str, Any]] = []
+    low_details: list[dict[str, Any]] = []
+    dist_details: list[dict[str, Any]] = []
+
+    high_items.append(
+        item(
+            "highest",
+            "最高流量区域",
+            f"当前截面（{time_at or '—'}）流量最高的是 {highest['region_id']}，为 "
+            f"{fmt_num(highest['value'])}{unit}。",
+            metrics={"region_id": highest["region_id"], "value": highest["value"]},
+        )
+    )
+    diff_mean = None if mean is None else highest["value"] - mean
+    pct_mean = relative_change(highest["value"], mean)
+    high_items.append(
+        item(
+            "vs_mean",
+            "与整体平均对比",
+            f"全部 {n} 个有效区域的平均流量为 {fmt_num(mean)}{unit}；最高区域"
+            + (f"比平均值高 {pct_mean:.1f}%（相差 {fmt_num(diff_mean)}）。" if pct_mean is not None
+               else f"与平均值相差 {fmt_num(diff_mean)}（平均值为 0，未计算百分比）。"),
+            metrics={"mean": mean, "difference": diff_mean, "relative_pct": pct_mean},
+        )
+    )
+    if len(top) >= 2:
+        last = top[-1]
+        spread = highest["value"] - last["value"]
+        spread_pct = relative_change(highest["value"], last["value"])
+        high_items.append(
+            item(
+                "top_spread",
+                f"Top {len(top)} 内部差异",
+                f"第 1 名 {highest['region_id']} 与第 {len(top)} 名 {last['region_id']} 相差 "
+                f"{fmt_num(spread)}" + (f"（{spread_pct:.1f}%）。" if spread_pct is not None else "。"),
+                metrics={"first": highest["region_id"], "last": last["region_id"],
+                         "difference": spread, "relative_pct": spread_pct},
+            )
+        )
+    else:
+        high_items.append(
+            item("top_spread", "Top 内部差异", "当前只有 1 个有效区域，无法比较排名内部差异。",
+                 level="warning")
+        )
+    if total > 0:
+        top3_share = sum(e["value"] for e in top[:3]) / total * 100
+        equal_share = min(3, n) / n * 100
+        ratio = top3_share / equal_share if equal_share > 0 else None
+        if ratio is not None and ratio >= 2:
+            judgment = "高值相对集中在少数区域"
+        elif ratio is not None and ratio < 1.2:
+            judgment = "高值并不集中，整体较为均衡"
+        else:
+            judgment = "高值集中程度中等"
+        high_items.append(
+            item(
+                "concentration",
+                "高值集中度",
+                f"当前排名前 3 的区域合计占全部有效区域流量总和的 {top3_share:.1f}%"
+                + (f"（若各区域完全相同应为 {equal_share:.1f}%，当前约为其 {ratio:.1f} 倍）" if ratio else "")
+                + f"，{judgment}。"
+                "该指标只描述数值分布，不代表拥堵或功能区属性。",
+                metrics={"top3_share_pct": top3_share, "equal_share_pct": equal_share, "ratio": ratio},
+            )
+        )
+    if n < 10:
+        high_warnings.append(f"当前只有 {n} 个有效区域，排名代表性有限。")
+    high_details.append({"label": "排名范围", "value": f"当前数据源全部有效区域（{n} 个）"})
+    for rank, entry in enumerate(top, start=1):
+        high_details.append(
+            {"label": f"#{rank} {entry['region_id']}", "value": f"{fmt_num(entry['value'])}{unit}"}
+        )
+
+    low_items.append(
+        item(
+            "lowest",
+            "最低流量区域",
+            f"当前截面流量最低的是 {lowest['region_id']}，为 {fmt_num(lowest['value'])}{unit}。",
+            metrics={"region_id": lowest["region_id"], "value": lowest["value"]},
+        )
+    )
+    if len(bottom) >= 2:
+        last = bottom[-1]
+        spread = last["value"] - lowest["value"]
+        low_items.append(
+            item(
+                "bottom_spread",
+                f"Bottom {len(bottom)} 内部差异",
+                f"最低的 {lowest['region_id']} 与第 {len(bottom)} 低的 {last['region_id']} 相差 "
+                f"{fmt_num(spread)}{unit}。",
+                metrics={"first": lowest["region_id"], "last": last["region_id"], "difference": spread},
+            )
+        )
+    diff_low = None if mean is None else lowest["value"] - mean
+    pct_low = relative_change(lowest["value"], mean)
+    low_items.append(
+        item(
+            "vs_mean",
+            "与整体平均对比",
+            f"最低区域"
+            + (f"比全部有效区域的平均值低 {abs(pct_low):.1f}%（相差 {fmt_num(abs(diff_low))}）。"
+               if pct_low is not None else "与平均值一致（或平均值为 0，未计算百分比）。"),
+            metrics={"mean": mean, "difference": diff_low, "relative_pct": pct_low},
+        )
+    )
+    if zeros:
+        low_items.append(
+            item(
+                "zeros",
+                "真实零值",
+                f"当前截面有 {zeros} 个区域的流量为真实 0（有效观测，不是缺失），已正常参与排名与分布。",
+                level="warning",
+                metrics={"zero_regions": zeros},
+            )
+        )
+    else:
+        low_items.append(item("zeros", "真实零值", "当前截面没有真实 0 值区域。", metrics={"zero_regions": 0}))
+    if lowest.get("range_mean") is not None:
+        rel = relative_change(lowest["value"], lowest["range_mean"])
+        low_items.append(
+            item(
+                "range_mean",
+                "当前值 vs 范围均值",
+                f"{lowest['region_id']} 当前值 {fmt_num(lowest['value'])}，所选日期范围内的平均值为 "
+                f"{fmt_num(lowest['range_mean'])}"
+                + (f"，当前值{'高' if (rel or 0) >= 0 else '低'} {abs(rel):.1f}%。" if rel is not None else "。")
+                + "（两者口径不同：前者是单一时刻，后者是整段平均。）",
+                metrics={"current": lowest["value"], "range_mean": lowest["range_mean"], "relative_pct": rel},
+            )
+        )
+    if no_data_count:
+        low_warnings.append(f"有 {no_data_count} 个区域在该时刻没有有效观测，未参与排名。")
+    if n < 6:
+        low_warnings.append(f"有效区域少于 6 个，Bottom 排名只展示实际存在的 {n} 个区域。")
+    low_details.append({"label": "排名范围", "value": f"当前数据源全部有效区域（{n} 个）"})
+    for rank, entry in enumerate(bottom, start=1):
+        detail = f"{fmt_num(entry['value'])}{unit}"
+        if entry.get("range_mean") is not None:
+            detail += f" · 范围均值 {fmt_num(entry['range_mean'])}"
+        low_details.append({"label": f"#{rank} {entry['region_id']}", "value": detail})
+
+    if bins:
+        main = max(bins, key=lambda b: b["count"])
+        main_pct = main["count"] / n * 100
+        dist_items.append(
+            item(
+                "main_bin",
+                "主要数值区间",
+                f"区域最集中的区间是 {fmt_num(main['start'])}–{fmt_num(main['end'])}{unit}，"
+                f"共 {main['count']} 个区域（{main_pct:.1f}%）。",
+                metrics={"start": main["start"], "end": main["end"], "count": main["count"],
+                         "pct": main_pct},
+            )
+        )
+        ordered = sorted(bins, key=lambda b: b["count"], reverse=True)
+        covered = 0
+        used = 0
+        for b in ordered:
+            covered += b["count"]
+            used += 1
+            if covered >= n * 0.8:
+                break
+        dist_items.append(
+            item(
+                "concentration",
+                "分布集中度",
+                f"约 80% 的区域集中在 {used} 个数值区间内（共 {len(bins)} 个区间），"
+                + ("分布较集中。" if used <= max(1, len(bins) * 0.4) else "分布相对分散。"),
+                metrics={"bins_covering_80pct": used, "bin_count": len(bins)},
+            )
+        )
+    if mean is not None and median is not None:
+        diff = mean - median
+        spread = std if std and std > 1e-12 else None
+        if spread is None:
+            desc = "所有有效区域数值相同，均值与中位数一致，无偏斜信息。"
+        elif abs(diff) <= 0.2 * spread:
+            desc = "均值与中位数接近，分布大致对称（描述性判断）。"
+        elif diff > 0:
+            desc = "均值高于中位数，数值分布可能右偏（描述性判断，未做统计检验）。"
+        else:
+            desc = "均值低于中位数，数值分布可能左偏（描述性判断，未做统计检验）。"
+        dist_items.append(
+            item("mean_median", "均值与中位数",
+                 f"均值 {fmt_num(mean)}，中位数 {fmt_num(median)}{unit}；{desc}",
+                 metrics={"mean": mean, "median": median, "difference": diff})
+        )
+    if std is not None and mean is not None and std > 1e-12:
+        hi_z = (stats.get("max") - mean) / std if stats.get("max") is not None else None
+        lo_z = (stats.get("min") - mean) / std if stats.get("min") is not None else None
+        tails = []
+        if hi_z is not None and hi_z >= 2:
+            tails.append(f"最高值约为均值 +{hi_z:.1f}σ")
+        if lo_z is not None and lo_z <= -2:
+            tails.append(f"最低值约为均值 {lo_z:.1f}σ")
+        dist_items.append(
+            item(
+                "tails",
+                "高低值与整体差异",
+                (("；".join(tails) + "，存在远离主体的数值。") if tails else
+                 "最高/最低值都在均值 ±2σ 之内，没有明显远离主体的极端值。")
+                + f" 当前标准差 {fmt_num(std)}，CV "
+                + (f"{stats.get('cv'):.3f}" if stats.get("cv") is not None else "N/A")
+                + "。",
+                metrics={"max_z": hi_z, "min_z": lo_z, "std": std, "cv": stats.get("cv")},
+            )
+        )
+    if stats.get("single_value"):
+        dist_warnings.append("当前所有有效区域数值相同，直方图只有一个区间，无法判断分布形态。")
+    if n < 10:
+        dist_warnings.append(f"有效区域只有 {n} 个，分箱与分布判断的稳定性有限。")
+    if no_data_count:
+        dist_warnings.append(f"{no_data_count} 个 No Data 区域未参与分箱。")
+    dist_details.append(
+        {"label": "统计口径", "value": f"当前时间截面 {time_at or '—'}，全部 {n} 个有效区域"}
+    )
+    for b in bins:
+        dist_details.append(
+            {"label": f"{fmt_num(b['start'])}–{fmt_num(b['end'])}",
+             "value": f"{b['count']} 个区域（{b['count'] / n * 100:.1f}%）"}
+        )
+    dist_details.append(
+        {"label": "分箱规则", "value": "等宽分箱，左闭右开，最后一个区间包含右端点；各区间计数之和等于有效区域总数"}
+    )
+
+    level_high = "medium" if n < 10 else "high"
+    return {
+        "high": {
+            **_spatial_block(high_items, high_warnings, high_details, level_high),
+            "reliability": {
+                "level": level_high,
+                "notes": [f"参与排名的有效区域：{n} 个。", f"No Data 区域：{no_data_count} 个。"],
+            },
+        },
+        "low": {
+            **_spatial_block(low_items, low_warnings, low_details,
+                             "medium" if n < 10 else "high"),
+            "reliability": {
+                "level": "medium" if n < 10 else "high",
+                "notes": [f"参与排名的有效区域：{n} 个。", f"真实零值区域：{zeros} 个。"],
+            },
+        },
+        "distribution": {
+            **_spatial_block(dist_items, dist_warnings, dist_details,
+                             "low" if stats.get("single_value") else ("medium" if n < 10 else "high")),
+            "reliability": {
+                "level": "low" if stats.get("single_value") else ("medium" if n < 10 else "high"),
+                "notes": [f"有效区域 {n} 个，分箱 {len(bins)} 个。"],
+            },
+        },
+    }
+
+
 def weekday_profiles(values: np.ndarray, hours: np.ndarray, weekdays: np.ndarray, dates: np.ndarray) -> dict[str, Any]:
     finite = np.isfinite(values)
     out: dict[str, Any] = {}

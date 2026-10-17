@@ -22,6 +22,8 @@ interface Props {
   /** show the region name permanently in the middle of each polygon */
   showLabels?: boolean
   labelFor?: (entry: MapEntry | undefined, regionId: string) => string
+  /** region highlighted from an external chart (does not change the selection) */
+  focus?: string | null
 }
 
 /**
@@ -40,6 +42,7 @@ export default function MapView({
   legend,
   showLabels = false,
   labelFor,
+  focus = null,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -135,13 +138,28 @@ export default function MapView({
     Object.entries(pathsRef.current).forEach(([regionId, path]) => {
       const entry = entryMap[regionId]
       const isSelected = selected.includes(regionId)
+      const isFocused = focus === regionId
       path.setStyle({
         fillColor: colorRef.current(entry),
-        color: isSelected ? '#142B52' : '#ffffff',
-        weight: isSelected ? 2.4 : 0.8,
+        color: isFocused ? '#D4380D' : isSelected ? '#142B52' : '#ffffff',
+        weight: isFocused ? 3 : isSelected ? 2.4 : 0.8,
       })
     })
-  }, [entryMap, selected, ready])
+  }, [entryMap, selected, focus, ready])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !focus) return
+    const path = pathsRef.current[focus]
+    if (!path) return
+    try {
+      const bounds = (path as any).getBounds?.()
+      if (bounds?.isValid?.()) map.flyToBounds(bounds, { maxZoom: 13, duration: 0.45 })
+      ;(path as any).bringToFront?.()
+    } catch {
+      /* ignore invalid geometry */
+    }
+  }, [focus, ready, geojson])
 
   return (
     <div>

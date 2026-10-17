@@ -7,7 +7,7 @@ import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import MapView, { BLUE_PALETTE, colorScale, type MapEntry } from '../components/MapView'
-import { AcfChart, HourlyChart, LineChart, WeekdayChart } from '../components/Charts'
+import { AcfChart, HistogramChart, HorizontalRankChart, HourlyChart, LineChart, WeekdayChart } from '../components/Charts'
 import InsightCard, { type InsightPayload } from '../components/InsightCard'
 import HelpTip from '../components/HelpTip'
 import { useGroupValidation } from '../validation/useValidation'
@@ -158,6 +158,8 @@ export default function Exploration() {
   const [computedKey, setComputedKey] = useState<string | null>(null)
   const [tab, setTab] = useState('temporal')
   const [expanded, setExpanded] = useState<null | 'hourly' | 'weekday' | 'acf'>(null)
+  const [expandedSpatial, setExpandedSpatial] = useState<null | 'top' | 'bottom' | 'dist'>(null)
+  const [focusRegion, setFocusRegion] = useState<string | null>(null)
   const [showLabels, setShowLabels] = useState(true)
   const requestSeq = useRef(0)
 
@@ -703,6 +705,7 @@ export default function Exploration() {
               onToggle={toggleRegion}
               showLabels={showLabels}
               labelFor={(entry, regionId) => entry?.label ?? regionId}
+              focus={focusRegion}
               colorFor={(entry) => colorScale(entry?.value ?? null, colorBounds.min, colorBounds.max, BLUE_PALETTE)}
               formatTooltip={(entry, regionId) =>
                 `${entry?.label ?? regionId}: ${entry?.value === null || entry?.value === undefined ? 'No Data' : entry.value.toFixed(2)}${
@@ -1077,65 +1080,104 @@ export default function Exploration() {
                 label: '空间分析（Spatial Analysis）',
                 children: (
                   <div className={stale ? 'tn-stale' : undefined}>
+                    <div className="tn-muted" style={{ marginBottom: 8 }}>
+                      当前截面 {spatial?.time_at ?? '—'} · 有效区域 {spatial?.value_region_count ?? 0} · No Data{' '}
+                      {spatial?.no_data_region_count ?? 0}
+                      {spatial?.gis_no_data_count ? `（另有 ${spatial.gis_no_data_count} 个 GIS 区域无时序）` : ''}
+                      {focusRegion ? ` · 地图已定位 ${focusRegion}` : ''}
+                    </div>
                     <div className="tn-stack">
-                      <div className="tn-hint">
-                        这一页把「当前时间截面」横向切开比较区域：图 1 为最高 12 个区域，图 2 为所有区域取值分布，
-                        图 3 为最低 6 个区域。拖动左侧时间截面滑块即可切换时刻。
-                        {range ? ` 范围内逐区域均值（range_mean）也在数据中提供，使用 ${range.start_at} ～ ${range.end_at}。` : ''}
-                      </div>
-                      <Card size="small" title={`当前时间截面空间强度（${spatial?.time_at ?? '—'}）`}>
-                        <div className="tn-muted">
-                          有效区域 {spatial?.summary?.regions_with_value ?? 0} · 缺失 {spatial?.summary?.regions_missing ?? 0} ·
-                          均值 {spatial?.summary?.mean?.toFixed(2) ?? '—'} · 标准差 {spatial?.summary?.std?.toFixed(2) ?? '—'}
-                        </div>
-                        <LineChart
-                          height={260}
-                          x={(spatial?.ranking ?? []).slice(0, 12).map((item: any) => item.region_id)}
-                          series={[
-                            {
-                              name: '当前截面值',
-                              data: (spatial?.ranking ?? []).slice(0, 12).map((item: any) => item.value),
-                              type: 'bar',
-                              color: '#2467E8',
-                            },
-                          ]}
-                        />
-                        <div className="tn-hint" style={{ marginTop: 6 }}>
-                          图 1：该时刻取值最高的 12 个区域（条形越长表示该时刻流量越大）。
-                        </div>
-                      </Card>
-                      <Card size="small" title="区域差异分布">
-                        <LineChart
-                          height={200}
-                          x={(spatial?.summary?.distribution ?? []).map(
-                            (bin: any) => `${bin.bin_start.toFixed(0)}~${bin.bin_end.toFixed(0)}`,
-                          )}
-                          series={[
-                            {
-                              name: '区域数',
-                              data: (spatial?.summary?.distribution ?? []).map((bin: any) => bin.count),
-                              type: 'bar',
-                              color: '#12A67A',
-                            },
-                          ]}
-                        />
-                        <div className="tn-hint" style={{ marginTop: 6 }}>
-                          图 2：把所有区域在该时刻的取值按数值区间分箱，柱高＝落在该区间的区域个数。
-                        </div>
-                      </Card>
-                      <Card size="small" title="最低区域（同截面）">
-                        {(spatial?.bottom ?? []).slice(0, 6).map((item: any) => (
-                          <div key={item.region_id} className="tn-muted">
-                            {item.region_id}: {item.value?.toFixed(2)}
-                            {item.range_mean !== null && item.range_mean !== undefined
-                              ? `（范围内均值 ${item.range_mean.toFixed(2)}）`
-                              : ''}
+                      <section aria-label="Top 12 Regions">
+                        <Card
+                          size="small"
+                          title={
+                            <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
+                              Top 12 Regions（最高流量区域）
+                              <Button size="small" type="link" onClick={() => setExpandedSpatial('top')}>
+                                放大查看
+                              </Button>
+                            </span>
+                          }
+                        >
+                          <div className="tn-muted" style={{ marginBottom: 4 }}>
+                            当前数据源全部有效区域 · 按当前截面值从高到低 · 点击条形可在中央地图定位
                           </div>
-                        ))}
-                        <div className="tn-hint" style={{ marginTop: 6 }}>
-                          图 3：同一时刻最低的 6 个区域，与图 1 构成两端对比。
-                        </div>
-                      </Card>
+                          <HorizontalRankChart
+                            items={spatial?.top ?? []}
+                            height={340}
+                            timeAt={spatial?.time_at}
+                            unit={spatial?.source?.unit_label}
+                            onSelect={setFocusRegion}
+                          />
+                        </Card>
+                        <InsightCard
+                          title="High-Intensity Region Insights"
+                          insights={spatial?.insights?.high}
+                          loading={loading || stale}
+                        />
+                      </section>
+
+                      <section aria-label="Bottom 6 Regions">
+                        <Card
+                          size="small"
+                          title={
+                            <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
+                              Bottom 6 Regions（最低流量区域）
+                              <Button size="small" type="link" onClick={() => setExpandedSpatial('bottom')}>
+                                放大查看
+                              </Button>
+                            </span>
+                          }
+                        >
+                          <div className="tn-muted" style={{ marginBottom: 4 }}>
+                            按当前截面值从低到高 · Tooltip 同时显示所选范围内均值（两个口径不同）
+                          </div>
+                          <HorizontalRankChart
+                            items={spatial?.bottom ?? []}
+                            height={260}
+                            color="#D98F00"
+                            timeAt={spatial?.time_at}
+                            unit={spatial?.source?.unit_label}
+                            showRangeMean
+                            onSelect={setFocusRegion}
+                          />
+                        </Card>
+                        <InsightCard
+                          title="Low-Intensity Region Insights"
+                          insights={spatial?.insights?.low}
+                          loading={loading || stale}
+                        />
+                      </section>
+
+                      <section aria-label="Regional Value Distribution">
+                        <Card
+                          size="small"
+                          title={
+                            <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
+                              Regional Value Distribution（区域数值分布）
+                              <Button size="small" type="link" onClick={() => setExpandedSpatial('dist')}>
+                                放大查看
+                              </Button>
+                            </span>
+                          }
+                        >
+                          <div className="tn-muted" style={{ marginBottom: 4 }}>
+                            横轴：流量数值区间 · 纵轴：区域数量 · 均值{' '}
+                            {spatial?.stats?.mean?.toFixed(2) ?? '—'} · 中位数{' '}
+                            {spatial?.stats?.median?.toFixed(2) ?? '—'}
+                          </div>
+                          <HistogramChart
+                            bins={spatial?.distribution?.bins ?? []}
+                            height={260}
+                            unit={spatial?.source?.unit_label}
+                          />
+                        </Card>
+                        <InsightCard
+                          title="Spatial Distribution Insights"
+                          insights={spatial?.insights?.distribution}
+                          loading={loading || stale}
+                        />
+                      </section>
                     </div>
                   </div>
                 ),
@@ -1226,6 +1268,64 @@ export default function Exploration() {
                 intervalMinutes={result?.acf?.interval_minutes ?? 10}
               />
               <InsightCard title="ACF & Trend Insights" insights={acfInsight} loading={loading} />
+            </>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        open={expandedSpatial !== null}
+        title={
+          expandedSpatial === 'top'
+            ? 'Top 12 Regions · 放大查看'
+            : expandedSpatial === 'bottom'
+              ? 'Bottom 6 Regions · 放大查看'
+              : 'Regional Value Distribution · 放大查看'
+        }
+        footer={null}
+        width={1080}
+        style={{ maxWidth: '94vw', top: 40 }}
+        onCancel={() => setExpandedSpatial(null)}
+        destroyOnClose
+      >
+        <div className="tn-stack">
+          <div className="tn-muted">
+            当前截面 {spatial?.time_at ?? '—'} · 有效区域 {spatial?.value_region_count ?? 0} · No Data{' '}
+            {spatial?.no_data_region_count ?? 0}
+            {spatial?.gis_no_data_count ? `（另有 ${spatial.gis_no_data_count} 个 GIS 区域无时序）` : ''}
+          </div>
+          {expandedSpatial === 'top' ? (
+            <>
+              <HorizontalRankChart
+                items={spatial?.top ?? []}
+                height={560}
+                timeAt={spatial?.time_at}
+                unit={spatial?.source?.unit_label}
+              />
+              <InsightCard title="High-Intensity Region Insights" insights={spatial?.insights?.high} />
+            </>
+          ) : null}
+          {expandedSpatial === 'bottom' ? (
+            <>
+              <HorizontalRankChart
+                items={spatial?.bottom ?? []}
+                height={460}
+                color="#D98F00"
+                timeAt={spatial?.time_at}
+                unit={spatial?.source?.unit_label}
+                showRangeMean
+              />
+              <InsightCard title="Low-Intensity Region Insights" insights={spatial?.insights?.low} />
+            </>
+          ) : null}
+          {expandedSpatial === 'dist' ? (
+            <>
+              <HistogramChart
+                bins={spatial?.distribution?.bins ?? []}
+                height={480}
+                unit={spatial?.source?.unit_label}
+              />
+              <InsightCard title="Spatial Distribution Insights" insights={spatial?.insights?.distribution} />
             </>
           ) : null}
         </div>

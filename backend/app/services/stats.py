@@ -14,7 +14,7 @@ import pandas as pd
 
 from app.core.errors import RequestRejected
 from app.services import insights as insight_engine
-from app.services.ingest import source_row
+from app.services.ingest import regions_for, source_row
 from app.services.series import resample
 from app.services.time_range import has_blocking, resolve_range
 
@@ -326,55 +326,137 @@ def spatial_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:  # range statistics are supplementary for the map view
         range_warnings.append(f"时间范围统计不可用：{exc}")
 
+    region_rows = regions_for(source["source_id"])
+    names = {r["region_id"]: r["display_name"] for r in region_rows}
+    gis_only = sum(1 for r in region_rows if not r["has_timeseries"])
     entries = []
     for position, region_id in enumerate(data.region_ids):
         value = float(slice_values[position]) if np.isfinite(slice_values[position]) else None
         entries.append(
             {
                 "region_id": region_id,
+                "display_name": names.get(region_id) or region_id,
                 "value": value,
                 "range_mean": range_means.get(region_id),
                 "range_valid_points": range_counts.get(region_id),
             }
         )
     finite = [e for e in entries if e["value"] is not None]
-    ranked = sorted(finite, key=lambda e: e["value"], reverse=True)
+    # Stable tie-break on region_id so equal values always rank the same way.
+    ranked = sorted(finite, key=lambda e: (-e["value"], e["region_id"]))
+    bottom_sorted = sorted(finite, key=lambda e: (e["value"], e["region_id"]))
     values_array = np.array([e["value"] for e in finite], dtype="float64")
+    histogram = _spatial_histogram(values_array)
+    spatial_stats = {
+        "count": int(values_array.size),
+        "mean": float(values_array.mean()) if values_array.size else None,
+        "median": float(np.median(values_array)) if values_array.size else None,
+        "std": float(values_array.std()) if values_array.size else None,
+        "min": float(values_array.min()) if values_array.size else None,
+        "max": float(values_array.max()) if values_array.size else None,
+        "p05": float(np.percentile(values_array, 5)) if values_array.size else None,
+        "p95": float(np.percentile(values_array, 95)) if values_array.size else None,
+        "cv": (
+            float(values_array.std() / values_array.mean())
+            if values_array.size and abs(float(values_array.mean())) > 1e-12 else None
+        ),
+        "single_value": bool(histogram["single_value"]),
+    }
+    top12 = ranked[:12]
+    bottom6 = bottom_sorted[:6]
+    no_data_count = len(entries) - len(finite)
+    time_at = str(pd.Timestamp(int(data.timestamps[index_value]), unit="s")) if total else None
+    spatial_insight = insight_engine.spatial_insights(
+        entries=entries,
+        top=top12,
+        bottom=bottom6,
+        bins=histogram["bins"],
+        stats=spatial_stats,
+        time_at=time_at,
+        no_data_count=no_data_count,
+        unit_label=source["unit_label"],
+    )
     return {
         "source": {"key": source["key"], "display_name": source["display_name"],
                    "unit_label": source["unit_label"]},
         "frequency": data.frequency,
         "time_index": index_value,
-        "time_at": str(pd.Timestamp(int(data.timestamps[index_value]), unit="s")) if total else None,
+        "time_at": time_at,
         "range": range_info,
         "range_warnings": range_warnings,
         "regions": entries,
-        "ranking": ranked[:20],
-        "bottom": list(reversed(ranked[-20:])),
+        "top": top12,
+        "bottom": bottom6,
+        "ranking": top12,
+        "distribution": histogram,
+        "value_region_count": int(values_array.size),
+        "no_data_region_count": int(no_data_count),
+        "gis_no_data_count": int(gis_only),
+        "stats": spatial_stats,
+        "insights": spatial_insight,
         "summary": {
             "regions_with_value": len(finite),
             "regions_missing": len(entries) - len(finite),
-            "mean": float(values_array.mean()) if values_array.size else None,
-            "std": float(values_array.std()) if values_array.size else None,
-            "min": float(values_array.min()) if values_array.size else None,
-            "max": float(values_array.max()) if values_array.size else None,
-            "distribution": _histogram(values_array),
+            "mean": spatial_stats["mean"],
+            "std": spatial_stats["std"],
+            "min": spatial_stats["min"],
+            "max": spatial_stats["max"],
+            "distribution": histogram["bins"],
         },
         "notes": [
-            "地图与排名是“当前时间截面”的真实观测；range_mean 是在所选分析时间范围内的逐区域均值。",
-            "No Data 区域保持为空值，不参与均值与排名。",
+            "地图与三张空间分析图都使用当前时间截面的真实观测（当前数据源全部有效区域）。",
+            "range_mean 是所选 Analysis Time Range 内的逐区域平均值，与当前截面值是两个不同口径。",
+            "No Data 区域保持为空值，不参与排名、均值与分箱。",
         ],
     }
 
 
-def _histogram(values: np.ndarray, bins: int = 12) -> list[dict[str, float]]:
+def _spatial_histogram(values: np.ndarray) -> dict[str, Any]:
+    """Equal-width bins, left-closed right-open (last bin includes the right edge)."""
     if values.size == 0:
-        return []
-    counts, edges = np.histogram(values, bins=min(bins, max(2, values.size)))
-    return [
-        {"bin_start": float(edges[i]), "bin_end": float(edges[i + 1]), "count": int(counts[i])}
-        for i in range(len(counts))
-    ]
+        return {"bins": [], "single_value": False, "bin_count": 0, "total": 0}
+    vmin = float(values.min())
+    vmax = float(values.max())
+    if abs(vmax - vmin) <= 1e-12 * max(1.0, abs(vmax)):
+        return {
+            "bins": [
+                {
+                    "index": 0,
+                    "start": vmin,
+                    "end": vmax,
+                    "count": int(values.size),
+                    "pct": 100.0,
+                    "left_closed": True,
+                    "right_closed": True,
+                }
+            ],
+            "single_value": True,
+            "bin_count": 1,
+            "total": int(values.size),
+            "boundary_rule": "all values equal -> single closed interval",
+        }
+    bin_count = int(min(10, max(4, round(np.sqrt(values.size)))))
+    counts, edges = np.histogram(values, bins=bin_count)
+    bins = []
+    for i, count in enumerate(counts):
+        bins.append(
+            {
+                "index": i,
+                "start": float(edges[i]),
+                "end": float(edges[i + 1]),
+                "count": int(count),
+                "pct": float(count / values.size * 100.0),
+                "left_closed": True,
+                "right_closed": i == len(counts) - 1,
+            }
+        )
+    return {
+        "bins": bins,
+        "single_value": False,
+        "bin_count": len(bins),
+        "total": int(values.size),
+        "boundary_rule": "equal-width; [start, end) except the last bin which includes end",
+    }
 
 
 def compare_sources(payload: dict[str, Any]) -> dict[str, Any]:

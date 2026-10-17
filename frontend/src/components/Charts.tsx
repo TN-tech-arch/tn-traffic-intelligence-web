@@ -97,6 +97,162 @@ export function ScatterChart({
   return <ReactECharts option={option} style={{ height }} notMerge />
 }
 
+export interface RankItem {
+  region_id: string
+  display_name?: string
+  value: number
+  range_mean?: number | null
+}
+
+function compactNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  const abs = Math.abs(value)
+  if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`
+  if (abs >= 1e4) return `${(value / 1e3).toFixed(1)}k`
+  return value.toFixed(2)
+}
+
+/** Horizontal ranking bars: item[0] is drawn at the top. */
+export function HorizontalRankChart({
+  items,
+  color = '#2467E8',
+  height = 340,
+  timeAt,
+  unit,
+  showRangeMean = false,
+  onSelect,
+}: {
+  items: RankItem[]
+  color?: string
+  height?: number
+  timeAt?: string | null
+  unit?: string
+  showRangeMean?: boolean
+  onSelect?: (regionId: string) => void
+}) {
+  if (!items.length) return <Empty description="当前时间截面没有有效区域" />
+  const option = {
+    animationDuration: 300,
+    grid: { left: 6, right: 62, top: 6, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any[]) => {
+        const index = params?.[0]?.dataIndex ?? 0
+        const entry = items[index]
+        if (!entry) return ''
+        const name = entry.display_name && entry.display_name !== entry.region_id
+          ? `${entry.display_name}（${entry.region_id}）`
+          : entry.region_id
+        return (
+          `<div style="font-size:12px;line-height:1.7">` +
+          `<div><b>${name}</b></div>` +
+          `<div>区域 ID：${entry.region_id}</div>` +
+          (timeAt ? `<div>时间截面：${timeAt}</div>` : '') +
+          `<div>当前值：<b>${entry.value.toFixed(2)}</b>${unit ? `（${unit}）` : ''}</div>` +
+          (showRangeMean && entry.range_mean !== null && entry.range_mean !== undefined
+            ? `<div style="color:#c3cadb">范围均值：${entry.range_mean.toFixed(2)}（所选日期范围）</div>`
+            : '') +
+          `<div style="color:#c3cadb">点击可在地图中定位</div>` +
+          `</div>`
+        )
+      },
+    },
+    xAxis: {
+      type: 'value',
+      axisLabel: { fontSize: 10, formatter: (value: number) => compactNumber(value) },
+      splitLine: { lineStyle: { color: '#eef3fa' } },
+    },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: items.map((item) => item.display_name || item.region_id),
+      axisLabel: { fontSize: 10, width: 118, overflow: 'truncate' },
+      axisTick: { show: false },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: items.map((item) => item.value),
+        barMaxWidth: 15,
+        showBackground: true,
+        backgroundStyle: { color: '#f3f7fd' },
+        itemStyle: { color, borderRadius: [0, 3, 3, 0] },
+        label: {
+          show: true,
+          position: 'right',
+          fontSize: 10,
+          color: '#34506f',
+          formatter: (params: any) => compactNumber(params.value),
+        },
+      },
+    ],
+  }
+  return (
+    <ReactECharts
+      option={option}
+      style={{ height }}
+      notMerge
+      onEvents={onSelect ? { click: (params: any) => onSelect(items[params.dataIndex]?.region_id) } : undefined}
+    />
+  )
+}
+
+/** Histogram of region values with count labels and range/count/percentage tooltips. */
+export function HistogramChart({
+  bins,
+  height = 260,
+  unit,
+}: {
+  bins: Array<{ index: number; start: number; end: number; count: number; pct: number }>
+  height?: number
+  unit?: string
+}) {
+  if (!bins.length) return <Empty description="当前时间截面没有有效区域" />
+  const labels = bins.map((bin) => `${compactNumber(bin.start)}–${compactNumber(bin.end)}`)
+  const option = {
+    grid: { left: 6, right: 14, top: 18, bottom: 10, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any[]) => {
+        const bin = bins[params?.[0]?.dataIndex ?? 0]
+        if (!bin) return ''
+        return (
+          `<div style="font-size:12px;line-height:1.7">` +
+          `<div><b>${bin.start.toFixed(2)} – ${bin.end.toFixed(2)}</b>${unit ? `（${unit}）` : ''}</div>` +
+          `<div>区域数量：<b>${bin.count}</b></div>` +
+          `<div>占有效区域：<b>${bin.pct.toFixed(1)}%</b></div>` +
+          `</div>`
+        )
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisLabel: { fontSize: 9, rotate: 32, hideOverlap: true, interval: 0 },
+    },
+    yAxis: {
+      type: 'value',
+      name: '区域数',
+      nameTextStyle: { fontSize: 10 },
+      minInterval: 1,
+      axisLabel: { fontSize: 10 },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: bins.map((bin) => bin.count),
+        barMaxWidth: 26,
+        itemStyle: { color: '#12A67A', borderRadius: [3, 3, 0, 0] },
+        label: { show: true, position: 'top', fontSize: 10, color: '#34506f' },
+      },
+    ],
+  }
+  return <ReactECharts option={option} style={{ height }} notMerge />
+}
+
 /** 24 hourly means with real sample counts in the tooltip; missing hours stay gaps. */
 export function HourlyChart({
   regions,

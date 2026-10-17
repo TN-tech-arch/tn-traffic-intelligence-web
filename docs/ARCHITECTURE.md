@@ -74,6 +74,9 @@ X_i = [v[t] … v[t+L-1]]      Y_i = [v[t+L] … v[t+L+H-1]]      next start = t
 * 数据隔离：一次 `temporal_analysis` 返回**所有已选区域**的 `statistics`（供中央表格与
   `insights.summary`），以及**一个 Analysis Target** 的 hourly/weekday/acf（`insight_region_id`）。
   切换 target 只改变后者，中央统计不变。
+* 空间分析：`POST /api/analysis/spatial` 以 `time_index` 取一个截面，对**该数据源全部有时序区域**
+  计算 `top`（12）、`bottom`（6）与等宽直方图 `distribution`（左闭右开，最后区间含右端点），
+  并返回 `insights.high/low/distribution`；`range_mean` 单独按所选日期范围计算，与截面值严格区分。
 
 ### 3.2 缩放（`windows.fit_scaler / apply_scaler / inverse_scaler`）
 
