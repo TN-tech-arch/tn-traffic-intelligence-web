@@ -27,7 +27,11 @@ page.on('pageerror', (e) => consoleErrors.push(String(e)))
 page.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()))
 
 await page.goto(`${BASE}/exploration`, { waitUntil: 'networkidle' })
-await page.waitForTimeout(5000)
+await page
+  .locator('.tn-range-summary')
+  .filter({ hasText: '实际起点' })
+  .waitFor({ state: 'visible', timeout: 30000 })
+  .catch(() => undefined)
 
 const grid = page.locator('.tn-three-pane').first()
 const columns = await grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns)
@@ -58,6 +62,11 @@ check('5 已移除可见的时间索引输入', (await page.locator('[data-field
 
 // ------------------------------------------------------------- centre ----
 const centerPane = page.locator('.tn-three-pane > section').nth(1)
+await centerPane
+  .locator('.tn-insight-card')
+  .filter({ hasText: 'Statistical Summary Insights' })
+  .waitFor({ state: 'visible', timeout: 30000 })
+  .catch(() => undefined)
 const centerText = await centerPane.innerText()
 const order = [
   centerText.indexOf('GIS & Temporal Visualization'),
@@ -113,7 +122,14 @@ await page.keyboard.type('BRERA', { delay: 40 })
 await page.waitForTimeout(500)
 await page.keyboard.press('Enter')
 await page.keyboard.press('Escape')
-await page.waitForTimeout(5000)
+await page
+  .waitForFunction(
+    () =>
+      document.querySelectorAll('.tn-three-pane > section:nth-child(2) table tbody tr').length >= 2,
+    null,
+    { timeout: 30000 },
+  )
+  .catch(() => undefined)
 const centerAfterAdd = await centerPane.innerText()
 const rowCount = await centerPane.locator('table tbody tr').count()
 check('15 增加区域后中央统计出现两行', rowCount === 2, `${rowCount} rows`)
@@ -124,7 +140,11 @@ const hourlyBefore = await page.locator('section[aria-label="Hourly Profile"] .t
 const targetSelect = page.locator('.tn-analysis-target .ant-select').first()
 await targetSelect.click()
 await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'BRERA' }).first().click()
-await page.waitForTimeout(5000)
+await page
+  .locator('.tn-analysis-target .ant-select-selection-item')
+  .filter({ hasText: 'BRERA' })
+  .waitFor({ state: 'visible', timeout: 30000 })
+  .catch(() => undefined)
 const statsAfter = (await centerPane.locator('table').first().innerText()).replace(/\s+/g, ' ')
 check(
   '17 切换分析对象不改变中央统计',
@@ -134,8 +154,24 @@ check(
 const targetValue = await page.locator('.tn-analysis-target .ant-select-selection-item').first().innerText()
 check('18 分析对象已切到 BRERA', targetValue.includes('BRERA'), targetValue)
 
-const hourlyAfter = await page.locator('section[aria-label="Hourly Profile"] .tn-insight-card').first().innerText()
 const peakLine = (text) => text.split('\n').find((line) => line.includes('主要高峰')) ?? ''
+await page
+  .waitForFunction(
+    (before) => {
+      const node = document.querySelector(
+        'section[aria-label="Hourly Profile"] .tn-insight-card',
+      )
+      const line =
+        node instanceof HTMLElement
+          ? node.innerText.split('\n').find((item) => item.includes('主要高峰')) ?? ''
+          : ''
+      return line.length > 0 && line !== before
+    },
+    peakLine(hourlyBefore),
+    { timeout: 30000 },
+  )
+  .catch(() => undefined)
+const hourlyAfter = await page.locator('section[aria-label="Hourly Profile"] .tn-insight-card').first().innerText()
 check(
   '19 右侧 Insights 随分析对象重新计算',
   peakLine(hourlyBefore) !== peakLine(hourlyAfter) && peakLine(hourlyAfter).length > 0,

@@ -26,6 +26,56 @@ page.on('console', (message) => message.type() === 'error' && consoleErrors.push
 await page.goto(`${BASE}/clustering`, { waitUntil: 'networkidle' })
 await page.waitForTimeout(3500)
 
+const grid = page.locator('.tn-three-pane').first()
+const columns = await grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns)
+const widths = columns.split(' ').map((value) => parseFloat(value))
+const total = widths.reduce((sum, value) => sum + value, 0)
+const ratios = widths.map((value) => Math.round((value / total) * 1000) / 10)
+check(
+  '0a Module 2 三栏比例为约 25% / 40% / 35%',
+  Math.abs(ratios[0] - 25) <= 2.5 &&
+    Math.abs(ratios[1] - 40) <= 2.5 &&
+    Math.abs(ratios[2] - 35) <= 2.5,
+  `${columns} → ${ratios.join('/')}%`,
+)
+const initialConfigPane = page.locator('.tn-three-pane > section').nth(0)
+const initialText = await initialConfigPane.innerText()
+check(
+  '0b 起始索引和窗口点数不再作为普通参数显示',
+  (await page.locator('[data-field="m2.start_index"]').count()) === 0 &&
+    (await page.locator('[data-field="m2.window_points"]').count()) === 0 &&
+    (await page.locator('[data-field="m2.time_start"] input').count()) === 1 &&
+    (await page.locator('[data-field="m2.time_end"] input').count()) === 1,
+  'date/time controls only',
+)
+check(
+  '0c 日期范围摘要来自真实时间索引',
+  initialText.includes('数据可用范围') &&
+    initialText.includes('选中时间点') &&
+    initialText.includes('有效观测') &&
+    initialText.includes('采样间隔'),
+  initialText.split('\n').slice(-8).join(' | '),
+)
+const startInput = page.locator('[data-field="m2.time_start"] input').first()
+await startInput.click()
+await startInput.fill('2013-11-02 00:00')
+await startInput.press('Enter')
+await page
+  .locator('.tn-range-summary')
+  .filter({ hasText: '2013-11-02 00:00:00' })
+  .waitFor({ state: 'visible', timeout: 20000 })
+  .catch(() => undefined)
+const updatedRangeText = await initialConfigPane.innerText()
+check(
+  '0d 修改开始日期后真实范围摘要同步更新',
+  updatedRangeText.includes('2013-11-02 00:00:00'),
+  updatedRangeText.split('\n').filter((line) => line.includes('2013-11-02')).join(' | '),
+)
+await startInput.click()
+await startInput.fill('2013-11-01 00:00')
+await startInput.press('Enter')
+await page.waitForTimeout(1000)
+
 const latestHierarchical = await page.evaluate(async () => {
   const response = await fetch('/api/clusters?limit=20')
   const data = await response.json()
@@ -53,11 +103,21 @@ check(
 
 const tabs = (await infoPane.locator('.ant-tabs-nav').first().locator('.ant-tabs-tab').allInnerTexts()).map((text) => text.trim())
 check(
-  '3 四个一级 Tab 完整保留',
-  ['Cluster Overview', 'Typical Patterns', 'Quality Evaluation', 'Region List'].every((text) =>
+  '3 右侧仅保留三个分析 Tab',
+  ['Cluster Overview', 'Typical Patterns', 'Quality Evaluation'].every((text) =>
     tabs.some((tab) => tab.includes(text)),
-  ),
+  ) && !tabs.some((tab) => tab.includes('Region List')),
   tabs.join(' | '),
+)
+
+const centralText = await centerPane.innerText()
+check(
+  '3b 中央顺序为 GIS → 特征空间 → 区域列表',
+  centralText.indexOf('GIS 簇分布') >= 0 &&
+    centralText.indexOf('GIS 簇分布') < centralText.indexOf('特征空间') &&
+    centralText.indexOf('特征空间') < centralText.indexOf('区域列表') &&
+    (await centerPane.locator('section[aria-label="Region List"]').count()) === 1,
+  'central order',
 )
 
 const overviewText = await panel.innerText()
@@ -136,10 +196,11 @@ const scatter = centerPane.locator('[data-testid="cluster-feature-scatter"]')
 const scatterAxes = await scatter.getAttribute('data-cluster-axes')
 const scatterColors = JSON.parse((await scatter.getAttribute('data-cluster-colors')) ?? '{}')
 check(
-  '11 Feature Space 明确为二维展示并标出真实轴名',
-  scatterAxes?.includes('平均值（Mean）') &&
-    scatterAxes?.includes('标准差（Std）') &&
+  '11 Feature Space 使用 PCA 并标出 PC1/PC2 解释方差',
+  /PC1（\d+\.\d%）/.test(scatterAxes ?? '') &&
+    /PC2（\d+\.\d%）/.test(scatterAxes ?? '') &&
     (await centerPane.innerText()).includes('实际聚类使用 7 个标准化特征') &&
+    (await centerPane.innerText()).includes('PCA 仅用于可视化') &&
     (await centerPane.innerText()).includes('二维距离接近不等于必须属于同一簇'),
   scatterAxes ?? 'missing axes',
 )
@@ -208,18 +269,48 @@ check(
 )
 await page.screenshot({ path: path.join(SHOTS, '43-m2-quality.png'), fullPage: true })
 
-await infoPane.locator('.ant-tabs-tab', { hasText: 'Region List' }).click()
-await page.waitForTimeout(500)
-const regionText = await panel.innerText()
+const regionSection = centerPane.locator('section[aria-label="Region List"]')
+const regionText = await regionSection.innerText()
 check(
   '18 区域列表包含区域、簇、模式类型与真实特征值',
   regionText.includes('区域') &&
     regionText.includes('模式类型') &&
-    regionText.includes('平均值') &&
+    regionText.includes('Mean') &&
+    regionText.includes('Std') &&
+    regionText.includes('CV') &&
     regionText.includes('簇 3'),
   regionText.replace(/\n/g, ' | ').slice(0, 160),
 )
-await panel.locator('tbody tr').first().locator('button').filter({ hasText: /定\s*位/ }).click()
+const regionSearch = regionSection.locator('input[placeholder="搜索区域名称或 ID"]')
+await regionSearch.fill('BRERA')
+await page.waitForTimeout(300)
+const searchRows = await regionSection.locator('tbody tr').allInnerTexts()
+check(
+  '18b 区域搜索正常',
+  searchRows.length === 1 && searchRows[0].includes('BRERA'),
+  searchRows.join(' | '),
+)
+await regionSearch.fill('')
+await page.waitForTimeout(200)
+await regionSection.locator('.ant-select-selector').click()
+await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '簇 3' }).first().click()
+await page.waitForTimeout(300)
+const filteredRows = await regionSection.locator('tbody tr').allInnerTexts()
+check(
+  '18c 按簇筛选正常',
+  filteredRows.length > 0 && filteredRows.every((row) => row.includes('簇 3')),
+  `${filteredRows.length} rows`,
+)
+await regionSection.locator('.ant-select-selector').click()
+await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '全部簇' }).first().click()
+await page.waitForTimeout(200)
+check(
+  '18d 区域列表分页正常',
+  (await regionSection.locator('.ant-pagination').count()) === 1 &&
+    (await regionSection.locator('tbody tr').count()) <= 10,
+  `rows=${await regionSection.locator('tbody tr').count()}`,
+)
+await regionSection.locator('tbody tr').first().locator('button').filter({ hasText: /定\s*位/ }).click()
 await page.waitForTimeout(900)
 check(
   '19 区域定位联动 GIS 且保留选择逻辑',
@@ -230,9 +321,21 @@ await page.mouse.move(1450, 1250)
 await page.waitForTimeout(250)
 await page.screenshot({ path: path.join(SHOTS, '44-m2-regions.png'), fullPage: true })
 
-const dbscanRow = page.locator('.tn-history-row').filter({ hasText: 'DBSCAN' }).first()
+const latestDbscan = await page.evaluate(async () => {
+  const response = await fetch('/api/clusters?limit=100')
+  const data = await response.json()
+  return data.runs.find((run) => run.algorithm_key === 'dbscan' && run.status === 'Completed')
+})
+const dbscanRow = page
+  .locator('.tn-history-row')
+  .filter({ hasText: latestDbscan?.cluster_run_id ?? '__missing_dbscan__' })
+  .first()
 await dbscanRow.locator('button').filter({ hasText: /打\s*开/ }).first().click()
-await page.waitForTimeout(3000)
+await centerPane
+  .locator('.tn-legend')
+  .filter({ hasText: '噪声（-1）' })
+  .waitFor({ state: 'visible', timeout: 20000 })
+  .catch(() => undefined)
 await infoPane.locator('.ant-tabs-tab', { hasText: 'Cluster Overview' }).click()
 await page.waitForTimeout(400)
 const noiseLegendText = await centerPane.locator('.tn-legend').first().innerText()
@@ -250,8 +353,27 @@ check(
   `${noiseColor} | ${noiseLegendText.replace(/\n/g, ' | ')}`,
 )
 
+const staleDateInput = configPane.locator('[data-field="m2.time_start"] input').first()
+await staleDateInput.click()
+await staleDateInput.fill('2013-11-03 00:00')
+await staleDateInput.press('Enter')
+await page.waitForTimeout(700)
+check(
+  '20b 修改配置后明确提示旧结果已过期',
+  (await page.locator('body').innerText()).includes('当前配置已修改，下方仍是上一次聚类结果'),
+  'stale result warning',
+)
+
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
-check('21 页面无横向溢出', overflow <= 1, `overflow=${overflow}`)
+check('21 宽屏页面无横向溢出', overflow <= 1, `overflow=${overflow}`)
+await page.setViewportSize({ width: 1200, height: 1000 })
+await page.waitForTimeout(500)
+const overflow1200 = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+check('21b 1200px 中等屏幕无横向溢出', overflow1200 <= 1, `overflow=${overflow1200}`)
+await page.setViewportSize({ width: 900, height: 1000 })
+await page.waitForTimeout(500)
+const overflow900 = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+check('21c 900px 窄屏无横向溢出', overflow900 <= 1, `overflow=${overflow900}`)
 check('22 浏览器控制台无未预期错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
 
 const failed = results.filter((result) => !result.ok).length

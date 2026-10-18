@@ -107,8 +107,14 @@ def intraday_profile(timestamps: np.ndarray, values: np.ndarray) -> np.ndarray:
         if not selector.any():
             continue
         block = values[selector]
-        with np.errstate(invalid="ignore"):
-            profile[hour] = np.nanmean(block, axis=0)
+        counts = np.isfinite(block).sum(axis=0)
+        sums = np.nansum(block, axis=0)
+        profile[hour] = np.divide(
+            sums,
+            counts,
+            out=np.full(block.shape[1], np.nan),
+            where=counts > 0,
+        )
     return profile
 
 
@@ -120,6 +126,13 @@ def weekly_profile(timestamps: np.ndarray, values: np.ndarray) -> np.ndarray:
         selector = weekdays == day
         if not selector.any():
             continue
-        with np.errstate(invalid="ignore"):
-            profile[day] = np.nanmean(values[selector], axis=0)
+        block = values[selector]
+        counts = np.isfinite(block).sum(axis=0)
+        sums = np.nansum(block, axis=0)
+        profile[day] = np.divide(
+            sums,
+            counts,
+            out=np.full(block.shape[1], np.nan),
+            where=counts > 0,
+        )
     return profile

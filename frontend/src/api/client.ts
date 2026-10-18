@@ -95,6 +95,7 @@ export const ENDPOINTS = {
   compare: '/api/analysis/compare',
   clusterFeatures: '/api/clusters/features',
   clusterValidate: '/api/clusters/validate',
+  clusterRange: '/api/clusters/range',
   clusterRun: '/api/clusters/run',
   clusterList: '/api/clusters',
   clusterGet: (id: string) => `/api/clusters/${id}`,

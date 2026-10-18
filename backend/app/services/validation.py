@@ -16,6 +16,7 @@ from typing import Any, Iterable
 from app.core.errors import Issue, error, warning
 from app.forecast.registry import MODEL_BY_KEY, MODELS, default_params
 from app.services.series import FREQUENCY_MINUTES
+from app.services.time_range import resolve_range
 
 # ---------------------------------------------------------------------------
 # Generic field checking
@@ -388,12 +389,21 @@ M2_SCHEMA: list[dict[str, Any]] = [
     {"key": "aggregation", "label": "Aggregation", "label_zh": "聚合方式", "type": "enum",
      "default": "mean", "enum": ["mean", "sum"], "help_zh": "聚合方式，影响特征量级。",
      "suggestion_zh": "mean 更利于形状比较。"},
+    {"key": "time_start", "label": "Start Date & Time", "label_zh": "开始日期时间", "type": "string",
+     "default": "", "required": False,
+     "help_zh": "聚类特征使用的起始时间（含边界，按当前时间分辨率的时间桶起点计）。",
+     "suggestion_zh": "格式 YYYY-MM-DD HH:mm:ss；必须早于结束时间。"},
+    {"key": "time_end", "label": "End Date & Time", "label_zh": "结束日期时间", "type": "string",
+     "default": "", "required": False,
+     "help_zh": "聚类特征使用的结束时间（含边界）。",
+     "suggestion_zh": "不能超过数据源真实结束时间。"},
     {"key": "start_index", "label": "Start Index", "label_zh": "起始时间点", "type": "integer",
-     "default": 0, "min": 0, "help_zh": "特征提取窗口起点。", "suggestion_zh": "默认 0。"},
+     "default": 0, "min": 0, "level": "advanced", "help_zh": "特征提取窗口起点（内部索引，界面默认使用日期时间）。",
+     "suggestion_zh": "普通使用请选择日期时间。"},
     {"key": "window_points", "label": "Window Points", "label_zh": "窗口点数", "type": "integer",
-     "default": 1008, "min": 24, "max": 100000,
-     "help_zh": "参与特征提取的连续时间点数，至少覆盖一个完整日周期。",
-     "suggestion_zh": "10 分钟频率下 1008 点约为 7 天。"},
+     "default": 1008, "min": 2, "max": 100000, "level": "advanced",
+     "help_zh": "参与特征提取的连续时间点数（内部索引，界面默认根据日期范围计算）。",
+     "suggestion_zh": "普通使用请选择日期时间。"},
     {"key": "features", "label": "Features", "label_zh": "聚类特征", "type": "array",
      "default": ["mean", "std", "cv", "intraday_peak_ratio", "day_night_ratio", "weekday_weekend_ratio", "daily_seasonality"],
      "help_zh": "从真实时间序列提取的特征集合。", "suggestion_zh": "至少选择 2 个特征。"},
@@ -599,6 +609,40 @@ def validate_m3(values: dict[str, Any], *, dataset_context: dict[str, Any] | Non
 
 def validate_m2(values: dict[str, Any], *, region_count: int | None = None) -> list[Issue]:
     issues, coerced = check_module("m2", values)
+    source_key = coerced.get("source_key")
+    if source_key:
+        resolved = resolve_range(
+            str(source_key),
+            str(coerced.get("frequency") or "native"),
+            time_start=coerced.get("time_start") or None,
+            time_end=coerced.get("time_end") or None,
+            start_index=coerced.get("start_index"),
+            window_points=coerced.get("window_points"),
+            path_prefix="m2",
+        )
+        issues.extend(resolved.issues)
+        if resolved.points > 0 and resolved.span_seconds < 86400:
+            issues.append(
+                warning(
+                    "m2.time_range",
+                    "SHORT_RANGE",
+                    f"所选范围仅约 {resolved.span_seconds / 3600:.1f} 小时，"
+                    "日内与工作日/周末特征的代表性不足。",
+                    "建议至少覆盖 7 天以稳定估计周内模式。",
+                    resolved.points,
+                )
+            )
+        elif resolved.points > 0 and resolved.span_seconds < 7 * 86400:
+            issues.append(
+                warning(
+                    "m2.time_range",
+                    "LIMITED_PERIOD",
+                    f"所选范围约 {resolved.span_seconds / 86400:.1f} 天，"
+                    "周期特征和功能区模式仍可能不稳定。",
+                    "建议覆盖至少 7 天，并谨慎解释簇名称。",
+                    resolved.points,
+                )
+            )
     algorithm = coerced.get("algorithm")
     features = values.get("features") or []
     if isinstance(features, list) and len(features) < 2:

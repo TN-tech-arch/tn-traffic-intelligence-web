@@ -146,10 +146,12 @@ try {
   await page.waitForTimeout(1500)
   const m2Tabs = (await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
   record(
-    'T31 M2 四个右侧 Tab 齐全',
-    ['Cluster Overview', 'Typical Patterns', 'Quality Evaluation', 'Region List'].every((t) =>
+    'T31 M2 三个右侧分析 Tab 齐全，区域列表位于中央',
+    ['Cluster Overview', 'Typical Patterns', 'Quality Evaluation'].every((t) =>
       m2Tabs.some((text) => text.includes(t)),
-    ),
+    ) &&
+      !m2Tabs.some((text) => text.includes('Region List')) &&
+      (await page.locator('.tn-three-pane > section').nth(1).locator('section[aria-label="Region List"]').count()) === 1,
     m2Tabs.join('|'),
   )
   // eps invalid then corrected

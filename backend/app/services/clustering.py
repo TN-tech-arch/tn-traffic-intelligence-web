@@ -8,10 +8,12 @@ from typing import Any
 import numpy as np
 
 from app.core.ids import now_utc
+from app.core.errors import RequestRejected
 from app.db.connection import get_connection, json_dumps, json_loads, query_one
 from app.services.features import FEATURE_LABELS, extract_features, intraday_profile, weekly_profile
 from app.services.ingest import load_series, regions_for, source_row
 from app.services.series import resolve_frequency_minutes, resample, valid_region_ids
+from app.services.time_range import has_blocking, resolve_range
 
 ALGORITHM_LABELS = {
     "kmeans": "K-Means",
@@ -213,6 +215,18 @@ def _profile_correlation(left: list[float | None], right: list[float | None]) ->
     if array_a.std() <= 1e-12 or array_b.std() <= 1e-12:
         return None
     return float(np.corrcoef(array_a, array_b)[0, 1])
+
+
+def _row_nanmean(block: np.ndarray) -> np.ndarray:
+    """Row-wise mean without the RuntimeWarning from all-missing rows."""
+    counts = np.isfinite(block).sum(axis=1)
+    sums = np.nansum(block, axis=1)
+    return np.divide(
+        sums,
+        counts,
+        out=np.full(block.shape[0], np.nan),
+        where=counts > 0,
+    )
 
 
 def _characterization(
@@ -554,6 +568,42 @@ def _build_pattern_insights(
     }
 
 
+def _pca_projection(
+    matrix: np.ndarray,
+    labels: np.ndarray,
+    region_ids: list[str],
+    names: list[str],
+) -> dict[str, Any]:
+    """PCA is visualisation only; clustering uses the original scaled matrix."""
+    if matrix.shape[0] < 2 or matrix.shape[1] < 2:
+        return {
+            "available": False,
+            "reason": "有效区域或特征少于 2 个，无法生成二维 PCA。",
+        }
+    from sklearn.decomposition import PCA
+
+    model = PCA(n_components=2)
+    coords = model.fit_transform(matrix)
+    return {
+        "available": True,
+        "method_zh": "对实际参与聚类的标准化特征矩阵执行 PCA；PCA 只用于二维可视化，不参与簇分配。",
+        "explained_variance_ratio": [float(value) for value in model.explained_variance_ratio_],
+        "projection": [
+            {
+                "region_id": region_ids[index],
+                "cluster_id": int(labels[index]),
+                "pc1": float(coords[index, 0]),
+                "pc2": float(coords[index, 1]),
+            }
+            for index in range(len(region_ids))
+        ],
+        "component_weights": {
+            "PC1": {names[index]: float(model.components_[0, index]) for index in range(len(names))},
+            "PC2": {names[index]: float(model.components_[1, index]) for index in range(len(names))},
+        },
+    }
+
+
 def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progress=None) -> dict[str, Any]:
     """Execute one genuine clustering run and persist every real result."""
     row = query_one("SELECT * FROM clusters WHERE cluster_run_id = ?", (cluster_run_id,))
@@ -572,9 +622,22 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
 
     report("Features", 5.0, f"提取 {len(region_ids)} 个区域的特征")
     data = resample(source["key"], region_ids=region_ids, frequency=frequency, aggregation=aggregation)
-    start = int(params.get("start_index") or 0)
-    points = int(params.get("window_points") or data.timestamps.size)
-    stop = min(start + points, data.timestamps.size)
+    resolved = resolve_range(
+        source["key"],
+        frequency,
+        time_start=params.get("time_start") or None,
+        time_end=params.get("time_end") or None,
+        start_index=params.get("start_index"),
+        window_points=params.get("window_points"),
+        path_prefix="m2",
+    )
+    if has_blocking(resolved.issues):
+        raise RequestRejected(
+            [issue for issue in resolved.issues if issue["severity"] == "error"],
+            message="聚类时间范围校验未通过",
+        )
+    start = resolved.start_index
+    stop = resolved.end_index
     ts = data.timestamps[start:stop]
     values = data.values[start:stop]
     selected = list(features.get("selected") or [])
@@ -618,7 +681,7 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
         member_regions = [kept_regions[p] for p in positions]
         intraday = [
             float(v) if np.isfinite(v) else None
-            for v in np.nanmean(profile[:, region_position], axis=1)
+            for v in _row_nanmean(profile[:, region_position])
         ]
         extremes = _profile_extremes(intraday)
         finite_profile = [value for value in intraday if value is not None]
@@ -637,7 +700,7 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
                 for value in intraday
             ],
             "weekly_profile": [float(v) if np.isfinite(v) else None
-                               for v in np.nanmean(weekly[:, region_position], axis=1)],
+                               for v in _row_nanmean(weekly[:, region_position])],
             "mean_level": float(np.nanmean(matrix[positions, 0])) if positions else None,
             "peak_hour": extremes["peak_hour"],
             "peak_value": extremes["peak_value"],
@@ -772,6 +835,7 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
                 "features": {names[f]: float(matrix[position, f]) for f in range(len(names))},
             }
         )
+    pca = _pca_projection(scaled, labels, kept_regions, names)
     result = {
         "algorithm": params["algorithm"],
         "algorithm_label": ALGORITHM_LABELS[params["algorithm"]],
@@ -789,6 +853,8 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
         "pairwise_differences": pairwise,
         "pattern_insights": pattern_insights,
         "sample_window_days": span_days,
+        "range": resolved.to_public(),
+        "pca": pca,
         "dropped_regions": dropped,
         "no_data_regions": [r["region_id"] for r in regions_for(source["source_id"], has_timeseries=False)],
         "time_start": str(ts[0]) if ts.size else None,

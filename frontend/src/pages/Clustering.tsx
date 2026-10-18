@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Collapse, Popconfirm, Switch, Table, Tabs, Tag, Tooltip, message } from 'antd'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Alert, Button, Card, Collapse, Input, Popconfirm, Select, Switch, Table, Tabs, Tag, Tooltip, message,
+} from 'antd'
+import dayjs, { type Dayjs } from 'dayjs'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
@@ -10,6 +13,7 @@ import { LineChart, ScatterChart } from '../components/Charts'
 import InsightCard from '../components/InsightCard'
 import StatusTag from '../components/StatusTag'
 import BiLabel from '../components/BiLabel'
+import DateTimeField from '../components/DateTimeField'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
@@ -26,6 +30,16 @@ const DEFAULT_FEATURES = [
   'daily_seasonality',
 ]
 
+function configSignature(values: Record<string, unknown>): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(values)
+        .filter(([key]) => !['random_state'].includes(key) || values.algorithm !== 'hierarchical')
+        .sort(([left], [right]) => left.localeCompare(right)),
+    ),
+  )
+}
+
 export default function Clustering() {
   const [messageApi, contextHolder] = message.useMessage()
   const [catalog, setCatalog] = useState<{ features: Array<{ key: string; label_zh: string; help_zh: string }>; algorithms: Array<{ key: string; label: string }> }>({ features: [], algorithms: [] })
@@ -33,6 +47,8 @@ export default function Clustering() {
     source_key: 'milano',
     frequency: 'native',
     aggregation: 'mean',
+    time_start: null as string | null,
+    time_end: null as string | null,
     start_index: 0,
     window_points: 1008,
     features: DEFAULT_FEATURES,
@@ -52,20 +68,30 @@ export default function Clustering() {
   })
   const [geojson, setGeojson] = useState<any>(null)
   const [regions, setRegions] = useState<any[]>([])
+  const [sourceMeta, setSourceMeta] = useState<any>(null)
+  const [rangeInfo, setRangeInfo] = useState<any>(null)
+  const [rangeLoading, setRangeLoading] = useState(true)
   const [result, setResult] = useState<any>(null)
+  const [resultKey, setResultKey] = useState<string | null>(null)
   const [runs, setRuns] = useState<any[]>([])
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null)
   const [focusRegion, setFocusRegion] = useState<string | null>(null)
   const [normalizedPatterns, setNormalizedPatterns] = useState(false)
+  const [regionSearch, setRegionSearch] = useState('')
+  const [clusterFilter, setClusterFilter] = useState('all')
   const [tab, setTab] = useState('overview')
   const [busy, setBusy] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
+  const skipSourceDateReset = useRef(false)
+  const pendingHistoryResultKey = useRef(false)
 
   const schema: FieldSpec[] = useMemo(
     () => [
       { key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'], enum_labels: ['Milano', 'Trentino', 'ZTE 4G Downlink'], default: 'milano', help_zh: '聚类使用的数据源。', suggestion_zh: 'ZTE 的无数据区域不会参与聚类。' },
       { key: 'frequency', label_zh: '时间分辨率', type: 'enum', enum: ['native', '30min', '60min', '1day'], enum_labels: ['原生', '30 分钟', '1 小时', '1 天'], default: 'native', help_zh: '特征提取所用的频率。', suggestion_zh: '日内模式建议原生或 30 分钟。' },
       { key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'], enum_labels: ['均值', '求和'], default: 'mean', help_zh: '聚合方式，会影响特征量级。', suggestion_zh: '均值更利于形状比较。' },
+      { key: 'time_start', label_zh: '开始日期时间', type: 'string', default: '', required: false, help_zh: '聚类特征使用的起始时间（含边界，按重采样后的时间桶起点计）。', suggestion_zh: '格式 YYYY-MM-DD HH:mm:ss；必须早于结束时间。' },
+      { key: 'time_end', label_zh: '结束日期时间', type: 'string', default: '', required: false, help_zh: '聚类特征使用的结束时间（含边界）。', suggestion_zh: '不能超过数据源真实结束时间。' },
       { key: 'start_index', label_zh: '起始时间点', type: 'integer', min: 0, default: 0, help_zh: '特征提取窗口起点（重采样后的点数）。', suggestion_zh: '默认 0。' },
       { key: 'window_points', label_zh: '窗口点数', type: 'integer', min: 24, max: 100000, default: 1008, help_zh: '参与特征提取的连续点数，至少覆盖一个完整日周期。', suggestion_zh: '10 分钟频率下 1008 点 ≈ 7 天。' },
       { key: 'features', label_zh: '聚类特征', type: 'array', enum: catalog.features.map((f) => f.key), enum_labels: catalog.features.map((f) => featureLabel(f.key, f.label_zh)), default: DEFAULT_FEATURES, help_zh: '从真实时间序列提取的特征集合。', suggestion_zh: '至少选择 2 个特征。' },
@@ -106,12 +132,87 @@ export default function Clustering() {
   useEffect(() => {
     const key = config.source_key as string
     if (!key) return
-    api.get<any>(ENDPOINTS.regions(key)).then((data) => setRegions(data.regions)).catch(() => undefined)
+    api
+      .get<any>(ENDPOINTS.regions(key))
+      .then((data) => {
+        setRegions(data.regions)
+        setSourceMeta(data.source)
+        const start = data.source?.time_start ? dayjs(data.source.time_start) : null
+        const end = data.source?.time_end ? dayjs(data.source.time_end) : null
+        const nativeMinutes = Number(data.source?.native_frequency_minutes ?? 10)
+        const weekEnd = start ? start.add(7, 'day').subtract(nativeMinutes, 'minute') : null
+        const defaultEnd = weekEnd && end ? (weekEnd.isBefore(end) ? weekEnd : end) : end
+        if (skipSourceDateReset.current) {
+          skipSourceDateReset.current = false
+        } else {
+          setConfig((prev) => ({
+            ...prev,
+            time_start: start ? start.format('YYYY-MM-DD HH:mm:ss') : null,
+            time_end: defaultEnd ? defaultEnd.format('YYYY-MM-DD HH:mm:ss') : null,
+          }))
+        }
+      })
+      .catch(() => undefined)
     api.get<any>(ENDPOINTS.geometry(key)).then(setGeojson).catch(() => undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.source_key])
 
+  useEffect(() => {
+    let active = true
+    setRangeLoading(true)
+    setRangeInfo(null)
+    const timer = window.setTimeout(() => {
+      api
+        .post<any>(ENDPOINTS.clusterRange, { values: config })
+        .then((data) => {
+          if (active) {
+            setRangeInfo(data)
+            setRangeLoading(false)
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setRangeInfo(null)
+            setRangeLoading(false)
+          }
+        })
+    }, 300)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [config.source_key, config.frequency, config.aggregation, config.time_start, config.time_end])
+
+  const bounds = useMemo(() => {
+    const start = sourceMeta?.time_start ? dayjs(sourceMeta.time_start) : null
+    const end = sourceMeta?.time_end ? dayjs(sourceMeta.time_end) : null
+    return { start, end }
+  }, [sourceMeta])
+
+  const disabledDate = useCallback(
+    (current: Dayjs) => {
+      if (!current) return false
+      if (bounds.start && current.endOf('day').isBefore(bounds.start.startOf('day'))) return true
+      if (bounds.end && current.startOf('day').isAfter(bounds.end.endOf('day'))) return true
+      return false
+    },
+    [bounds],
+  )
+
+  const stale = Boolean(resultKey && result && configSignature(config) !== resultKey)
+  const rangeBlocked = rangeInfo?.valid === false
+
+  useEffect(() => {
+    if (!pendingHistoryResultKey.current) return
+    pendingHistoryResultKey.current = false
+    setResultKey(configSignature(config))
+  }, [config])
+
   const runClustering = async () => {
+    if (rangeBlocked) {
+      messageApi.error('所选时间范围有效观测不足，无法开始聚类。')
+      return
+    }
     if (!valid) {
       messageApi.error('存在参数错误，请查看输入框下方提示。')
       return
@@ -128,6 +229,7 @@ export default function Clustering() {
         if (!['Queued', 'Running'].includes(state.status)) {
           if (state.status === 'Completed') {
             setResult({ ...state.result, cluster_run_id: state.cluster_run_id, params: state.params, metrics: state.metrics })
+            setResultKey(configSignature(config))
             messageApi.success('聚类完成（真实计算）')
           } else {
             messageApi.error(`聚类失败：${state.error ?? statusLabel(state.status)}`)
@@ -155,8 +257,25 @@ export default function Clustering() {
         messageApi.warning(`该运行没有可用结果，当前状态：${statusLabel(state.status)}。`)
         return
       }
+      const resultStart = state.result?.range?.start_at ?? (
+        state.result?.time_start && /^\d+$/.test(String(state.result.time_start))
+          ? dayjs.unix(Number(state.result.time_start)).format('YYYY-MM-DD HH:mm:ss')
+          : String(state.result?.time_start ?? '')
+      )
+      const resultEnd = state.result?.range?.end_at ?? (
+        state.result?.time_end && /^\d+$/.test(String(state.result.time_end))
+          ? dayjs.unix(Number(state.result.time_end)).format('YYYY-MM-DD HH:mm:ss')
+          : String(state.result?.time_end ?? '')
+      )
+      const nextConfig = {
+        ...state.params,
+        time_start: resultStart || null,
+        time_end: resultEnd || null,
+      }
+      skipSourceDateReset.current = String(state.params?.source_key ?? '') !== String(config.source_key ?? '')
       setResult({ ...state.result, cluster_run_id: runId, params: state.params, metrics: state.metrics })
-      setConfig((prev) => ({ ...prev, ...(state.params ?? {}) }))
+      pendingHistoryResultKey.current = true
+      setConfig((prev) => ({ ...prev, ...nextConfig }))
       messageApi.success(`已载入历史聚类 ${runId}`)
     } catch (err) {
       messageApi.error(String(err))
@@ -176,16 +295,22 @@ export default function Clustering() {
   const scatter = useMemo(() => {
     if (!result?.feature_matrix?.length || !result?.labels) return []
     const [first, second] = result.feature_names
-    return result.labels.map((label: number, index: number) => ({
-      x: result.feature_matrix[index][0],
-      y: second ? result.feature_matrix[index][1] : result.feature_matrix[index][0],
-      group: label,
-      name: result.regions[index]?.region_id,
-      regionId: result.regions[index]?.region_id,
-      extra: second
-        ? `${featureLabel(first)} ${Number(result.feature_matrix[index][0]).toFixed(3)} · ${featureLabel(second)} ${Number(result.feature_matrix[index][1]).toFixed(3)}`
-        : `${featureLabel(first)} ${Number(result.feature_matrix[index][0]).toFixed(3)}`,
-    }))
+    const projection = result.pca?.available ? result.pca.projection : null
+    return result.labels.map((label: number, index: number) => {
+      const row = result.regions[index]
+      return {
+        x: projection ? Number(projection[index].pc1) : result.feature_matrix[index][0],
+        y: projection
+          ? Number(projection[index].pc2)
+          : (second ? result.feature_matrix[index][1] : result.feature_matrix[index][0]),
+        group: label,
+        name: row?.region_id,
+        regionId: row?.region_id,
+        extra: result.feature_names.map((key: string) =>
+          `${featureLabel(key)} ${Number(row?.features?.[key]).toFixed(3)}`
+        ).join(' · '),
+      }
+    })
   }, [result])
 
   const clusterOf = (regionId: string | null) =>
@@ -196,15 +321,107 @@ export default function Clustering() {
   const clusterById: Map<number, any> = new Map(
     (result?.clusters ?? []).map((cluster: any) => [Number(cluster.cluster_id), cluster]),
   )
-  const featureAxes = result?.feature_names?.length
+  const featureAxes = result?.pca?.available
     ? [
-        { key: result.feature_names[0], label: featureLabel(result.feature_names[0]) },
-        { key: result.feature_names[1], label: featureLabel(result.feature_names[1]) },
+        { key: 'pc1', label: `PC1（${(Number(result.pca.explained_variance_ratio?.[0] ?? 0) * 100).toFixed(1)}%）` },
+        { key: 'pc2', label: `PC2（${(Number(result.pca.explained_variance_ratio?.[1] ?? 0) * 100).toFixed(1)}%）` },
       ]
-    : []
+    : result?.feature_names?.length
+      ? [
+          { key: result.feature_names[0], label: featureLabel(result.feature_names[0]) },
+          { key: result.feature_names[1], label: featureLabel(result.feature_names[1]) },
+        ]
+      : []
   const clusterColorMap = Object.fromEntries(
     normalClusters.map((cluster: any) => [String(cluster.cluster_id), clusterColor(cluster.cluster_id)]),
   )
+  const regionRows = useMemo(() => (
+    (result?.regions ?? []).map((row: any) => ({
+      ...row,
+      display_name: regions.find((region) => region.region_id === row.region_id)?.display_name ?? row.region_id,
+      pattern_type: clusterById.get(row.cluster_id)?.pattern_type?.label ?? '—',
+    }))
+  ), [result, regions, clusterById])
+  const filteredRegionRows = useMemo(() => (
+    regionRows.filter((row: any) => {
+      const query = regionSearch.trim().toUpperCase()
+      const queryMatch = !query ||
+        String(row.region_id).toUpperCase().includes(query) ||
+        String(row.display_name).toUpperCase().includes(query)
+      const clusterMatch = clusterFilter === 'all' || String(row.cluster_id) === clusterFilter
+      return queryMatch && clusterMatch
+    })
+  ), [regionRows, regionSearch, clusterFilter])
+  const regionColumns = [
+    {
+      title: '区域',
+      dataIndex: 'region_id',
+      width: '21%',
+      ellipsis: true,
+      sorter: (a: any, b: any) => String(a.region_id).localeCompare(String(b.region_id)),
+      render: (value: string, row: any) => (
+        <Tooltip title={`${row.display_name}（${value}）`}>
+          <span>{value}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: '簇',
+      dataIndex: 'cluster_id',
+      width: '12%',
+      sorter: (a: any, b: any) => a.cluster_id - b.cluster_id,
+      render: (value: number) => (
+        <Tag color={clusterColor(value)}>{value === -1 ? '噪声' : `簇 ${value}`}</Tag>
+      ),
+    },
+    {
+      title: '模式类型',
+      dataIndex: 'pattern_type',
+      width: '16%',
+      ellipsis: true,
+      render: (value: string, row: any) => (
+        <Tooltip title={clusterById.get(row.cluster_id)?.pattern_type?.hypothesis_zh || value}>
+          <span>{value}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: 'Mean',
+      width: '14%',
+      render: (_: unknown, row: any) => Number(row.features[result.feature_names[0]]).toFixed(1),
+      sorter: (a: any, b: any) => a.features[result.feature_names[0]] - b.features[result.feature_names[0]],
+    },
+    {
+      title: 'Std',
+      width: '14%',
+      render: (_: unknown, row: any) => (
+        result.feature_names.includes('std') ? Number(row.features.std).toFixed(1) : '—'
+      ),
+    },
+    {
+      title: 'CV',
+      width: '11%',
+      render: (_: unknown, row: any) => (
+        result.feature_names.includes('cv') ? Number(row.features.cv).toFixed(3) : '—'
+      ),
+    },
+    {
+      title: '操作',
+      width: '12%',
+      render: (_: unknown, row: any) => (
+        <Button
+          size="small"
+          onClick={(event) => {
+            event.stopPropagation()
+            setSelectedRegion(row.region_id)
+            setFocusRegion(row.region_id)
+          }}
+        >
+          定位
+        </Button>
+      ),
+    },
+  ]
 
   const clusterLegend = (
     <div className="tn-inline" style={{ gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
@@ -232,6 +449,29 @@ export default function Clustering() {
     </div>
   )
 
+  const visibleConfigFields = visibleFields(schema, config).filter((spec) => (
+    !['time_start', 'time_end', 'start_index', 'window_points'].includes(spec.key) &&
+    (spec.key !== 'random_state' || ['kmeans', 'gmm'].includes(String(config.algorithm)))
+  ))
+  const fieldsBeforeRange = visibleConfigFields.filter((spec) =>
+    ['source_key', 'frequency', 'aggregation'].includes(spec.key),
+  )
+  const fieldsAfterRange = visibleConfigFields.filter((spec) =>
+    !['source_key', 'frequency', 'aggregation'].includes(spec.key),
+  )
+  const renderParamField = (spec: FieldSpec) => (
+    <ParamField
+      key={spec.key}
+      spec={spec}
+      value={config[spec.key]}
+      issues={fieldIssues(spec.key)}
+      path={`m2.${spec.key}`}
+      onChange={(key, value) => setConfig((prev) => ({ ...prev, [key]: value }))}
+      disabledReason={fieldDisabledReason(spec, config)}
+      compact
+    />
+  )
+
   return (
     <div>
       {contextHolder}
@@ -248,39 +488,102 @@ export default function Clustering() {
       {serverIssues.length > 0 ? (
         <Alert type="error" showIcon style={{ marginBottom: 10 }} message="后端拒绝了本次请求" description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')} />
       ) : null}
+      {stale ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message="当前配置已修改，下方仍是上一次聚类结果"
+          description="请点击“开始聚类”基于新的时间范围、特征或算法参数重新计算。"
+        />
+      ) : null}
+      {rangeBlocked ? (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message="所选时间范围没有足够有效观测，无法开始聚类"
+          description={(rangeInfo?.issues ?? [])
+            .filter((item: Issue) => item.severity === 'error')
+            .slice(0, 2)
+            .map((item: Issue) => item.message)
+            .join('；')}
+        />
+      ) : null}
       <ThreePane
+        variant="m1"
         config={
           <>
             <PaneHead
               title={bilingual('配置', 'Configuration')}
               extra={
-                <Button size="small" onClick={() => setConfig((prev) => ({ ...prev, algorithm: 'kmeans', n_clusters: 4, features: DEFAULT_FEATURES, standardize: true, eps: 1.2, min_samples: 3, gmm_n_components: 4, linkage: 'ward', metric: 'euclidean' }))}>
+                <Button size="small" onClick={() => {
+                  setConfig((prev) => ({ ...prev, algorithm: 'kmeans', n_clusters: 4, features: DEFAULT_FEATURES, standardize: true, eps: 1.2, min_samples: 3, gmm_n_components: 4, linkage: 'ward', metric: 'euclidean' }))
+                  setResult(null)
+                  setResultKey(null)
+                }}>
                   {ACTION_LABELS.reset}
                 </Button>
               }
             />
-            {visibleFields(schema, config)
-              .filter((spec) => (
-                spec.key !== 'random_state' || ['kmeans', 'gmm'].includes(String(config.algorithm))
-              ))
-              .map((spec) => (
-              <ParamField
-                key={spec.key}
-                spec={spec}
-                value={config[spec.key]}
-                issues={fieldIssues(spec.key)}
-                path={`m2.${spec.key}`}
-                onChange={(key, value) => setConfig((prev) => ({ ...prev, [key]: value }))}
-                disabledReason={fieldDisabledReason(spec, config)}
-                compact
-              />
-              ))}
+            {fieldsBeforeRange.map(renderParamField)}
+            <div className="tn-section-title" style={{ marginTop: 4 }}>
+              {bilingual('分析时间范围', 'Analysis Time Range')}
+            </div>
+            <DateTimeField
+              id="m2.time_start"
+              label="开始日期时间"
+              value={config.time_start as string | null}
+              issues={fieldIssues('time_start')}
+              disabledDate={disabledDate}
+              help="聚类特征使用的起始时间（含边界，按当前时间分辨率的时间桶起点计）。"
+              detail="日期会转换为后端实际索引；不会继续使用旧的固定窗口。"
+              onChange={(value) => setConfig((prev) => ({ ...prev, time_start: value }))}
+            />
+            <DateTimeField
+              id="m2.time_end"
+              label="结束日期时间"
+              value={config.time_end as string | null}
+              issues={fieldIssues('time_end')}
+              disabledDate={disabledDate}
+              help="聚类特征使用的结束时间（含边界）。"
+              detail="不能超过数据源真实结束时间；缺失值不会补 0。"
+              onChange={(value) => setConfig((prev) => ({ ...prev, time_end: value }))}
+            />
+            <div className="tn-range-summary" aria-live="polite">
+              {rangeLoading ? (
+                <div className="tn-muted">正在解析所选范围的真实时间索引与有效观测…</div>
+              ) : rangeInfo?.range ? (
+                <>
+                  <div>
+                    <strong>数据可用范围：</strong>
+                    {rangeInfo.range.source_start_at ?? '—'} ～ {rangeInfo.range.source_end_at ?? '—'}
+                  </div>
+                  <div><strong>实际开始：</strong>{rangeInfo.range.start_at ?? '—'}</div>
+                  <div><strong>最后一个有效观测：</strong>{rangeInfo.range.end_at ?? '—'}</div>
+                  <div>
+                    <strong>时间跨度：</strong>{rangeInfo.range.span_label} ·{' '}
+                    <strong>采样间隔：</strong>{rangeInfo.range.interval_minutes} 分钟
+                  </div>
+                  <div>
+                    <strong>选中时间点：</strong>{rangeInfo.range.points} 个 ·{' '}
+                    <strong>有效观测：</strong>{rangeInfo.valid_observations} 个（{rangeInfo.valid_time_points} 个时间点）
+                  </div>
+                  <div className="tn-muted">
+                    边界：{rangeInfo.range.boundary}；原始采样间隔由当前数据源实际数据读取。
+                  </div>
+                </>
+              ) : (
+                <div className="tn-muted">选择日期时间后显示真实范围与有效样本。</div>
+              )}
+            </div>
+            {fieldsAfterRange.map(renderParamField)}
             {config.algorithm === 'hierarchical' ? (
               <div className="tn-muted" style={{ marginTop: -4, marginBottom: 8 }}>
                 实际算法：Ward 层次聚类 + 欧氏距离；该算法不使用随机种子。
               </div>
             ) : null}
-            <Button type="primary" block onClick={runClustering} loading={busy} disabled={!valid} style={{ marginTop: 8 }}>
+            <Button type="primary" block onClick={runClustering} loading={busy} disabled={!valid || rangeBlocked || rangeLoading} style={{ marginTop: 8 }}>
               {ACTION_LABELS.startClustering}
             </Button>
             {warnings.map((w) => (
@@ -330,7 +633,12 @@ export default function Clustering() {
               geojson={geojson}
               entries={regionEntries}
               selected={selectedRegion ? [selectedRegion] : []}
-              onToggle={(regionId) => setSelectedRegion(regionId === selectedRegion ? null : regionId)}
+              onToggle={(regionId) => {
+                setSelectedRegion(regionId === selectedRegion ? null : regionId)
+                setFocusRegion(regionId)
+                setRegionSearch(regionId)
+                setClusterFilter('all')
+              }}
               height={400}
               focus={focusRegion}
               colorFor={(entry) => (
@@ -366,7 +674,14 @@ export default function Clustering() {
                 </>
               }
             />
-            <Card size="small" title={bilingual('特征空间', 'Feature Space')} style={{ marginTop: 10 }}>
+            <Card
+              size="small"
+              title={bilingual(
+                result?.pca?.available ? '特征空间（PCA 二维投影）' : '特征空间',
+                'Feature Space',
+              )}
+              style={{ marginTop: 10 }}
+            >
               {scatter.length ? (
                 <>
                   <ScatterChart
@@ -377,8 +692,10 @@ export default function Clustering() {
                     onSelect={(regionId) => setFocusRegion(regionId)}
                   />
                   <div className="tn-muted">
-                    二维展示仅使用 {featureAxes[0]?.label ?? '—'} 与 {featureAxes[1]?.label ?? '—'} 两个维度；
-                    实际聚类使用 {result?.feature_names?.length ?? 0} 个标准化特征。
+                    {result?.pca?.available
+                      ? `每个点代表一个区域；颜色表示所属簇。横轴 ${featureAxes[0]?.label}、纵轴 ${featureAxes[1]?.label} 来自实际聚类特征矩阵的 PCA 投影。`
+                      : `二维展示仅使用 ${featureAxes[0]?.label ?? '—'} 与 ${featureAxes[1]?.label ?? '—'} 两个维度。`}
+                    {' '}实际聚类使用 {result?.feature_names?.length ?? 0} 个标准化特征，PCA 仅用于可视化，不参与簇分配。
                     二维距离接近不等于必须属于同一簇。点击散点可在 GIS 地图中定位。
                   </div>
                 </>
@@ -386,6 +703,59 @@ export default function Clustering() {
                 <EmptyState text="运行聚类后显示特征散点。" />
               )}
             </Card>
+            <section aria-label="Region List">
+            <Card size="small" title={bilingual('区域列表', 'Region List')} style={{ marginTop: 10 }}>
+              {result ? (
+                <>
+                  <div className="tn-inline" style={{ marginBottom: 7, flexWrap: 'wrap' }}>
+                    <Input
+                      allowClear
+                      size="small"
+                      value={regionSearch}
+                      placeholder="搜索区域名称或 ID"
+                      onChange={(event) => setRegionSearch(event.target.value)}
+                      style={{ width: 190 }}
+                      aria-label="搜索区域"
+                    />
+                    <Select
+                      size="small"
+                      value={clusterFilter}
+                      style={{ width: 120 }}
+                      onChange={setClusterFilter}
+                      options={[
+                        { value: 'all', label: '全部簇' },
+                        ...normalClusters.map((cluster: any) => ({
+                          value: String(cluster.cluster_id),
+                          label: `簇 ${cluster.cluster_id}`,
+                        })),
+                        ...(noiseCluster ? [{ value: '-1', label: '噪声' }] : []),
+                      ]}
+                      aria-label="按簇筛选"
+                    />
+                    <span className="tn-muted">
+                      {filteredRegionRows.length}/{regionRows.length} 个区域
+                    </span>
+                  </div>
+                  <Table
+                    size="small"
+                    tableLayout="fixed"
+                    rowKey="region_id"
+                    dataSource={filteredRegionRows}
+                    pagination={{ pageSize: 10, size: 'small', showSizeChanger: false }}
+                    onRow={(record: any) => ({
+                      onClick: () => {
+                        setSelectedRegion(record.region_id)
+                        setFocusRegion(record.region_id)
+                      },
+                    })}
+                    columns={regionColumns}
+                  />
+                </>
+              ) : (
+                <EmptyState text="运行聚类后显示区域列表。" />
+              )}
+            </Card>
+            </section>
             <Alert style={{ marginTop: 8 }} type="info" showIcon message={result?.disclaimer_zh ?? '簇的功能区标签为基于流量模式的推测，不代表真实土地使用数据。'} />
           </>
         }
@@ -649,75 +1019,6 @@ export default function Clustering() {
                       <pre className="tn-code">{JSON.stringify(result.algorithm_detail, null, 2)}</pre>
                     </Card>
                   </div>
-                ) : (
-                  <EmptyState text="尚无聚类结果。" />
-                ),
-              },
-              {
-                key: 'regions',
-                label: <BiLabel zh="区域列表" en="Region List" />,
-                children: result ? (
-                  <Table
-                    size="small"
-                    tableLayout="fixed"
-                    rowKey="region_id"
-                    pagination={{ pageSize: 12, size: 'small' }}
-                    dataSource={result.regions}
-                    onRow={(record: any) => ({
-                      onClick: () => {
-                        setSelectedRegion(record.region_id)
-                        setFocusRegion(record.region_id)
-                      },
-                    })}
-                    columns={[
-                      { title: '区域', dataIndex: 'region_id', width: '22%', ellipsis: true, sorter: (a: any, b: any) => String(a.region_id).localeCompare(String(b.region_id)) },
-                      {
-                        title: '簇',
-                        dataIndex: 'cluster_id',
-                        width: '14%',
-                        sorter: (a: any, b: any) => a.cluster_id - b.cluster_id,
-                        render: (value: number) => (
-                          <Tag color={clusterColor(value)}>{value === -1 ? '噪声（-1）' : `簇 ${value}`}</Tag>
-                        ),
-                      },
-                      {
-                        title: '模式类型',
-                        width: '21%',
-                        ellipsis: true,
-                        render: (_: unknown, record: any) =>
-                          clusterById.get(record.cluster_id)?.pattern_type?.label ?? '—',
-                      },
-                      {
-                        title: '平均值',
-                        width: '18%',
-                        render: (_: unknown, record: any) => Number(record.features[result.feature_names[0]]).toFixed(1),
-                        sorter: (a: any, b: any) => a.features[result.feature_names[0]] - b.features[result.feature_names[0]],
-                      },
-                      {
-                        title: 'CV',
-                        width: '13%',
-                        render: (_: unknown, record: any) =>
-                          result.feature_names.includes('cv') ? Number(record.features.cv).toFixed(3) : '—',
-                      },
-                      {
-                        title: '定位',
-                        width: '12%',
-                        render: (_: unknown, record: any) => (
-                          <Tooltip title="在地图上高亮">
-                            <Button
-                              size="small"
-                              onClick={() => {
-                                setSelectedRegion(record.region_id)
-                                setFocusRegion(record.region_id)
-                              }}
-                            >
-                              定位
-                            </Button>
-                          </Tooltip>
-                        ),
-                      },
-                    ]}
-                  />
                 ) : (
                   <EmptyState text="尚无聚类结果。" />
                 ),

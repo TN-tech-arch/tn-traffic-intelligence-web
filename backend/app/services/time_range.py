@@ -101,6 +101,7 @@ def resolve_range(
     time_end: str | None = None,
     start_index: int | None = None,
     window_points: int | None = None,
+    path_prefix: str = "m1",
 ) -> ResolvedRange:
     """Resolve the authoritative analysis range, collecting field level issues."""
     if frequency not in FREQUENCY_MINUTES:
@@ -112,15 +113,15 @@ def resolve_range(
             source_key=source_key, frequency=frequency, interval_minutes=0, total_points=0,
             start_index=0, end_index=0, start_at=None, end_at=None, start_epoch=None, end_epoch=None,
             source_start_at=None, source_end_at=None, span_seconds=0, points=0,
-            issues=[error("m1.time_start", "NO_DATA", "该数据源没有任何可用时间点。", "请先导入数据。")],
+            issues=[error(f"{path_prefix}.time_start", "NO_DATA", "该数据源没有任何可用时间点。", "请先导入数据。")],
         )
     interval = int((axis[1] - axis[0]) // 60) if total > 1 else FREQUENCY_MINUTES.get(frequency) or 10
     source_start, source_end = int(axis[0]), int(axis[-1])
     issues: list[Issue] = []
     truncated_start = truncated_end = False
 
-    start_epoch, start_issues = _parse_epoch(time_start, "m1.time_start")
-    end_epoch, end_issues = _parse_epoch(time_end, "m1.time_end")
+    start_epoch, start_issues = _parse_epoch(time_start, f"{path_prefix}.time_start")
+    end_epoch, end_issues = _parse_epoch(time_end, f"{path_prefix}.time_end")
     issues.extend(start_issues)
     issues.extend(end_issues)
 
@@ -129,23 +130,23 @@ def resolve_range(
         start_epoch = source_start if start_epoch is None else start_epoch
         end_epoch = source_end if end_epoch is None else end_epoch
         if start_epoch > end_epoch:
-            issues.append(error("m1.time_start", "DATE_ORDER",
+            issues.append(error(f"{path_prefix}.time_start", "DATE_ORDER",
                                 "开始时间必须早于结束时间。",
                                 "请调整 Start / End，或使用高级索引设置。", _fmt(start_epoch)))
             start_epoch, end_epoch = end_epoch, start_epoch
         if start_epoch > source_end or end_epoch < source_start:
-            issues.append(error("m1.time_start", "OUT_OF_BOUNDS",
+            issues.append(error(f"{path_prefix}.time_start", "OUT_OF_BOUNDS",
                                 f"所选范围完全超出数据边界（{_fmt(source_start)} ～ {_fmt(source_end)}）。",
                                 "请把日期时间调整到该数据源的真实观测范围内。", _fmt(start_epoch)))
         if start_epoch < source_start:
             truncated_start = True
-            issues.append(warning("m1.time_start", "TRUNCATED_START",
+            issues.append(warning(f"{path_prefix}.time_start", "TRUNCATED_START",
                                   f"开始时间早于数据起点，已从 {_fmt(source_start)} 开始。",
                                   "这是数据边界，不是缺失。", _fmt(start_epoch)))
             start_epoch = source_start
         if end_epoch > source_end:
             truncated_end = True
-            issues.append(warning("m1.time_end", "TRUNCATED_END",
+            issues.append(warning(f"{path_prefix}.time_end", "TRUNCATED_END",
                                   f"结束时间晚于数据终点，已截断到 {_fmt(source_end)}。",
                                   "这是数据边界，不是缺失。", _fmt(end_epoch)))
             end_epoch = source_end
@@ -155,28 +156,28 @@ def resolve_range(
         start_index = 0 if start_index is None else int(start_index)
         points = total if window_points is None else int(window_points)
         if start_index < 0 or start_index >= total:
-            issues.append(error("m1.start_index", "OUT_OF_RANGE",
+            issues.append(error(f"{path_prefix}.start_index", "OUT_OF_RANGE",
                                 f"起始索引必须在 0 ～ {total - 1} 之间，收到 {start_index}。",
                                 "请减小起始索引或使用日期时间选择。", start_index))
             start_index = min(max(start_index, 0), max(total - 1, 0))
         if points < 1:
-            issues.append(error("m1.window_points", "OUT_OF_RANGE",
+            issues.append(error(f"{path_prefix}.window_points", "OUT_OF_RANGE",
                                 "窗口点数必须大于 0。", "请输入至少 2 个时间点。", points))
             points = 1
         low = start_index
         high = min(start_index + points, total)
         if start_index + points > total:
-            issues.append(warning("m1.window_points", "TRUNCATED_WINDOW",
+            issues.append(warning(f"{path_prefix}.window_points", "TRUNCATED_WINDOW",
                                   f"窗口超出数据末端，已截断到 {total - start_index} 个点。",
                                   "可按日期时间选择范围以避免手工计算。", points))
 
     points = max(0, high - low)
     if points == 0:
-        issues.append(error("m1.time_range", "NO_POINTS",
+        issues.append(error(f"{path_prefix}.time_range", "NO_POINTS",
                             "所选时间范围内没有任何观测点。",
                             "请扩大范围或检查数据源的时间边界。", None))
     elif points == 1:
-        issues.append(error("m1.window_points", "TOO_FEW_POINTS",
+        issues.append(error(f"{path_prefix}.window_points", "TOO_FEW_POINTS",
                             "所选时间范围只有 1 个观测点，无法进行时间分析。",
                             "请至少选择 2 个采样点（建议覆盖一个完整日周期）。", points))
 

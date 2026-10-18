@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 from fastapi import APIRouter, Body, Query
 
 from app.api.deps import create_job, raise_if_invalid
@@ -10,7 +11,8 @@ from app.core.ids import cluster_run_id as make_id, now_utc
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.services.clustering import ALGORITHM_LABELS, feature_catalog
 from app.services.ingest import source_row
-from app.services.series import valid_region_ids
+from app.services.series import resample, valid_region_ids
+from app.services.time_range import has_blocking, resolve_range
 from app.services.validation import check_module, validate_m2
 
 router = APIRouter(prefix="/api/clusters", tags=["clustering"])
@@ -38,14 +40,91 @@ def validate(payload: dict[str, Any] = Body(...)) -> dict:
     }
 
 
+@router.post("/range")
+def range_preview(payload: dict[str, Any] = Body(...)) -> dict:
+    values = payload.get("values") or payload
+    source = source_row(values.get("source_key") or "")
+    region_count = len(valid_region_ids(source["key"]))
+    issues = validate_m2(values, region_count=region_count)
+    _, coerced = check_module("m2", values)
+    resolved = resolve_range(
+        source["key"],
+        str(coerced.get("frequency") or "native"),
+        time_start=coerced.get("time_start") or None,
+        time_end=coerced.get("time_end") or None,
+        start_index=coerced.get("start_index"),
+        window_points=coerced.get("window_points"),
+        path_prefix="m2",
+    )
+    valid_observations = 0
+    valid_time_points = 0
+    if not has_blocking(issues) and resolved.points:
+        data = resample(
+            source["key"],
+            frequency=str(coerced.get("frequency") or "native"),
+            aggregation=str(coerced.get("aggregation") or "mean"),
+        )
+        values_window = data.values[resolved.start_index:resolved.end_index]
+        finite = np.isfinite(values_window)
+        valid_observations = int(finite.sum())
+        valid_time_points = int(finite.any(axis=1).sum())
+        if valid_time_points < 2:
+            issues.append(
+                {
+                    "path": "m2.time_range",
+                    "code": "NO_VALID_OBSERVATIONS",
+                    "severity": "error",
+                    "message": "所选时间范围内有效观测不足 2 个时间点，无法执行聚类。",
+                    "suggestion": "请扩大时间范围或选择具有真实观测的数据源。",
+                    "received_value": valid_time_points,
+                }
+            )
+    return {
+        "range": resolved.to_public(),
+        "issues": issues,
+        "valid": not any(item["severity"] == "error" for item in issues),
+        "valid_observations": valid_observations,
+        "valid_time_points": valid_time_points,
+        "region_count": region_count,
+    }
+
+
 @router.post("/run")
 def run(payload: dict[str, Any] = Body(...)) -> dict:
     values = payload.get("values") or payload
     source = source_row(values.get("source_key") or "")
     region_count = len(valid_region_ids(source["key"]))
     issues = validate_m2(values, region_count=region_count)
-    raise_if_invalid(issues)
     _, coerced = check_module("m2", values)
+    frequency = str(coerced.get("frequency") or "native")
+    resolved = resolve_range(
+        source["key"],
+        frequency,
+        time_start=coerced.get("time_start") or None,
+        time_end=coerced.get("time_end") or None,
+        start_index=coerced.get("start_index"),
+        window_points=coerced.get("window_points"),
+        path_prefix="m2",
+    )
+    if not has_blocking(issues) and resolved.points:
+        preview = resample(
+            source["key"],
+            frequency=frequency,
+            aggregation=str(coerced.get("aggregation") or "mean"),
+        )
+        finite = np.isfinite(preview.values[resolved.start_index:resolved.end_index])
+        if int(finite.any(axis=1).sum()) < 2:
+            issues.append(
+                {
+                    "path": "m2.time_range",
+                    "code": "NO_VALID_OBSERVATIONS",
+                    "severity": "error",
+                    "message": "所选时间范围内有效观测不足 2 个时间点，无法执行聚类。",
+                    "suggestion": "请扩大时间范围或选择具有真实观测的数据源。",
+                    "received_value": 0,
+                }
+            )
+    raise_if_invalid(issues)
     new_id = make_id()
     get_connection().execute(
         """
