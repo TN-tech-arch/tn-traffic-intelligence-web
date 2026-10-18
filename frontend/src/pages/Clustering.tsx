@@ -7,7 +7,7 @@ import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import MapView, {
-  CLUSTER_NOISE_COLOR, CLUSTER_NO_DATA_COLOR, clusterColor,
+  CLUSTER_NO_DATA_COLOR, clusterColor,
 } from '../components/MapView'
 import { LineChart, ScatterChart } from '../components/Charts'
 import InsightCard from '../components/InsightCard'
@@ -46,8 +46,10 @@ const DEFAULT_CONFIG: Record<string, unknown> = {
   hierarchical_n_clusters: 4,
   linkage: 'ward',
   metric: 'euclidean',
-  eps: 1.2,
-  min_samples: 3,
+  spectral_n_clusters: 4,
+  spectral_affinity: 'nearest_neighbors',
+  spectral_n_neighbors: 10,
+  spectral_gamma: 1,
   gmm_n_components: 4,
   covariance_type: 'full',
   reg_covar: 0.000001,
@@ -102,18 +104,20 @@ export default function Clustering() {
       { key: 'window_points', label_zh: '窗口点数', type: 'integer', min: 24, max: 100000, default: 1008, help_zh: '参与特征提取的连续点数，至少覆盖一个完整日周期。', suggestion_zh: '10 分钟频率下 1008 点 ≈ 7 天。' },
       { key: 'features', label_zh: '聚类特征', type: 'array', enum: catalog.features.map((f) => f.key), enum_labels: catalog.features.map((f) => featureLabel(f.key, f.label_zh)), default: DEFAULT_FEATURES, help_zh: '从真实时间序列提取的特征集合。', suggestion_zh: '至少选择 2 个特征。' },
       { key: 'standardize', label_zh: '特征标准化', type: 'boolean', default: true, help_zh: '聚类前对特征做 z-score 标准化。', suggestion_zh: '建议开启。' },
-      { key: 'algorithm', label_zh: '聚类算法', type: 'enum', enum: ['kmeans', 'dbscan', 'hierarchical', 'gmm'], enum_labels: ['K-Means', 'DBSCAN', '层次聚类（Hierarchical）', '高斯混合（GMM）'], default: 'kmeans', help_zh: '四选一的真实聚类算法。', suggestion_zh: '先用 K-Means，再对比其它三种。' },
+      { key: 'algorithm', label_zh: '聚类算法', type: 'enum', enum: ['kmeans', 'spectral', 'hierarchical', 'gmm'], enum_labels: ['K-Means', '谱聚类（Spectral Clustering）', '层次聚类（Hierarchical）', '高斯混合（GMM）'], default: 'kmeans', help_zh: '四选一的真实聚类算法；谱聚类依据区域特征的相似关系分组。', suggestion_zh: '先用 K-Means，再用谱聚类对比相似关系。' },
       { key: 'n_clusters', label_zh: '簇数量 K', type: 'integer', min: 2, max: 30, default: 4, visible_when: { algorithm: 'kmeans' }, enabled_when: { algorithm: 'kmeans' }, help_zh: 'K-Means 的簇数量。', suggestion_zh: '3-8 之间便于解释。' },
       { key: 'n_init', label_zh: '初始化次数', type: 'integer', min: 1, max: 100, default: 10, level: 'advanced', visible_when: { algorithm: 'kmeans' }, enabled_when: { algorithm: 'kmeans' }, help_zh: 'K-Means 重复初始化次数，取最优惯性。', suggestion_zh: '10 是稳健默认值。' },
+      { key: 'spectral_n_clusters', label_zh: '簇数量 K', type: 'integer', min: 2, max: 30, default: 4, visible_when: { algorithm: 'spectral' }, enabled_when: { algorithm: 'spectral' }, help_zh: '谱聚类最终划分的簇数量。', suggestion_zh: '3-8 之间便于解释。' },
+      { key: 'spectral_affinity', label_zh: '相似度构建方式', type: 'enum', enum: ['nearest_neighbors', 'rbf'], enum_labels: ['近邻图（nearest_neighbors）', '径向基核（rbf）'], default: 'nearest_neighbors', visible_when: { algorithm: 'spectral' }, enabled_when: { algorithm: 'spectral' }, help_zh: '谱聚类的相似度构图方式；近邻图强调局部连接，RBF 按距离核建立全局相似度。', suggestion_zh: '区域较多时优先使用近邻图。' },
+      { key: 'spectral_n_neighbors', label_zh: '邻居数量', type: 'integer', min: 2, max: 200, default: 10, visible_when: { algorithm: 'spectral', spectral_affinity: 'nearest_neighbors' }, enabled_when: { algorithm: 'spectral', spectral_affinity: 'nearest_neighbors' }, help_zh: '近邻图模式下每个区域连接的邻居数，必须小于有效区域数。', suggestion_zh: '通常设为有效区域数的 5%-15%。' },
+      { key: 'spectral_gamma', label_zh: 'RBF 相似度参数', type: 'number', min: 0, exclusive_min: true, default: 1, visible_when: { algorithm: 'spectral', spectral_affinity: 'rbf' }, enabled_when: { algorithm: 'spectral', spectral_affinity: 'rbf' }, help_zh: 'RBF 模式下控制相似度随距离衰减的速度，必须大于 0。', suggestion_zh: '默认 1；增大 gamma 会强化局部相似关系。' },
       { key: 'hierarchical_n_clusters', label_zh: '簇数量 K', type: 'integer', min: 2, max: 30, default: 4, visible_when: { algorithm: 'hierarchical' }, enabled_when: { algorithm: 'hierarchical' }, help_zh: '层次聚类的簇数量。', suggestion_zh: '与 K-Means 比较时使用相同 K。' },
       { key: 'linkage', label_zh: '连接方式', type: 'enum', enum: ['ward', 'complete', 'average', 'single'], enum_labels: ['沃德（ward）', '完全连接（complete）', '平均连接（average）', '单连接（single）'], default: 'ward', level: 'advanced', visible_when: { algorithm: 'hierarchical' }, enabled_when: { algorithm: 'hierarchical' }, help_zh: '层次聚类连接准则；沃德法只能配合欧氏距离。', suggestion_zh: '默认使用沃德法。' },
       { key: 'metric', label_zh: '距离度量', type: 'enum', enum: ['euclidean', 'manhattan', 'cosine'], enum_labels: ['欧氏距离（euclidean）', '曼哈顿距离（manhattan）', '余弦距离（cosine）'], default: 'euclidean', level: 'advanced', visible_when: { algorithm: 'hierarchical' }, enabled_when: { algorithm: 'hierarchical' }, help_zh: '距离度量；沃德法仅支持欧氏距离。', suggestion_zh: '默认使用欧氏距离。' },
-      { key: 'eps', label_zh: '邻域半径', type: 'number', min: 0, exclusive_min: true, default: 1.2, visible_when: { algorithm: 'dbscan' }, enabled_when: { algorithm: 'dbscan' }, help_zh: 'DBSCAN 邻域半径（标准化特征空间），必须大于 0。', suggestion_zh: '标准化后 0.3-2.0 较常见。' },
-      { key: 'min_samples', label_zh: '最小样本数', type: 'integer', min: 1, max: 200, default: 3, visible_when: { algorithm: 'dbscan' }, enabled_when: { algorithm: 'dbscan' }, help_zh: 'DBSCAN 核心点最小邻居数。', suggestion_zh: '3-10。' },
       { key: 'gmm_n_components', label_zh: '高斯分量数', type: 'integer', min: 1, max: 30, default: 4, visible_when: { algorithm: 'gmm' }, enabled_when: { algorithm: 'gmm' }, help_zh: 'GMM 高斯分量个数。', suggestion_zh: '3-8。' },
       { key: 'covariance_type', label_zh: '协方差类型', type: 'enum', enum: ['full', 'tied', 'diag', 'spherical'], enum_labels: ['完全协方差（full）', '共享协方差（tied）', '对角协方差（diag）', '球形协方差（spherical）'], default: 'full', level: 'advanced', visible_when: { algorithm: 'gmm' }, enabled_when: { algorithm: 'gmm' }, help_zh: '高斯混合模型的协方差结构；样本少时完全协方差可能不可靠。', suggestion_zh: '样本充足时使用完全协方差。' },
       { key: 'reg_covar', label_zh: '协方差正则项', type: 'number', min: 0, exclusive_min: true, default: 0.000001, level: 'advanced', visible_when: { algorithm: 'gmm' }, enabled_when: { algorithm: 'gmm' }, help_zh: 'GMM 协方差对角线正则项，必须大于 0 以保证数值稳定。', suggestion_zh: '1e-6 起。' },
-      { key: 'random_state', label_zh: '随机种子', type: 'integer', min: 0, max: 2147483647, default: 42, level: 'advanced', help_zh: '固定随机性以便复现。', suggestion_zh: '默认 42。' },
+      { key: 'random_state', label_zh: '随机种子', type: 'integer', min: 0, max: 2147483647, default: 42, level: 'advanced', help_zh: '固定 K-Means、GMM 或谱聚类中的随机过程以便复现。', suggestion_zh: '默认 42。' },
     ],
     [catalog.features],
   )
@@ -324,15 +328,24 @@ export default function Clustering() {
     }
   }
 
+  const clusterDisplayName = (clusterId: number | null | undefined) => {
+    if (clusterId === null || clusterId === undefined) return '无数据'
+    const cluster = (result?.clusters ?? []).find(
+      (item: any) => Number(item.cluster_id) === Number(clusterId),
+    )
+    return cluster?.display_name ??
+      `簇 ${clusterId}（${cluster?.pattern_type?.label ?? '综合流量特征型'}）`
+  }
+
   const regionEntries = useMemo(() => {
     if (!result) return []
     return result.regions.map((item: any) => ({
       region_id: item.region_id,
       value: item.features?.mean ?? null,
       group: item.cluster_id,
-      label: `${item.region_id} · ${item.cluster_id === -1 ? '噪声' : `簇 ${item.cluster_id}`}`,
+      label: `${item.region_id} · ${clusterDisplayName(item.cluster_id)}`,
     }))
-  }, [result])
+  }, [result, clusterDisplayName])
 
   const scatter = useMemo(() => {
     if (!result?.feature_matrix?.length || !result?.labels) return []
@@ -358,8 +371,7 @@ export default function Clustering() {
   const clusterOf = (regionId: string | null) =>
     regionId ? result?.regions?.find((r: any) => r.region_id === regionId)?.cluster_id : undefined
 
-  const normalClusters = (result?.clusters ?? []).filter((cluster: any) => cluster.cluster_id >= 0)
-  const noiseCluster = (result?.clusters ?? []).find((cluster: any) => cluster.cluster_id < 0)
+  const normalClusters = result?.clusters ?? []
   const clusterById: Map<number, any> = new Map(
     (result?.clusters ?? []).map((cluster: any) => [Number(cluster.cluster_id), cluster]),
   )
@@ -410,19 +422,23 @@ export default function Clustering() {
     {
       title: '簇',
       dataIndex: 'cluster_id',
-      width: '12%',
+      width: '24%',
       sorter: (a: any, b: any) => a.cluster_id - b.cluster_id,
       render: (value: number) => (
-        <Tag color={clusterColor(value)}>{value === -1 ? '噪声' : `簇 ${value}`}</Tag>
+        <Tooltip title={clusterDisplayName(value)}>
+          <Tag color={clusterColor(value)} style={{ whiteSpace: 'normal' }}>
+            {clusterDisplayName(value)}
+          </Tag>
+        </Tooltip>
       ),
     },
     {
       title: '模式类型',
       dataIndex: 'pattern_type',
-      width: '16%',
+      width: '14%',
       ellipsis: true,
       render: (value: string, row: any) => (
-        <Tooltip title={clusterById.get(row.cluster_id)?.pattern_type?.hypothesis_zh || value}>
+        <Tooltip title={clusterDisplayName(row.cluster_id)}>
           <span>{value}</span>
         </Tooltip>
       ),
@@ -475,15 +491,9 @@ export default function Clustering() {
             data-cluster-color={clusterColor(cluster.cluster_id)}
             style={{ background: clusterColor(cluster.cluster_id) }}
           />
-          簇 {cluster.cluster_id} · {cluster.region_count} 区
+          {clusterDisplayName(cluster.cluster_id)} · {cluster.region_count} 区
         </span>
       ))}
-      {noiseCluster ? (
-        <span className="tn-inline" style={{ gap: 4 }}>
-          <span className="tn-legend-swatch" style={{ background: CLUSTER_NOISE_COLOR }} />
-          噪声 · {noiseCluster.region_count} 区
-        </span>
-      ) : null}
       <span className="tn-inline" style={{ gap: 4 }}>
         <span className="tn-legend-swatch" style={{ background: CLUSTER_NO_DATA_COLOR }} />
         无数据
@@ -493,7 +503,7 @@ export default function Clustering() {
 
   const visibleConfigFields = visibleFields(schema, config).filter((spec) => (
     !['time_start', 'time_end', 'start_index', 'window_points'].includes(spec.key) &&
-    (spec.key !== 'random_state' || ['kmeans', 'gmm'].includes(String(config.algorithm)))
+    (spec.key !== 'random_state' || ['kmeans', 'spectral', 'gmm'].includes(String(config.algorithm)))
   ))
   const fieldsBeforeRange = visibleConfigFields.filter((spec) =>
     ['source_key', 'frequency', 'aggregation'].includes(spec.key),
@@ -526,7 +536,7 @@ export default function Clustering() {
         module={MODULE_META.m2.index}
         titleZh={MODULE_META.m2.titleZh}
         titleEn={MODULE_META.m2.titleEn}
-        description="K-Means / DBSCAN / Hierarchical / GMM 真实聚类、GIS 簇着色与质量评估"
+        description="K-Means / 谱聚类 / Hierarchical / GMM 真实聚类、GIS 簇着色与质量评估"
         datasetInfo={result ? `最近运行 ${result.cluster_run_id} · ${result.algorithm_label} · ${result.clusters.length} 个簇` : '尚未运行聚类'}
       />
       {errors.length > 0 ? (
@@ -626,6 +636,11 @@ export default function Clustering() {
                 实际算法：Ward 层次聚类 + 欧氏距离；该算法不使用随机种子。
               </div>
             ) : null}
+            {config.algorithm === 'spectral' ? (
+              <div className="tn-muted" style={{ marginTop: -4, marginBottom: 8 }}>
+                实际算法：sklearn Spectral Clustering；先按所选 affinity 构建区域相似度图，再进行谱嵌入和簇划分。
+              </div>
+            ) : null}
             <Button type="primary" block onClick={runClustering} loading={busy} disabled={!valid || rangeBlocked || rangeLoading} style={{ marginTop: 8 }}>
               {ACTION_LABELS.startClustering}
             </Button>
@@ -671,7 +686,7 @@ export default function Clustering() {
         }
         visual={
           <>
-            <PaneHead title={bilingual('GIS 簇分布', 'GIS Cluster Map')} extra={<span className="tn-muted">{selectedRegion ? `已选 ${selectedRegion}（簇 ${clusterOf(selectedRegion)}）` : '点击地图查看区域'}</span>} />
+            <PaneHead title={bilingual('GIS 簇分布', 'GIS Cluster Map')} extra={<span className="tn-muted">{selectedRegion ? `已选 ${selectedRegion} · ${clusterDisplayName(clusterOf(selectedRegion))}` : '点击地图查看区域'}</span>} />
             <MapView
               geojson={geojson}
               entries={regionEntries}
@@ -690,7 +705,7 @@ export default function Clustering() {
                   : clusterColor(entry.group)
               )}
               formatTooltip={(entry, regionId) =>
-                `${regionId}: ${entry?.group === undefined ? '无数据 / 未参与聚类' : entry.group === -1 ? '噪声（DBSCAN）' : `簇 ${entry.group}`}`
+                `${regionId}: ${entry?.group === undefined ? '无数据 / 未参与聚类' : clusterDisplayName(entry.group)}`
               }
               legend={
                 <>
@@ -702,15 +717,9 @@ export default function Clustering() {
                         data-cluster-color={clusterColor(cluster.cluster_id)}
                         style={{ background: clusterColor(cluster.cluster_id) }}
                       />
-                      簇 {cluster.cluster_id}
+                      {clusterDisplayName(cluster.cluster_id)}
                     </span>
                   ))}
-                  {noiseCluster ? (
-                    <span>
-                      <span className="tn-legend-swatch" style={{ background: CLUSTER_NOISE_COLOR }} />
-                      噪声（-1）
-                    </span>
-                  ) : null}
                   <span>
                     <span className="tn-legend-swatch" style={{ background: CLUSTER_NO_DATA_COLOR }} />无数据
                   </span>
@@ -732,6 +741,12 @@ export default function Clustering() {
                     xName={featureAxes[0]?.label}
                     yName={featureAxes[1]?.label}
                     colorFor={(groupId) => clusterColor(groupId)}
+                    groupNames={Object.fromEntries(
+                      normalClusters.map((cluster: any) => [
+                        String(cluster.cluster_id),
+                        clusterDisplayName(cluster.cluster_id),
+                      ]),
+                    )}
                     onSelect={(regionId) => setFocusRegion(regionId)}
                   />
                   <div className="tn-muted">
@@ -763,15 +778,14 @@ export default function Clustering() {
                     <Select
                       size="small"
                       value={clusterFilter}
-                      style={{ width: 120 }}
+                      style={{ width: 230 }}
                       onChange={setClusterFilter}
                       options={[
                         { value: 'all', label: '全部簇' },
                         ...normalClusters.map((cluster: any) => ({
                           value: String(cluster.cluster_id),
-                          label: `簇 ${cluster.cluster_id}`,
+                          label: clusterDisplayName(cluster.cluster_id),
                         })),
-                        ...(noiseCluster ? [{ value: '-1', label: '噪声' }] : []),
                       ]}
                       aria-label="按簇筛选"
                     />
@@ -834,7 +848,7 @@ export default function Clustering() {
                               data-cluster-color={clusterColor(cluster.cluster_id)}
                               style={{ background: clusterColor(cluster.cluster_id) }}
                             />
-                            {cluster.label_zh} · {cluster.region_count} 个区域
+                            {clusterDisplayName(cluster.cluster_id)} · {cluster.region_count} 个区域
                           </span>
                         )}
                       >
@@ -850,6 +864,11 @@ export default function Clustering() {
                         <div style={{ fontSize: 11.5, lineHeight: 1.65 }}>
                           {cluster.characterization?.summary_zh ?? '暂无差异化特征摘要。'}
                         </div>
+                        {cluster.pattern_type?.selection_basis_zh ? (
+                          <div className="tn-muted" style={{ marginTop: 4 }}>
+                            命名依据：{cluster.pattern_type.selection_basis_zh}
+                          </div>
+                        ) : null}
                         <div
                           style={{
                             display: 'grid',
@@ -902,14 +921,6 @@ export default function Clustering() {
                         />
                       </Card>
                     ))}
-                    {noiseCluster ? (
-                      <Alert
-                        type="info"
-                        showIcon
-                        message={`噪声点：${noiseCluster.region_count} 个区域`}
-                        description="DBSCAN 噪声点不构成功能区模式，使用独立灰色显示。"
-                      />
-                    ) : null}
                   </div>
                 ) : (
                   <EmptyState text="尚无聚类结果。" />
@@ -942,7 +953,7 @@ export default function Clustering() {
                           xLabelInterval={2}
                           yName={normalizedPatterns ? '相对水平（各簇均值＝1）' : '流量值'}
                           series={normalClusters.map((cluster: any) => ({
-                            name: `${cluster.label_zh} · ${cluster.region_count} 区`,
+                            name: `${clusterDisplayName(cluster.cluster_id)} · ${cluster.region_count} 区`,
                             data: normalizedPatterns ? cluster.normalized_profile : cluster.intraday_profile,
                             color: clusterColor(cluster.cluster_id),
                           }))}
@@ -961,7 +972,7 @@ export default function Clustering() {
                         xName="星期"
                         yName="流量值"
                         series={normalClusters.map((cluster: any) => ({
-                          name: `${cluster.label_zh} · ${cluster.region_count} 区`,
+                          name: `${clusterDisplayName(cluster.cluster_id)} · ${cluster.region_count} 区`,
                           data: cluster.weekly_profile,
                           color: clusterColor(cluster.cluster_id),
                         }))}
@@ -994,7 +1005,6 @@ export default function Clustering() {
                         <div>轮廓系数（Silhouette）：{result.metrics?.silhouette === null || result.metrics?.silhouette === undefined ? '不适用' : Number(result.metrics.silhouette).toFixed(4)}</div>
                         <div>戴维斯-布尔丁指数（Davies-Bouldin）：{result.metrics?.davies_bouldin === null || result.metrics?.davies_bouldin === undefined ? '不适用' : Number(result.metrics.davies_bouldin).toFixed(4)}</div>
                         <div>方差比准则（Calinski-Harabasz）：{result.metrics?.calinski_harabasz === null || result.metrics?.calinski_harabasz === undefined ? '不适用' : Number(result.metrics.calinski_harabasz).toFixed(2)}</div>
-                        <div>噪声点：{result.metrics?.noise_points ?? 0}</div>
                         <div>实际有效簇：{result.metrics?.n_clusters ?? normalClusters.length}（请求 {result.cluster_count_check?.requested ?? '—'}）</div>
                         <div>
                           区域归属：{result.assignment?.assigned_regions ?? result.regions.length}/
@@ -1006,6 +1016,18 @@ export default function Clustering() {
                       {(result.metrics?.interpretation ?? result.metrics?.notes ?? []).map((note: string) => (
                         <div className="tn-muted" key={note}>
                           · {note}
+                        </div>
+                      ))}
+                    </Card>
+                    <Card size="small" title={bilingual('簇名称与区域归属', 'Cluster Names & Membership')}>
+                      {normalClusters.map((cluster: any) => (
+                        <div key={cluster.cluster_id} className="tn-inline" style={{ gap: 6, marginBottom: 4 }}>
+                          <span
+                            className="tn-legend-swatch"
+                            style={{ background: clusterColor(cluster.cluster_id) }}
+                          />
+                          <strong>{clusterDisplayName(cluster.cluster_id)}</strong>
+                          <span className="tn-muted">{cluster.region_count} 个区域</span>
                         </div>
                       ))}
                     </Card>

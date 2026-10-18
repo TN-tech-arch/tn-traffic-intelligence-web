@@ -154,17 +154,20 @@ try {
       (await page.locator('.tn-three-pane > section').nth(1).locator('section[aria-label="Region List"]').count()) === 1,
     m2Tabs.join('|'),
   )
-  // eps invalid then corrected
+  // Spectral gamma invalid then corrected
   await page.locator('.tn-pane input, .tn-pane .ant-select-selector').first().waitFor()
   await page.locator('[data-field="m2.algorithm"] .ant-select-selector').click()
-  await page.locator('.ant-select-item-option', { hasText: 'DBSCAN' }).first().click()
+  await page.locator('.ant-select-item-option', { hasText: '谱聚类' }).first().click()
   await page.waitForTimeout(400)
-  await setField(page, 'm2.eps', 0)
-  const epsError = await fieldErrorText(page, 'm2.eps')
-  record('T45/T46 eps=0 在输入框下方显示错误', Boolean(epsError && epsError.includes('大于 0')), epsError ?? 'no error shown')
-  await setField(page, 'm2.eps', 1.2)
-  const epsErrorCleared = await fieldErrorText(page, 'm2.eps')
-  record('T45 修正后错误立即清除', !epsErrorCleared, epsErrorCleared ?? 'cleared')
+  await page.locator('[data-field="m2.spectral_affinity"] .ant-select-selector').click()
+  await page.locator('.ant-select-item-option', { hasText: 'rbf' }).first().click()
+  await page.waitForTimeout(300)
+  await setField(page, 'm2.spectral_gamma', 0)
+  const gammaError = await fieldErrorText(page, 'm2.spectral_gamma')
+  record('T45/T46 Spectral gamma=0 在输入框下方显示错误', Boolean(gammaError && gammaError.includes('大于 0')), gammaError ?? 'no error shown')
+  await setField(page, 'm2.spectral_gamma', 1)
+  const gammaErrorCleared = await fieldErrorText(page, 'm2.spectral_gamma')
+  record('T45 修正后错误立即清除', !gammaErrorCleared, gammaErrorCleared ?? 'cleared')
   const nClustersHidden = await page.locator('[data-field="m2.n_clusters"]').count()
   record('T49 切换算法后联动隐藏不相关参数（K-Means 专属项）', nClustersHidden === 0, `n_clusters visible: ${nClustersHidden}`)
   const helpButtons = await page.locator('.tn-field-label button[aria-label$="帮助信息"]').count()

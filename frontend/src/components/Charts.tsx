@@ -92,6 +92,7 @@ export function ScatterChart({
   xName,
   yName,
   colorFor,
+  groupNames,
   onSelect,
 }: {
   points: Array<{
@@ -106,6 +107,7 @@ export function ScatterChart({
   xName?: string
   yName?: string
   colorFor?: (group: number) => string
+  groupNames?: Record<string, string>
   onSelect?: (regionId: string) => void
 }) {
   if (!points.length) return <Empty description="暂无真实数据" />
@@ -113,6 +115,8 @@ export function ScatterChart({
   const clusterColors = Object.fromEntries(
     groups.map((group) => [String(group), colorFor?.(group) ?? '']),
   )
+  const groupName = (group: number) =>
+    groupNames?.[String(group)] ?? `簇 ${group}`
   const option = {
     tooltip: {
       trigger: 'item',
@@ -121,7 +125,7 @@ export function ScatterChart({
         return (
           `<div style="font-size:12px;line-height:1.7">` +
           `<div><b>${data.name ?? '—'}</b></div>` +
-          `<div>所属簇：<b>${data.group < 0 ? '噪声（-1）' : `簇 ${data.group}`}</b></div>` +
+          `<div>所属簇：<b>${groupName(data.group)}</b></div>` +
           `<div>${xName ?? '横轴特征'}：${Number(data.value?.[0]).toFixed(3)}</div>` +
           `<div>${yName ?? '纵轴特征'}：${Number(data.value?.[1]).toFixed(3)}</div>` +
           (data.extra ? `<div style="color:#c3cadb">${data.extra}</div>` : '') +
@@ -135,7 +139,7 @@ export function ScatterChart({
     xAxis: { type: 'value', name: xName ?? '特征值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
     yAxis: { type: 'value', name: yName ?? '特征值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
     series: groups.map((group) => ({
-      name: group < 0 ? '噪声（-1）' : `簇 ${group}`,
+      name: groupName(group),
       type: 'scatter',
       symbolSize: 9,
       itemStyle: { color: colorFor?.(group) },

@@ -181,12 +181,10 @@ export const CLUSTER_PALETTE = [
   '#2467E8', '#12A67A', '#D98F00', '#8B5CF6', '#E4572E', '#0E9AA7', '#C2185B', '#5B7095',
 ]
 
-export const CLUSTER_NOISE_COLOR = '#8B8B8B'
 export const CLUSTER_NO_DATA_COLOR = '#C9D3E2'
 
 /** Single Cluster ID -> color mapping shared by every Module 2 view. */
 export function clusterColor(clusterId: number | null | undefined): string {
   if (clusterId === null || clusterId === undefined) return CLUSTER_NO_DATA_COLOR
-  if (clusterId < 0) return CLUSTER_NOISE_COLOR
   return CLUSTER_PALETTE[Math.abs(clusterId) % CLUSTER_PALETTE.length]
 }

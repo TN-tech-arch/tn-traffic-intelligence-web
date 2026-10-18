@@ -410,9 +410,10 @@ M2_SCHEMA: list[dict[str, Any]] = [
     {"key": "standardize", "label": "Standardize", "label_zh": "特征标准化", "type": "boolean",
      "default": True, "help_zh": "聚类前对特征做 z-score 标准化。", "suggestion_zh": "建议开启。"},
     {"key": "algorithm", "label": "Algorithm", "label_zh": "聚类算法", "type": "enum", "default": "kmeans",
-     "enum": ["kmeans", "dbscan", "hierarchical", "gmm"],
-     "enum_labels": ["K-Means", "DBSCAN", "Hierarchical", "GMM"],
-     "help_zh": "四选一的真实聚类算法。", "suggestion_zh": "先看 K-Means 再对比其它。"},
+     "enum": ["kmeans", "spectral", "hierarchical", "gmm"],
+     "enum_labels": ["K-Means", "Spectral Clustering", "Hierarchical", "GMM"],
+     "help_zh": "四选一的真实聚类算法；谱聚类依据区域特征的相似关系分组。",
+     "suggestion_zh": "先看 K-Means，再用谱聚类对比相似关系。"},
     {"key": "n_clusters", "label": "Clusters (K)", "label_zh": "簇数量 K", "type": "integer",
      "default": 4, "min": 2, "max": 30, "help_zh": "K-Means / Hierarchical 的簇数量。",
      "suggestion_zh": "3-8 之间便于解释。", "visible_when": {"algorithm": "kmeans"},
@@ -425,6 +426,28 @@ M2_SCHEMA: list[dict[str, Any]] = [
      "min": 1, "max": 100, "level": "advanced", "help_zh": "K-Means 重复初始化的次数，取最优惯性。",
      "suggestion_zh": "10 是稳健默认值。", "visible_when": {"algorithm": "kmeans"},
      "enabled_when": {"algorithm": "kmeans"}},
+    {"key": "spectral_n_clusters", "label": "Clusters (K)", "label_zh": "簇数量 K", "type": "integer",
+     "default": 4, "min": 2, "max": 30, "help_zh": "谱聚类最终划分的簇数量。",
+     "suggestion_zh": "3-8 之间便于解释。", "visible_when": {"algorithm": "spectral"},
+     "enabled_when": {"algorithm": "spectral"}},
+    {"key": "spectral_affinity", "label": "Affinity", "label_zh": "相似度构建方式", "type": "enum",
+     "default": "nearest_neighbors", "enum": ["nearest_neighbors", "rbf"],
+     "enum_labels": ["nearest_neighbors", "rbf"],
+     "help_zh": "谱聚类构图方式：近邻图按局部邻居关系连接；RBF 按距离核建立相似度。",
+     "suggestion_zh": "区域较多时先用 nearest_neighbors。", "visible_when": {"algorithm": "spectral"},
+     "enabled_when": {"algorithm": "spectral"}},
+    {"key": "spectral_n_neighbors", "label": "Neighbors", "label_zh": "邻居数量", "type": "integer",
+     "default": 10, "min": 2, "max": 200,
+     "help_zh": "nearest_neighbors 模式下每个区域连接的邻居数量，必须小于有效区域数。",
+     "suggestion_zh": "通常设置为有效区域数的 5%-15%。",
+     "visible_when": {"algorithm": "spectral", "spectral_affinity": "nearest_neighbors"},
+     "enabled_when": {"algorithm": "spectral", "spectral_affinity": "nearest_neighbors"}},
+    {"key": "spectral_gamma", "label": "Gamma", "label_zh": "RBF 相似度参数", "type": "number",
+     "default": 1.0, "min": 0, "exclusive_min": True,
+     "help_zh": "rbf 模式下控制相似度随距离衰减的速度，必须大于 0。",
+     "suggestion_zh": "默认 1.0；增大 gamma 会强化局部相似关系。",
+     "visible_when": {"algorithm": "spectral", "spectral_affinity": "rbf"},
+     "enabled_when": {"algorithm": "spectral", "spectral_affinity": "rbf"}},
     {"key": "linkage", "label": "Linkage", "label_zh": "连接方式", "type": "enum", "default": "ward",
      "enum": ["ward", "complete", "average", "single"],
      "enum_labels": ["ward", "complete", "average", "single"],
@@ -436,13 +459,6 @@ M2_SCHEMA: list[dict[str, Any]] = [
      "enum_labels": ["euclidean", "manhattan", "cosine"],
      "level": "advanced", "help_zh": "距离度量；ward 仅支持欧氏距离。",
      "suggestion_zh": "默认 euclidean。", "enabled_when": {"algorithm": "hierarchical"}},
-    {"key": "eps", "label": "Eps", "label_zh": "邻域半径 eps", "type": "number", "default": 1.2,
-     "min": 0, "exclusive_min": True, "help_zh": "DBSCAN 邻域半径（标准化特征空间），必须大于 0。",
-     "suggestion_zh": "标准化后 0.3-2.0 之间较常见。", "visible_when": {"algorithm": "dbscan"},
-     "enabled_when": {"algorithm": "dbscan"}},
-    {"key": "min_samples", "label": "Min Samples", "label_zh": "最小样本数", "type": "integer", "default": 3,
-     "min": 1, "max": 200, "help_zh": "DBSCAN 核心点最小邻居数。", "suggestion_zh": "3-10。",
-     "visible_when": {"algorithm": "dbscan"}, "enabled_when": {"algorithm": "dbscan"}},
     {"key": "gmm_n_components", "label": "Components", "label_zh": "高斯分量数", "type": "integer",
      "default": 4, "min": 1, "max": 30, "help_zh": "GMM 高斯分量个数。", "suggestion_zh": "3-8。",
      "visible_when": {"algorithm": "gmm"}, "enabled_when": {"algorithm": "gmm"}},
@@ -456,7 +472,8 @@ M2_SCHEMA: list[dict[str, Any]] = [
      "help_zh": "GMM 协方差对角线正则项，必须大于 0 以保证数值稳定。", "suggestion_zh": "1e-6 起。",
      "visible_when": {"algorithm": "gmm"}, "enabled_when": {"algorithm": "gmm"}},
     {"key": "random_state", "label": "Random State", "label_zh": "随机种子", "type": "integer",
-     "default": 42, "min": 0, "max": 2**31 - 1, "level": "advanced", "help_zh": "固定随机性以便复现。",
+     "default": 42, "min": 0, "max": 2**31 - 1, "level": "advanced",
+     "help_zh": "固定 K-Means、GMM 或谱聚类中的随机过程以便复现。",
      "suggestion_zh": "默认 42。"},
 ]
 
@@ -655,11 +672,20 @@ def validate_m2(values: dict[str, Any], *, region_count: int | None = None) -> l
             issues.append(error("m2.metric", "LINKAGE_METRIC",
                                 f"Ward 连接只支持欧氏距离，当前 metric={metric}。",
                                 "请将 metric 改为 euclidean 或更换 linkage。", metric))
-    if algorithm == "dbscan" and region_count is not None and region_count < (coerced.get("min_samples") or 0):
-        issues.append(warning("m2.min_samples", "MIN_SAMPLES_LARGE",
-                              f"min_samples={coerced.get('min_samples')} 大于可用区域数 {region_count}，"
-                              "很可能所有点都被判为噪声。",
-                              "请降低 min_samples。", coerced.get("min_samples")))
+    if algorithm == "spectral" and region_count is not None:
+        spectral_clusters = coerced.get("spectral_n_clusters") or 0
+        if spectral_clusters >= region_count:
+            issues.append(error("m2.spectral_n_clusters", "CLUSTERS_GT_SAMPLES",
+                                f"spectral_n_clusters={spectral_clusters} 必须小于可用区域数 {region_count}。",
+                                "请减小簇数量，确保至少留下一个有效区域用于谱嵌入。",
+                                spectral_clusters))
+        if coerced.get("spectral_affinity") == "nearest_neighbors":
+            neighbors = coerced.get("spectral_n_neighbors") or 0
+            if neighbors >= region_count:
+                issues.append(error("m2.spectral_n_neighbors", "NEIGHBORS_GT_SAMPLES",
+                                    f"n_neighbors={neighbors} 必须小于可用区域数 {region_count}。",
+                                    f"请把邻居数量调整为 2-{max(1, region_count - 1)}。",
+                                    neighbors))
     if algorithm == "kmeans" and region_count is not None and (coerced.get("n_clusters") or 0) > region_count:
         issues.append(error("m2.n_clusters", "CLUSTERS_GT_SAMPLES",
                             f"n_clusters={coerced.get('n_clusters')} 大于可用区域数 {region_count}。",

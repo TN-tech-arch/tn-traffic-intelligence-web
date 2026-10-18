@@ -10,7 +10,7 @@
 | ☑ Pass | T03 | 质量报告 `zero_count=735`、`nan_count=0` | ZTE 真实零值保留（不视为 NaN）；缺失点为 0；插值/丢弃规则记录在 Dataset 质量报告中且不越界 |
 | ☑ Pass | T04 | `ui_check.mjs`：GIS 常驻、切 Tab 不消失、88 多边形渲染；`/api/analysis/spatial` 随 `time_index` 变化 | 地图选择区域/时间 → 右侧曲线与真实统计随之变化 |
 | ☑ Pass | T05 | `/api/analysis/compare` 返回 z-score 归一化形状 + 免责声明；UI Tag「时间与单位免责声明」 | 明确禁止原始值同量纲比较，并说明时段不重叠与 ZTE 为 4G 下行流量 |
-| ☑ Pass | T06 | `/api/clusters/run` + `services/clustering.py` | K-Means/DBSCAN/Hierarchical/GMM 均真实运行（sklearn）；DBSCAN 噪声 -1，有效簇不足 2 时质量指标返回 N/A 并给原因 |
+| ☑ Pass | T06 | `/api/clusters/run` + `services/clustering.py` | K-Means/Spectral/Hierarchical/GMM 均真实运行（sklearn）；谱聚类的 affinity、邻居数与 gamma 实际生效；有效簇不足 2 时质量指标返回 N/A 并给原因 |
 | ☑ Pass | T07 | 簇摘要 `inferred_zone_type.is_inferred=true` + 免责声明 | 标签明示为推测；ZTE 无时序区域不进入聚类（`dropped_regions` / `no_data_regions` 记录） |
 | ☑ Pass | T08 | `test_windows.py`（窗口定义/边界）+ UI 三个预览区 | X/Y 边界、时间与步长、首末合法窗口均与规范一致；L=0 在前端与后端均被拒绝 |
 | ☑ Pass | T09 | `test_ratio_sum_must_be_one`、`test_targets_never_cross_split_boundaries`、UI 比例报错 | 默认 70/15/15；分割无泄漏；各 split 实际窗口数与预览一致；非法配置阻止 Save（前端禁用 + 后端 422） |

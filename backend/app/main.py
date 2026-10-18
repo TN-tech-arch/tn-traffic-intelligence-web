@@ -29,6 +29,7 @@ from app.api import (
 )
 from app.core.config import PROJECT_ROOT, settings
 from app.core.errors import Conflict, NotFound, RequestRejected
+from app.db.maintenance import purge_legacy_dbscan_history
 from app.db.migrate import run_migrations
 from app.services.ingest import SOURCE_DEFINITIONS, import_all, sources_summary
 
@@ -36,6 +37,7 @@ from app.services.ingest import SOURCE_DEFINITIONS, import_all, sources_summary
 def bootstrap() -> dict:
     settings.ensure_dirs()
     applied = run_migrations()
+    cluster_maintenance = purge_legacy_dbscan_history()
     imported: list[str] = []
     missing: list[str] = []
     if not sources_summary():
@@ -46,7 +48,12 @@ def bootstrap() -> dict:
         if not missing:
             results = import_all(write_cache=True)
             imported = list(results.keys())
-    return {"migrations": applied, "imported": imported, "missing_files": missing}
+    return {
+        "migrations": applied,
+        "imported": imported,
+        "missing_files": missing,
+        "cluster_maintenance": cluster_maintenance,
+    }
 
 
 @asynccontextmanager

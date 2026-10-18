@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import numpy as np
@@ -17,7 +16,7 @@ from app.services.time_range import has_blocking, resolve_range
 
 ALGORITHM_LABELS = {
     "kmeans": "K-Means",
-    "dbscan": "DBSCAN",
+    "spectral": "Spectral Clustering",
     "hierarchical": "Hierarchical",
     "gmm": "GMM",
 }
@@ -44,16 +43,46 @@ def _cluster_labels(matrix: np.ndarray, params: dict[str, Any]) -> tuple[np.ndar
         labels = model.fit_predict(matrix)
         detail["inertia"] = float(model.inertia_)
         detail["n_iter"] = int(model.n_iter_)
-    elif algorithm == "dbscan":
-        from sklearn.cluster import DBSCAN
+    elif algorithm == "spectral":
+        from sklearn.cluster import SpectralClustering
 
-        model = DBSCAN(
-            eps=float(params.get("eps", 1.2)),
-            min_samples=int(params.get("min_samples", 3)),
-            metric=params.get("dbscan_metric", "euclidean"),
-        )
+        n_clusters = int(params.get("spectral_n_clusters", 4))
+        if n_clusters >= matrix.shape[0]:
+            raise ValueError(
+                f"谱聚类簇数量 {n_clusters} 必须小于有效区域数 {matrix.shape[0]}。"
+            )
+        affinity = str(params.get("spectral_affinity", "nearest_neighbors"))
+        model_options: dict[str, Any] = {
+            "n_clusters": n_clusters,
+            "random_state": int(params.get("random_state", 42)),
+            "affinity": affinity,
+        }
+        if affinity == "nearest_neighbors":
+            n_neighbors = int(params.get("spectral_n_neighbors", 10))
+            if n_neighbors < 1 or n_neighbors >= matrix.shape[0]:
+                raise ValueError(
+                    f"谱聚类邻居数量 {n_neighbors} 必须在 1 到 {matrix.shape[0] - 1} 之间。"
+                )
+            model_options["n_neighbors"] = n_neighbors
+            detail["n_neighbors"] = n_neighbors
+        elif affinity == "rbf":
+            gamma = float(params.get("spectral_gamma", 1.0))
+            if gamma <= 0:
+                raise ValueError("谱聚类 RBF gamma 必须大于 0。")
+            model_options["gamma"] = gamma
+            detail["gamma"] = gamma
+        else:
+            raise ValueError(f"不支持的谱聚类相似度构建方式：{affinity}")
+        model = SpectralClustering(**model_options)
         labels = model.fit_predict(matrix)
-        detail["core_samples"] = int(getattr(model, "core_sample_indices_", np.array([])).size)
+        detail.update(
+            {
+                "n_clusters": n_clusters,
+                "affinity": affinity,
+                "random_state": int(params.get("random_state", 42)),
+                "implementation": "sklearn.cluster.SpectralClustering",
+            }
+        )
     elif algorithm == "hierarchical":
         from sklearn.cluster import AgglomerativeClustering
 
@@ -83,10 +112,10 @@ def _cluster_labels(matrix: np.ndarray, params: dict[str, Any]) -> tuple[np.ndar
 
 
 def _quality_metrics(matrix: np.ndarray, labels: np.ndarray) -> dict[str, Any]:
-    unique = sorted({int(x) for x in labels.tolist() if int(x) >= 0})
+    unique = sorted({int(x) for x in labels.tolist()})
     metrics: dict[str, Any] = {
         "n_clusters": len(unique),
-        "noise_points": int((labels == -1).sum()),
+        "noise_points": 0,
         "silhouette": None,
         "davies_bouldin": None,
         "calinski_harabasz": None,
@@ -95,22 +124,18 @@ def _quality_metrics(matrix: np.ndarray, labels: np.ndarray) -> dict[str, Any]:
     if len(unique) < 2:
         metrics["notes"].append("有效簇少于 2 个，轮廓系数、Davies-Bouldin 和 Calinski-Harabasz 指标不适用。")
         return metrics
-    mask = labels >= 0
-    if mask.sum() < len(unique):
-        metrics["notes"].append("存在噪声点，质量指标只在非噪声样本上计算。")
     from sklearn import metrics as skm
 
-    sub_matrix, sub_labels = matrix[mask], labels[mask]
     try:
-        metrics["silhouette"] = float(skm.silhouette_score(sub_matrix, sub_labels))
+        metrics["silhouette"] = float(skm.silhouette_score(matrix, labels))
     except Exception as exc:
         metrics["notes"].append(f"轮廓系数无法计算：{exc}")
     try:
-        metrics["davies_bouldin"] = float(skm.davies_bouldin_score(sub_matrix, sub_labels))
+        metrics["davies_bouldin"] = float(skm.davies_bouldin_score(matrix, labels))
     except Exception as exc:
         metrics["notes"].append(f"Davies-Bouldin 无法计算：{exc}")
     try:
-        metrics["calinski_harabasz"] = float(skm.calinski_harabasz_score(sub_matrix, sub_labels))
+        metrics["calinski_harabasz"] = float(skm.calinski_harabasz_score(matrix, labels))
     except Exception as exc:
         metrics["notes"].append(f"Calinski-Harabasz 无法计算：{exc}")
     return metrics
@@ -141,49 +166,165 @@ def _rank_word(index: int, count: int, words: list[str]) -> str:
     return words[scaled]
 
 
-def _pattern_type(feature_means: dict[str, float]) -> dict[str, Any]:
-    """Coarse temporal shape only; land-use wording is an explicit hypothesis."""
-    peak = float(feature_means.get("intraday_peak_ratio") or 0.0)
-    day_night = float(feature_means.get("day_night_ratio") or 0.0)
-    weekday_weekend = float(feature_means.get("weekday_weekend_ratio") or 0.0)
-    cv = float(feature_means.get("cv") or 0.0)
-    seasonality = float(feature_means.get("daily_seasonality") or 0.0)
-    if peak >= 1.4 and day_night >= 1.35 and weekday_weekend >= 1.2:
-        key = "daytime_peak"
-        label = "日间高峰型"
-        hypothesis = "可能与通勤或办公活动有关（假设，未验证真实土地用途）"
-    elif peak >= 1.25 and day_night >= 1.12:
-        key = "daytime_biased"
-        label = "日间偏强型"
-        hypothesis = None
-    elif day_night < 0.9:
-        key = "night_active"
-        label = "夜间活跃型"
-        hypothesis = None
-    elif cv < 0.32 and peak < 1.3:
-        key = "steady"
-        label = "平稳均衡型"
-        hypothesis = None
+def _percentile_rank(values: np.ndarray, value: float) -> float | None:
+    finite = np.asarray(values, dtype="float64")
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0 or not np.isfinite(value):
+        return None
+    below = int((finite < value).sum())
+    equal = int(np.isclose(finite, value, rtol=1e-10, atol=1e-12).sum())
+    return float((below + 0.5 * equal) / finite.size)
+
+
+def _pattern_type(
+    feature_means: dict[str, float],
+    matrix: np.ndarray,
+    names: list[str],
+) -> dict[str, Any]:
+    """Name a cluster from its real statistics relative to all valid regions.
+
+    The label never uses a cluster number and never asserts a land-use class.
+    High/low flow and volatility are percentile based rather than fixed absolute
+    cut-offs, so the same rule adapts to Milano, Trentino and ZTE.
+    """
+    index = {name: position for position, name in enumerate(names)}
+    raw = {
+        "mean": feature_means.get("mean"),
+        "std": feature_means.get("std"),
+        "cv": feature_means.get("cv"),
+        "intraday_peak_ratio": feature_means.get("intraday_peak_ratio"),
+        "day_night_ratio": feature_means.get("day_night_ratio"),
+        "weekday_weekend_ratio": feature_means.get("weekday_weekend_ratio"),
+        "daily_seasonality": feature_means.get("daily_seasonality"),
+    }
+
+    def feature_percentile(key: str) -> float | None:
+        position = index.get(key)
+        value = raw.get(key)
+        if position is None or value is None:
+            return None
+        return _percentile_rank(matrix[:, position], float(value))
+
+    mean_pct = feature_percentile("mean")
+    cv_pct = feature_percentile("cv")
+    peak_pct = feature_percentile("intraday_peak_ratio")
+    season_pct = feature_percentile("daily_seasonality")
+    day_night_pct = feature_percentile("day_night_ratio")
+    weekday_pct = None
+    weekday_position = index.get("weekday_weekend_ratio")
+    weekday_value = raw.get("weekday_weekend_ratio")
+    if weekday_position is not None and weekday_value is not None:
+        deviations = np.abs(matrix[:, weekday_position] - 1.0)
+        weekday_pct = _percentile_rank(deviations, abs(float(weekday_value) - 1.0))
+
+    def level(pct: float | None, *, high: float, low: float) -> str:
+        if pct is None:
+            return "unknown"
+        if pct >= 0.85:
+            return "very_high"
+        if pct >= high:
+            return "high"
+        if pct <= 0.15:
+            return "very_low"
+        if pct <= low:
+            return "low"
+        return "mid"
+
+    flow_level = level(mean_pct, high=0.65, low=0.35)
+    vol_level = level(cv_pct, high=0.70, low=0.30)
+    flow_words = {
+        "very_high": "高流量",
+        "high": "中高流量",
+        "mid": "中流量",
+        "low": "中低流量",
+        "very_low": "低流量",
+    }
+    vol_words = {
+        "very_high": "高波动",
+        "high": "高波动",
+        "mid": "波动适中",
+        "low": "平稳",
+        "very_low": "平稳",
+    }
+    key_by_label = {
+        "高流量·高波动型": "high_flow_high_volatility",
+        "高流量·波动适中型": "high_flow_mid_volatility",
+        "高流量·平稳型": "high_flow_low_volatility",
+        "中高流量·高波动型": "upper_mid_flow_high_volatility",
+        "中高流量·波动适中型": "upper_mid_flow_mid_volatility",
+        "中高流量·平稳型": "upper_mid_flow_low_volatility",
+        "中流量·高波动型": "mid_flow_high_volatility",
+        "中流量·波动适中型": "mid_flow_mid_volatility",
+        "中流量·平稳型": "mid_flow_low_volatility",
+        "中低流量·高波动型": "lower_mid_flow_high_volatility",
+        "中低流量·波动适中型": "lower_mid_flow_mid_volatility",
+        "中低流量·平稳型": "lower_mid_flow_low_volatility",
+        "低流量·高波动型": "low_flow_high_volatility",
+        "低流量·波动适中型": "low_flow_mid_volatility",
+        "低流量·平稳型": "low_flow_low_volatility",
+        "流量峰值突出型": "prominent_peak",
+        "日周期特征明显型": "strong_daily_cycle",
+        "工作日与周末差异明显型": "weekday_weekend_difference",
+        "综合流量特征型": "mixed_profile",
+    }
+
+    if flow_level != "unknown" and vol_level != "unknown":
+        label = f"{flow_words[flow_level]}·{vol_words[vol_level]}型"
+        selection_basis = f"Mean 百分位 {mean_pct:.3f}；CV 百分位 {cv_pct:.3f}"
+        if flow_level == "mid" and vol_level == "mid":
+            temporal_candidates = [
+                (peak_pct, "流量峰值突出型", "日内峰值比"),
+                (weekday_pct, "工作日与周末差异明显型", "工作日/周末偏离度"),
+                (season_pct, "日周期特征明显型", "日周期强度"),
+            ]
+            best = max(
+                (item for item in temporal_candidates if item[0] is not None and item[0] >= 0.80),
+                default=None,
+                key=lambda item: float(item[0]),
+            )
+            if best is not None:
+                label = best[1]
+                selection_basis = f"{best[2]}百分位 {float(best[0]):.3f}，作为主要区分特征"
     else:
-        key = "mixed"
-        label = "混合波动型"
-        hypothesis = None
+        temporal_candidates = [
+            (peak_pct, "流量峰值突出型", "日内峰值比"),
+            (weekday_pct, "工作日与周末差异明显型", "工作日/周末偏离度"),
+            (season_pct, "日周期特征明显型", "日周期强度"),
+        ]
+        best = max(
+            (item for item in temporal_candidates if item[0] is not None and item[0] >= 0.80),
+            default=None,
+            key=lambda item: float(item[0]),
+        )
+        if best is None:
+            label = "综合流量特征型"
+            selection_basis = "Mean 或 CV 不可用，且没有单一时间特征达到 80% 百分位"
+        else:
+            label = best[1]
+            selection_basis = f"{best[2]}百分位 {float(best[0]):.3f}，作为主要区分特征"
+
     return {
-        "key": key,
+        "key": key_by_label[label],
         "label": label,
-        "is_hypothesis": hypothesis is not None,
-        "hypothesis_zh": hypothesis,
+        "is_hypothesis": False,
+        "hypothesis_zh": None,
         "evidence": {
-            "intraday_peak_ratio": peak,
-            "day_night_ratio": day_night,
-            "weekday_weekend_ratio": weekday_weekend,
-            "cv": cv,
-            "daily_seasonality": seasonality,
+            **raw,
+            "mean_percentile": mean_pct,
+            "cv_percentile": cv_pct,
+            "intraday_peak_percentile": peak_pct,
+            "day_night_percentile": day_night_pct,
+            "weekday_weekend_deviation_percentile": weekday_pct,
+            "daily_seasonality_percentile": season_pct,
+            "valid_region_count": int(matrix.shape[0]),
         },
+        "selection_basis_zh": selection_basis,
         "rule_zh": (
-            "日内峰值比≥1.40、昼夜比≥1.35 且工作日/周末比≥1.20 => 日间高峰型；"
-            "日内峰值比≥1.25 且昼夜比≥1.12 => 日间偏强型；"
-            "否则按夜间活跃、平稳均衡或混合波动归类。"
+            "先比较该簇 Mean 与 CV 在全部有效区域中的百分位：Mean≥65% 为高流量、"
+            "35%-65% 为中流量、≤35% 为中低/低流量；CV≥70% 为高波动、≤30% 为平稳。"
+            "仅当流量和波动都处于中间水平时，才用日内峰值、工作日/周末偏离度或"
+            "日周期强度的 80% 百分位选择单一主导特征；否则使用综合流量特征型。"
+            "阈值基于当前数据分布，不使用固定绝对流量值，也不推断土地用途。"
         ),
     }
 
@@ -604,6 +745,86 @@ def _pca_projection(
     }
 
 
+def refresh_cluster_result_names(result: dict[str, Any]) -> dict[str, Any]:
+    """Recompute descriptive names from a stored run without changing labels.
+
+    Older results were saved with the previous naming rules.  Rebuilding only
+    the explanatory fields keeps their original cluster IDs, region membership,
+    colors and quality metrics intact while presenting the current terminology.
+    """
+    matrix = np.asarray(result.get("feature_matrix") or [], dtype="float64")
+    scaled = np.asarray(result.get("scaled_matrix") or [], dtype="float64")
+    labels = np.asarray(result.get("labels") or [], dtype="int64")
+    names = list(result.get("feature_names") or [])
+    clusters = list(result.get("clusters") or [])
+    if (
+        matrix.size == 0
+        or scaled.size == 0
+        or labels.size == 0
+        or not names
+        or not clusters
+    ):
+        return result
+
+    feature_means_by_cluster = {
+        int(summary["cluster_id"]): summary.get("feature_means", {})
+        for summary in clusters
+        if int(summary["cluster_id"]) >= 0
+    }
+    for summary in clusters:
+        cluster_id = int(summary["cluster_id"])
+        if cluster_id < 0:
+            continue
+        pattern_type = _pattern_type(
+            summary.get("feature_means", {}),
+            matrix,
+            names,
+        )
+        summary["pattern_type"] = pattern_type
+        summary["display_name"] = f"簇 {cluster_id}（{pattern_type['label']}）"
+        summary["label_zh"] = summary["display_name"]
+        summary["characterization"] = _characterization(
+            cluster_id, feature_means_by_cluster
+        )
+        summary["inferred_zone_type"] = {
+            "label": pattern_type["label"],
+            "is_inferred": False,
+            "hypothesis_zh": None,
+            "evidence": pattern_type["evidence"],
+            "disclaimer_zh": "该名称仅描述当前数据中的统计特征，不代表真实土地用途。",
+        }
+
+    cluster_index = {
+        int(cluster_id): [
+            position for position, label in enumerate(labels.tolist())
+            if int(label) == int(cluster_id)
+        ]
+        for cluster_id in feature_means_by_cluster
+    }
+    pairwise, pair_by_cluster = _build_pairwise_analysis(
+        clusters, scaled, cluster_index, names
+    )
+    for summary in clusters:
+        summary["differences"] = pair_by_cluster.get(int(summary["cluster_id"]), [])
+    quality = result.get("quality") or {}
+    assignment = result.get("assignment") or {}
+    span_days = float(result.get("sample_window_days") or 0.0)
+    result["pairwise_differences"] = pairwise
+    result["pattern_insights"] = _build_pattern_insights(
+        clusters,
+        pairwise,
+        quality,
+        span_days=span_days,
+        assignment=assignment,
+    )
+    result["disclaimer_zh"] = (
+        "簇模式名来自真实流量特征及其在当前有效区域中的统计位置；"
+        "不推断商业、办公、住宅或通勤等真实土地用途。"
+    )
+    result["name_rule_version"] = "distribution_percentile_v2"
+    return result
+
+
 def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progress=None) -> dict[str, Any]:
     """Execute one genuine clustering run and persist every real result."""
     row = query_one("SELECT * FROM clusters WHERE cluster_run_id = ?", (cluster_run_id,))
@@ -661,6 +882,8 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
     scaled = (matrix - scaler_mean) / scaler_std if standardize_applied else matrix
     report("Clustering", 45.0, f"运行 {ALGORITHM_LABELS[params['algorithm']]}")
     labels, algo_detail = _cluster_labels(scaled, params)
+    if np.any(labels < 0):
+        raise ValueError("聚类算法返回了无效簇标签，无法生成可靠的功能区结果。")
     quality = _quality_metrics(scaled, labels)
     report("Summarising", 75.0, "计算簇摘要与典型模式")
 
@@ -688,7 +911,7 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
         profile_mean = float(np.mean(finite_profile)) if finite_profile else None
         summary = {
             "cluster_id": label,
-            "label_zh": "噪声点" if label == -1 else f"簇 {label}",
+            "label_zh": f"簇 {label}",
             "region_count": len(positions),
             "regions": member_regions,
             "feature_means": {
@@ -713,43 +936,22 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
     feature_means_by_cluster = {
         int(summary["cluster_id"]): summary["feature_means"]
         for summary in cluster_summaries
-        if int(summary["cluster_id"]) >= 0
     }
     for summary in cluster_summaries:
         cluster_id = int(summary["cluster_id"])
-        if cluster_id < 0:
-            summary["pattern_type"] = {
-                "key": "noise",
-                "label": "噪声点",
-                "is_hypothesis": False,
-                "hypothesis_zh": None,
-                "evidence": {},
-                "rule_zh": "DBSCAN 噪声点不构成功能模式。",
-            }
-            summary["characterization"] = {"summary_zh": "未归入稳定簇的噪声点", "tags": ["噪声"]}
-            summary["differences"] = []
-            summary["reliability"] = {
-                "level": "low",
-                "notes": ["噪声点不参与典型功能区模式解释。"],
-            }
-            summary["inferred_zone_type"] = {
-                "label": "噪声点",
-                "is_inferred": False,
-                "evidence": {},
-                "disclaimer_zh": "噪声点是算法输出，不代表功能区类型。",
-            }
-            continue
-        pattern_type = _pattern_type(summary["feature_means"])
+        pattern_type = _pattern_type(summary["feature_means"], matrix, names)
         characterization = _characterization(cluster_id, feature_means_by_cluster)
         summary["pattern_type"] = pattern_type
+        summary["display_name"] = f"簇 {cluster_id}（{pattern_type['label']}）"
+        summary["label_zh"] = summary["display_name"]
         summary["characterization"] = characterization
         summary["inferred_zone_type"] = {
             "label": pattern_type["label"],
-            "is_inferred": True,
+            "is_inferred": False,
             "hypothesis_zh": pattern_type["hypothesis_zh"],
             "evidence": pattern_type["evidence"],
             "disclaimer_zh": (
-                "该名称仅描述真实时间模式；涉及通勤、办公、商业或住宅的词均为未验证假设。"
+                "该名称仅描述当前数据中的统计特征，不代表真实土地用途。"
             ),
         }
         notes = [f"该簇包含 {summary['region_count']} 个区域。"]
@@ -771,7 +973,6 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
     sizes = {
         int(summary["cluster_id"]): int(summary["region_count"])
         for summary in cluster_summaries
-        if int(summary["cluster_id"]) >= 0
     }
     assigned_regions = sum(sizes.values())
     assignment = {
@@ -785,6 +986,8 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
     expected_clusters = None
     if params["algorithm"] == "kmeans":
         expected_clusters = int(params.get("n_clusters", 4))
+    elif params["algorithm"] == "spectral":
+        expected_clusters = int(params.get("spectral_n_clusters", 4))
     elif params["algorithm"] == "hierarchical":
         expected_clusters = int(params.get("hierarchical_n_clusters", 4))
     elif params["algorithm"] == "gmm":
@@ -862,7 +1065,11 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
         "frequency": frequency,
         "aggregation": aggregation,
         "feature_help": {key: FEATURE_LABELS[key] for key in names if key in FEATURE_LABELS},
-        "disclaimer_zh": "簇模式名来自真实流量特征；通勤、办公、商业、住宅等土地用途表述均为未验证假设。",
+        "disclaimer_zh": (
+            "簇模式名来自真实流量特征及其在当前有效区域中的统计位置；"
+            "不推断商业、办公、住宅或通勤等真实土地用途。"
+        ),
+        "name_rule_version": "distribution_percentile_v2",
     }
     get_connection().execute(
         """

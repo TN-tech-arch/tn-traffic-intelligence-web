@@ -25,7 +25,7 @@
 | 原生/30min/1h/1day 重采样（sum/mean） | Verified | 不完整桶记为缺失 |
 | GIS 多边形 + No Data 渲染 | Verified | Leaflet Canvas 渲染，88/223/162 多边形与真实指标涂色 |
 | M1 三个右侧 Tab | Verified | 浏览器测试逐项断言 |
-| M2 四种聚类 + 四个 Tab + 质量指标 N/A 语义 | Verified | DBSCAN 噪声 -1；簇类型标注为推测 |
+| M2 四种聚类 + 三个分析 Tab + 中央区域列表 + 质量指标 N/A 语义 | Verified | K-Means / Spectral / Hierarchical / GMM；簇名依据当前有效区域的 Mean、CV 与时间特征百分位生成 |
 | M3 L/H/S、70/15/15、无泄漏切分、因果插值、标准化 | Verified | 单测 + 端到端 |
 | M3 Dataset ID、原子构建、Archive/Delete 依赖保护 | Verified | 失败无半成品；被引用数据集删除返回 409 |
 | M4 12 算法注册表与参数 schema | Verified | `test_registry_has_exactly_twelve_algorithms` 等 |

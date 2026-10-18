@@ -1,11 +1,19 @@
 """Module 2 integration checks on the real Milano Hierarchical K=4 result."""
 
+import copy
+from pathlib import Path
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.deps import create_job
+from app.core.config import settings
+from app.core.ids import cluster_run_id as make_cluster_id, now_utc
+from app.db.connection import get_connection, query_one
+from app.db.maintenance import purge_legacy_dbscan_history
 from app.main import app
-from app.services.clustering import run_clustering
+from app.services.clustering import refresh_cluster_result_names, run_clustering
 from app.services.series import resample
 
 client = TestClient(app)
@@ -48,10 +56,15 @@ def hierarchical_payload():
             4,
         ),
         (
-            "dbscan",
-            {"eps": 1.2, "min_samples": 3},
-            {"core_samples"},
-            None,
+            "spectral",
+            {
+                "spectral_n_clusters": 4,
+                "spectral_affinity": "nearest_neighbors",
+                "spectral_n_neighbors": 10,
+                "random_state": 42,
+            },
+            {"affinity", "n_neighbors", "n_clusters", "implementation"},
+            4,
         ),
         (
             "hierarchical",
@@ -119,20 +132,67 @@ def test_all_four_algorithms_execute_and_persist_real_results(
         assert {
             int(key): value for key, value in persisted_assignment["cluster_sizes"].items()
         } == assignment["cluster_sizes"]
-        if expected_clusters is not None:
-            assert result["cluster_count_check"] == {
-                "requested": expected_clusters,
-                "actual": expected_clusters,
-                "matches": True,
-            }
-            assert state["metrics"]["n_clusters"] == expected_clusters
-            assert state["metrics"]["noise_points"] == 0
-        else:
-            assert result["cluster_count_check"]["requested"] is None
-            assert result["algorithm_detail"]["core_samples"] > 0
-            assert len(result["clusters"]) > 1
+        assert result["cluster_count_check"] == {
+            "requested": expected_clusters,
+            "actual": expected_clusters,
+            "matches": True,
+        }
+        assert state["metrics"]["n_clusters"] == expected_clusters
+        assert state["metrics"]["noise_points"] == 0
+        assert all(item["cluster_id"] >= 0 for item in result["clusters"])
     finally:
         client.delete(f"/api/clusters/{run_id}")
+
+
+def test_spectral_rbf_uses_real_spectral_model_and_parameters():
+    payload = hierarchical_payload()
+    payload["values"].update(
+        {
+            "algorithm": "spectral",
+            "spectral_n_clusters": 4,
+            "spectral_affinity": "rbf",
+            "spectral_gamma": 0.7,
+            "random_state": 17,
+        }
+    )
+    created = client.post("/api/clusters/run", json=payload)
+    assert created.status_code == 200, created.text
+    run_id = created.json()["cluster_run_id"]
+    try:
+        result = run_clustering(
+            run_id,
+            job_id="test-spectral-rbf",
+            cancel_requested=lambda: False,
+        )
+        assert result["algorithm"] == "spectral"
+        assert result["algorithm_detail"] == {
+            "n_clusters": 4,
+            "affinity": "rbf",
+            "gamma": 0.7,
+            "random_state": 17,
+            "implementation": "sklearn.cluster.SpectralClustering",
+        }
+        assert len(set(result["labels"])) == 4
+        assert result["quality"]["noise_points"] == 0
+        assert all(item["cluster_id"] >= 0 for item in result["clusters"])
+    finally:
+        client.delete(f"/api/clusters/{run_id}")
+
+
+def test_removed_dbscan_algorithm_is_rejected_without_persisting_a_run():
+    payload = hierarchical_payload()
+    payload["values"]["algorithm"] = "dbscan"
+    payload["values"]["eps"] = 1.2
+    payload["values"]["min_samples"] = 3
+    before = len(client.get("/api/clusters?limit=500").json()["runs"])
+    rejected = client.post("/api/clusters/run", json=payload)
+    assert rejected.status_code == 422
+    assert any(
+        issue["path"] == "m2.algorithm" and issue["code"] == "ENUM_INVALID"
+        for issue in rejected.json()["issues"]
+    )
+    after = len(client.get("/api/clusters?limit=500").json()["runs"])
+    assert after == before
 
 
 def test_hierarchical_k4_has_unique_assignments_and_distinct_explanations():
@@ -179,9 +239,14 @@ def test_hierarchical_k4_has_unique_assignments_and_distinct_explanations():
         assert len(result["pca"]["projection"]) == 88
 
         clusters = {cluster["cluster_id"]: cluster for cluster in result["clusters"]}
-        assert clusters[0]["pattern_type"]["key"] == clusters[2]["pattern_type"]["key"]
-        assert clusters[1]["pattern_type"]["key"] == clusters[3]["pattern_type"]["key"]
-        assert clusters[0]["pattern_type"]["key"] != clusters[1]["pattern_type"]["key"]
+        assert clusters[0]["display_name"] == "簇 0（高流量·高波动型）"
+        assert clusters[1]["display_name"] == "簇 1（中高流量·波动适中型）"
+        assert clusters[2]["display_name"] == "簇 2（中低流量·高波动型）"
+        assert clusters[3]["display_name"] == "簇 3（中流量·平稳型）"
+        assert len({cluster["display_name"] for cluster in clusters.values()}) == 4
+        assert clusters[0]["pattern_type"]["is_hypothesis"] is False
+        assert clusters[0]["pattern_type"]["evidence"]["mean_percentile"] > 0.85
+        assert clusters[2]["pattern_type"]["evidence"]["cv_percentile"] > 0.75
         assert clusters[0]["characterization"]["summary_zh"] != clusters[2]["characterization"]["summary_zh"]
         assert clusters[1]["characterization"]["summary_zh"] != clusters[3]["characterization"]["summary_zh"]
         cluster1_vs_0 = next(
@@ -192,7 +257,7 @@ def test_hierarchical_k4_has_unique_assignments_and_distinct_explanations():
         assert "分别为" in cluster1_vs_0["why_separated_zh"]
 
         insight_keys = [item["key"] for item in result["pattern_insights"]["items"]]
-        assert insight_keys == ["peak_trough", "pair_0_2", "pair_1_3", "reliability"]
+        assert insight_keys == ["peak_trough", "pairwise_center", "reliability"]
         pairs = {
             tuple(sorted((pair["left_cluster_id"], pair["right_cluster_id"]))): pair
             for pair in result["pairwise_differences"]
@@ -202,6 +267,22 @@ def test_hierarchical_k4_has_unique_assignments_and_distinct_explanations():
         assert pairs[(1, 3)]["profile_correlation"] > 0.9
         assert "两条 24 小时曲线相关" in pairs[(0, 2)]["why_separated_zh"]
         assert result["pattern_insights"]["reliability"]["level"] == "low"
+
+        labels_before = list(result["labels"])
+        membership_before = [
+            (item["region_id"], item["cluster_id"]) for item in result["regions"]
+        ]
+        names_before = [
+            cluster["display_name"] for cluster in result["clusters"]
+        ]
+        refreshed = refresh_cluster_result_names(copy.deepcopy(result))
+        assert refreshed["labels"] == labels_before
+        assert [
+            (item["region_id"], item["cluster_id"]) for item in refreshed["regions"]
+        ] == membership_before
+        assert [
+            cluster["display_name"] for cluster in refreshed["clusters"]
+        ] == names_before
 
         quality = state["metrics"]
         assert quality["silhouette"] is not None
@@ -222,6 +303,58 @@ def test_quality_metrics_explain_when_clusters_are_insufficient():
     assert metrics["davies_bouldin"] is None
     assert metrics["calinski_harabasz"] is None
     assert "不适用" in metrics["notes"][0]
+
+
+def test_dbscan_cleanup_is_scoped_and_preserves_other_histories():
+    conn = get_connection()
+    source = query_one("SELECT source_id FROM data_sources WHERE key = 'milano'")
+    assert source is not None
+    run_id = make_cluster_id()
+    preserved_before = conn.execute(
+        "SELECT COUNT(*) AS n FROM clusters WHERE lower(algorithm_key) <> 'dbscan'"
+    ).fetchone()["n"]
+    artifact = Path(settings.artifacts_dir) / "clusters" / run_id
+    artifact.mkdir(parents=True, exist_ok=True)
+    (artifact / "result.json").write_text('{"legacy":true}', encoding="utf-8")
+    conn.execute(
+        """
+        INSERT INTO clusters (
+            cluster_run_id, source_id, algorithm_key, params_json, features_json,
+            frequency, aggregation, region_count, cluster_count, noise_count,
+            status, artifact_ref, created_at
+        ) VALUES (?, ?, 'dbscan', '{}', '{}', 'native', 'mean', 88, 2, 22,
+                  'Completed', ?, ?)
+        """,
+        (run_id, source["source_id"], str(artifact), now_utc()),
+    )
+    job_id = create_job(
+        job_type="clustering",
+        payload={"cluster_run_id": run_id},
+        cluster_run_id=run_id,
+    )
+    conn.execute(
+        "INSERT INTO audit_events (resource, resource_id, action, detail_json, created_at) "
+        "VALUES ('cluster', ?, 'finished', '{}', ?)",
+        (run_id, now_utc()),
+    )
+
+    cleanup = purge_legacy_dbscan_history()
+
+    assert run_id in cleanup["cluster_run_ids"]
+    assert cleanup["cluster_rows_deleted"] == 1
+    assert cleanup["job_rows_deleted"] == 1
+    assert cleanup["audit_rows_deleted"] == 1
+    assert not artifact.exists()
+    assert query_one(
+        "SELECT cluster_run_id FROM clusters WHERE cluster_run_id = ?", (run_id,)
+    ) is None
+    assert query_one(
+        "SELECT job_id FROM jobs WHERE job_id = ?", (job_id,)
+    ) is None
+    preserved_after = conn.execute(
+        "SELECT COUNT(*) AS n FROM clusters WHERE lower(algorithm_key) <> 'dbscan'"
+    ).fetchone()["n"]
+    assert preserved_after == preserved_before
 
 
 def test_date_range_preview_and_invalid_range_rejection():

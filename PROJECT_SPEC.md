@@ -98,7 +98,7 @@
 | 模块 | 英文名称 | 核心交付 |
 |---|---|---|
 | M1 | Exploratory Traffic Analysis | GIS 区域、时序、空间与跨地点模式分析 |
-| M2 | Functional Zone Clustering | K-Means、DBSCAN、Hierarchical、GMM 及 GIS 聚类图 |
+| M2 | Functional Zone Clustering | K-Means、Spectral Clustering、Hierarchical、GMM 及 GIS 聚类图 |
 | M3 | Forecasting Dataset Construction | 时间窗口、无泄漏切分、Dataset ID |
 | M4 | Model Training | **12 种预测算法 + All Models 批处理 + Batch/Experiment IDs** |
 | M5 | Prediction & Evaluation | held-out Test 真实对比、评价、GIS 与 Evaluation ID |
@@ -293,7 +293,7 @@ M1 从零实现为三栏页面和三个指定的右侧 Tab；**中央 GIS 地图
 | 区域 | 必须提供 |
 |---|---|
 | 左 Configuration | 地点、时间区间、流量聚合、聚类特征选择、标准化、算法选择、Basic/Advanced 参数、Run Clustering / Reset |
-| 中央 GIS | 每区按簇着色，区域点选；DBSCAN 噪声独立，ZTE 无时序区域标为 No Data |
+| 中央 GIS | 每区按簇着色，区域点选；ZTE 无时序区域标为 No Data |
 | 右 Tab 1 `Cluster Overview` | 实际簇数、每簇区域数与统计摘要、典型簇特征 |
 | 右 Tab 2 `Typical Patterns` | 各簇平均日内模式、工作日与周末差异、峰谷；图例标真实统计 |
 | 右 Tab 3 `Quality Evaluation` | Silhouette、Davies-Bouldin、Calinski-Harabasz 等在合法条件下计算，否则 N/A 和原因 |
@@ -304,7 +304,7 @@ M1 从零实现为三栏页面和三个指定的右侧 Tab；**中央 GIS 地图
 | 算法 | 必须可调整参数 | 强制验证 |
 |---|---|---|
 | K-Means | `n_clusters`, `n_init`, `random_state` | K 范围及非空输入，Silhouette 至少 2 个有效簇 |
-| DBSCAN | `eps`, `min_samples`, `metric` | eps>0；噪声 label -1，少于 2 有效簇时部分指标 N/A |
+| Spectral Clustering | `n_clusters`, `affinity`, `n_neighbors`, `gamma`, `random_state` | 簇数必须小于有效样本数；`nearest_neighbors` 与 `rbf` 参数按 affinity 动态生效 |
 | Hierarchical | `n_clusters`, `linkage`, `metric` | Ward 仅欧氏距离；数据规模与合法簇数 |
 | GMM | `n_components`, `covariance_type`, `reg_covar`, `random_state` | 协方差有效与收敛状态 |
 
@@ -934,7 +934,7 @@ Codex 必须**从空白目录创建完整软件**，按以下阶段持续推进�
 |---|---|---|
 | **P0 环境初始化与数据基线** | 从零建立 Git 工程、前后端骨架、依赖锁、配置样例、数据导入/验证器、数据库迁移与测试框架；读取真实六文件 | `README` 安装步骤可复现；三来源 schema、区域映射、时点和 fingerprint 检查通过；初始 API/DB 可运行 |
 | **P1 TN 品牌与全局界面** | TN SVG/PNG/favicons、城市/道路横幅、Home、双行顶部六导航、三栏模板、统一响应式设计 Token | 无卡通人物；导航正常；首页真实统计或空历史状态；宽屏与笔记本宽度可用 |
-| **P2 M1/M2 真实分析** | 全新实现 CSV→GIS 映射、时序/空间分析、跨地点模式比较；K-Means/DBSCAN/Hierarchical/GMM 聚类与 GIS | 数据、颜色、簇及统计真正由后台计算；三个 M1 Tab、四个 M2 Tab 全可操作 |
+| **P2 M1/M2 真实分析** | 全新实现 CSV→GIS 映射、时序/空间分析、跨地点模式比较；K-Means/Spectral/Hierarchical/GMM 聚类与 GIS | 数据、颜色、簇及统计真正由后台计算；三个 M1 Tab、三个 M2 分析 Tab 与中央区域列表全可操作 |
 | **P3 M3 数据集构建** | L/H/S、原生与聚合时间粒度、按时序 Train/Val/Test、无泄漏预处理、三张叠放预览、Dataset ID + 管理 | 单区与全区真实 Build；边界测试与工件重载通过；失败不覆盖已保存版本 |
 | **P4 M4 10 个常规模型** | 从零建 12 项模型注册表及其 schema（大模型先标未准备）；10 个普通算法适配器、训练 worker、实时事件、Experiment ID | 10 算法均在真实数据上可 Fit/Train 与生成 `[N,H]`，监控数据真实且停止可审计 |
 | **P5 M4 两个 Foundation** | TimesFM、Chronos 官方适配器、真实预训练 checkpoint、许可/版本/设备检查、Zero-shot 输出 | 两者分别执行真实权重推理 smoke test；无法兼容硬件则如实阻塞，不准假的 Completed |
@@ -958,7 +958,7 @@ Codex 必须**从空白目录创建完整软件**，按以下阶段持续推进�
 | T03 | 零值与缺失 | ZTE 的 0 保留；不把 0 视为 NaN；缺失处理记录且不越界 |
 | T04 | M1 时空联动 | GIS 选择区域/时间，右侧曲线与真实统计随之变化 |
 | T05 | M1 跨地点 | 归一化形状比较，时间与单位免责声明明确，禁原始值直接同量纲比较 |
-| T06 | M2 四聚类 | KMeans/DBSCAN/Hierarchical/GMM 都真实运行，DBSCAN 噪声/质量 N/A 合理 |
+| T06 | M2 四聚类 | KMeans/Spectral/Hierarchical/GMM 都真实运行；谱聚类参数真实生效，簇名称由当前数据分布生成 |
 | T07 | M2 功能区解释 | 标签为推测，不冒充真实地类；ZTE No Data 不进入簇 |
 | T08 | M3 L/H/S 窗口 | 对已知序列核对 X/Y 边界、时间与步长、首末合法窗口完全正确 |
 | T09 | M3 时间切分 | 70/15/15 默认、分割无泄漏、各 split 实际窗口计数一致；非法配置阻止 Save |

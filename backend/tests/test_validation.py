@@ -92,7 +92,12 @@ def test_clustering_rules_ward_requires_euclidean():
     issues = validate_m2({"algorithm": "hierarchical", "linkage": "ward", "metric": "manhattan",
                           "features": ["mean", "std"]})
     assert ("LINKAGE_METRIC", "error") in severity(issues)
-    issues2 = validate_m2({"algorithm": "dbscan", "eps": 0, "min_samples": 3, "features": ["mean", "std"]})
+    issues2 = validate_m2({
+        "algorithm": "spectral",
+        "spectral_affinity": "rbf",
+        "spectral_gamma": 0,
+        "features": ["mean", "std"],
+    })
     assert ("OUT_OF_RANGE", "error") in severity(issues2)
 
 

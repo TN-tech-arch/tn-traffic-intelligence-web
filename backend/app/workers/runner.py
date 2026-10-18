@@ -19,6 +19,7 @@ import traceback
 from app.core.config import settings
 from app.core.ids import now_utc, ulid
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
+from app.db.maintenance import purge_legacy_dbscan_history
 from app.db.migrate import run_migrations
 from app.workers.tasks import ProgressReporter, run_clustering, run_evaluation, run_experiment
 
@@ -255,6 +256,7 @@ def main() -> None:
         signal.signal(signal.SIGTERM, _handle_signal)
     settings.ensure_dirs()
     applied = run_migrations()
+    purge_legacy_dbscan_history()
     recovered = recover_stale_jobs()
     print(
         f"[worker] id={WORKER_ID} db={settings.db_path} migrations={applied or 'up-to-date'} "

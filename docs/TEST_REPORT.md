@@ -25,7 +25,7 @@ cd backend
 |---|---|---|
 | `test_metrics.py` | MAE / RMSE / sMAPE / R² 的手工样例、sMAPE 0/0、常量真值 R²=N/A、非有限值不当作 0、Macro 等权平均 | 7 passed |
 | `test_windows.py` | 窗口定义、目标不跨 split、切分吸收余数、因果插值的“不得偷看未来”规则、目标从不插值、scaler 仅拟合训练段且可逆、前向填充只用过去值 | 7 passed |
-| `test_validation.py` | 恰好 12 算法、dropout 越界、dropout 边界 0/1、L=0/S=0、比例之和、Transformer 整除、Epochs 大是 Warning、batch_size 大于样本是 Warning、ARIMA trend 与 d 兼容、非数字/非整数、Ward+非欧氏、DBSCAN eps>0、至少两个特征、M1 区域上限与未知区域、M5 Scope 冲突、All Models 逐算法报告 | 15 passed |
+| `test_validation.py` | 恰好 12 算法、dropout 越界、dropout 边界 0/1、L=0/S=0、比例之和、Transformer 整除、Epochs 大是 Warning、batch_size 大于样本是 Warning、ARIMA trend 与 d 兼容、非数字/非整数、Ward+非欧氏、Spectral gamma>0、至少两个特征、M1 区域上限与未知区域、M5 Scope 冲突、All Models 逐算法报告 | 15 passed |
 | `test_adapters.py` | 10 个常规适配器在真实 pytorch/statsmodels/sklearn 上产出有限 `[N,H]`；两个 Foundation 在真实权重上 Zero-shot 且 `no_epochs=true`；未知 checkpoint 必须报错而不偷偷换权重 | 10 passed + 2 passed（Foundation 真实权重） |
 | `test_api.py` | 健康检查、数据基线断言、注册表 12 条、GIS 162 多边形与 14 No Data、L=0 返回字段级错误、比例非法阻止 Build 且不产生 Dataset、**绕过前端的 dropout=1.5 被 422 拒绝且不创建 Experiment**、Transformer 整除 422、未知 Dataset 404、批次逐算法预检、评价缺实验校验、被引用数据集删除 409、schema 可机读 | 14 passed |
 | `test_m1_time_range.py` | 10/15 分钟日期→点数（7 天 1008 vs 672）、重采样点数、索引→日期、开始晚于结束、越界拒绝、边界截断警告、空范围拒绝、非法日期、短范围警告、昼夜小时校验 | 11 passed |
@@ -96,7 +96,7 @@ cd frontend; node tests\ui_check.mjs
 * 首页真实数字 3 / 459 / 12 / 5 与真实 Recent Activity。
 * 模块工作区恰好三栏；窄屏（900px）折叠为单列。
 * M1 三个右侧 Tab、GIS 常驻且切换 Tab 不消失、88 个真实多边形渲染。
-* M2 四个右侧 Tab、`eps=0` 在输入框下方报错并可在修正后立即消失、切换算法联动隐藏 K-Means 专属参数、每个字段都有 ⓘ 帮助。
+* M2 三个右侧分析 Tab、中央区域列表、Spectral gamma=0 在输入框下方报错并可在修正后立即消失、切换算法联动隐藏无关参数、每个字段都有 ⓘ 帮助。
 * M3 三个核心 Tab + Dataset Management、比例不足/超出报错、`L=0` 报错、中央三个真实预览区。
 * M4 三个右侧 Tab、All Models 置顶、`d_model=130 & n_heads=8` 整除错误、`dropout=1.5` 报错、`Epochs=10000` 只给 Warning 且不误禁用按钮、修正后 Run 恢复可用、All Models 12 个独立参数组与可运行状态标签。
 * M5 三个右侧 Tab + 历史管理、中央四个视图。

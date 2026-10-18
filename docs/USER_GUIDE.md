@@ -109,8 +109,8 @@ Temporal 内部**不再有二级 Tab**，而是按顺序纵向排列：
 ## 3. Module 2 · Clustering
 
 1. 选择地点、时间区间、聚合方式、聚类特征（至少 2 个）与是否标准化。
-2. 选择算法：K-Means / DBSCAN / Hierarchical / GMM；只显示该算法相关的参数，非法值会在对应输入框下方给出原因。
-3. 点击 `Run Clustering`，任务进入后台队列；完成后 GIS 按簇着色（DBSCAN 噪声为灰色 -1，ZTE 无时序区域为 No Data）。
+2. 选择算法：K-Means / Spectral Clustering / Hierarchical / GMM；只显示该算法相关的参数，非法值会在对应输入框下方给出原因。
+3. 点击 `Run Clustering`，任务进入后台队列；完成后 GIS 按“簇 N（描述性分类名称）”着色，ZTE 无时序区域显示为 No Data。
 4. 右侧四个 Tab：`Cluster Overview`、`Typical Patterns`、`Quality Evaluation`（Silhouette / DB / CH，条件不满足时显示 N/A 与原因）、`Region List`。
 5. 左侧下方是聚类历史：`Open` 复现历史结果，`Delete` 删除本次结果（运行中会拒绝）。
 6. 簇的类型标签（如「推测：日间通勤/办公型」）明确标注为**推测**，不代表真实土地使用数据。
