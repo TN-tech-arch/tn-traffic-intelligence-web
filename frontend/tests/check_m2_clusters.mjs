@@ -444,6 +444,93 @@ const overflow900 = await page.evaluate(() => document.documentElement.scrollWid
 check('21c 900px 窄屏无横向溢出', overflow900 <= 1, `overflow=${overflow900}`)
 check('22 浏览器控制台无未预期错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
 
+await page.setViewportSize({ width: 1600, height: 1200 })
+await page.waitForTimeout(500)
+
+const selectFieldOption = async (field, label) => {
+  await page.locator(`[data-field="m2.${field}"] .ant-select-selector`).click()
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .filter({ hasText: label })
+    .first()
+    .click()
+  await page.waitForTimeout(150)
+}
+
+await page.locator('#field-m2_eps').fill('2.5')
+await page.locator('#field-m2_min_samples').fill('12')
+await selectAlgorithm('K-Means')
+await page.locator('#field-m2_n_clusters').fill('9')
+await page.locator('#field-m2_n_init').fill('77')
+await page.locator('#field-m2_random_state').fill('99')
+await selectFieldOption('frequency', '30 分钟')
+await selectFieldOption('aggregation', '求和')
+await page.locator('#field-m2_standardize').uncheck()
+await selectAlgorithm('层次聚类（Hierarchical）')
+await page.locator('#field-m2_hierarchical_n_clusters').fill('8')
+await selectFieldOption('linkage', 'complete')
+await selectFieldOption('metric', 'manhattan')
+await selectAlgorithm('高斯混合（GMM）')
+await page.locator('#field-m2_gmm_n_components').fill('7')
+await selectFieldOption('covariance_type', 'diag')
+await page.locator('#field-m2_reg_covar').fill('0.2')
+await page.locator('#field-m2_random_state').fill('99')
+
+await configPane.locator('button').filter({ hasText: '重置配置' }).click()
+await page
+  .locator('.tn-range-summary')
+  .filter({ hasText: '2013-11-01 00:00:00' })
+  .waitFor({ state: 'visible', timeout: 30000 })
+  .catch(() => undefined)
+const resetText = await configPane.innerText()
+const resetInfo = await infoPane.innerText()
+check(
+  '23 重置配置恢复全部基础参数并清除旧结果',
+  resetText.includes('K-Means') &&
+    resetText.includes('原生') &&
+    resetText.includes('均值') &&
+    resetText.includes('实际开始：2013-11-01 00:00:00') &&
+    (await inputValue('#field-m2_n_clusters')) === '4' &&
+    (await inputValue('#field-m2_n_init')) === '10' &&
+    (await inputValue('#field-m2_random_state')) === '42' &&
+    (await page.locator('#field-m2_standardize').isChecked()) &&
+    (await page.locator('[data-field="m2.features"] .ant-select-selection-item').count()) === 7 &&
+    resetInfo.includes('尚无聚类结果') &&
+    !(await page.locator('body').innerText()).includes('当前配置已修改，下方仍是上一次聚类结果'),
+  'basic defaults, date range, features, result clearing',
+)
+
+await selectAlgorithm('层次聚类（Hierarchical）')
+const resetHierarchical = {
+  k: await inputValue('#field-m2_hierarchical_n_clusters'),
+  text: await configPane.locator('[data-field="m2.linkage"]').innerText(),
+  metric: await configPane.locator('[data-field="m2.metric"]').innerText(),
+}
+await selectAlgorithm('DBSCAN')
+const resetDbscan = {
+  eps: await inputValue('#field-m2_eps'),
+  minSamples: await inputValue('#field-m2_min_samples'),
+}
+await selectAlgorithm('高斯混合（GMM）')
+const resetGmm = {
+  components: await inputValue('#field-m2_gmm_n_components'),
+  covariance: await configPane.locator('[data-field="m2.covariance_type"]').innerText(),
+  reg: await inputValue('#field-m2_reg_covar'),
+  randomState: await inputValue('#field-m2_random_state'),
+}
+check(
+  '23b 重置后各算法的隐藏高级参数也恢复默认值',
+  resetHierarchical.k === '4' &&
+    resetHierarchical.text.includes('ward') &&
+    resetHierarchical.metric.includes('euclidean') &&
+    resetDbscan.eps === '1.2' &&
+    resetDbscan.minSamples === '3' &&
+    resetGmm.components === '4' &&
+    resetGmm.covariance.includes('full') &&
+    resetGmm.reg === '0.000001' &&
+    resetGmm.randomState === '42',
+  `${JSON.stringify(resetHierarchical)} | ${JSON.stringify(resetDbscan)} | ${JSON.stringify(resetGmm)}`,
+)
 const failed = results.filter((result) => !result.ok).length
 console.log(`\n${results.length - failed}/${results.length} Module 2 checks passed`)
 await browser.close()

@@ -30,6 +30,30 @@ const DEFAULT_FEATURES = [
   'daily_seasonality',
 ]
 
+const DEFAULT_CONFIG: Record<string, unknown> = {
+  source_key: 'milano',
+  frequency: 'native',
+  aggregation: 'mean',
+  time_start: null,
+  time_end: null,
+  start_index: 0,
+  window_points: 1008,
+  features: DEFAULT_FEATURES,
+  standardize: true,
+  algorithm: 'kmeans',
+  n_clusters: 4,
+  n_init: 10,
+  hierarchical_n_clusters: 4,
+  linkage: 'ward',
+  metric: 'euclidean',
+  eps: 1.2,
+  min_samples: 3,
+  gmm_n_components: 4,
+  covariance_type: 'full',
+  reg_covar: 0.000001,
+  random_state: 42,
+}
+
 function configSignature(values: Record<string, unknown>): string {
   return JSON.stringify(
     Object.fromEntries(
@@ -43,29 +67,10 @@ function configSignature(values: Record<string, unknown>): string {
 export default function Clustering() {
   const [messageApi, contextHolder] = message.useMessage()
   const [catalog, setCatalog] = useState<{ features: Array<{ key: string; label_zh: string; help_zh: string }>; algorithms: Array<{ key: string; label: string }> }>({ features: [], algorithms: [] })
-  const [config, setConfig] = useState<Record<string, unknown>>({
-    source_key: 'milano',
-    frequency: 'native',
-    aggregation: 'mean',
-    time_start: null as string | null,
-    time_end: null as string | null,
-    start_index: 0,
-    window_points: 1008,
-    features: DEFAULT_FEATURES,
-    standardize: true,
-    algorithm: 'kmeans',
-    n_clusters: 4,
-    n_init: 10,
-    hierarchical_n_clusters: 4,
-    linkage: 'ward',
-    metric: 'euclidean',
-    eps: 1.2,
-    min_samples: 3,
-    gmm_n_components: 4,
-    covariance_type: 'full',
-    reg_covar: 0.000001,
-    random_state: 42,
-  })
+  const [config, setConfig] = useState<Record<string, unknown>>(() => ({
+    ...DEFAULT_CONFIG,
+    features: [...DEFAULT_FEATURES],
+  }))
   const [geojson, setGeojson] = useState<any>(null)
   const [regions, setRegions] = useState<any[]>([])
   const [sourceMeta, setSourceMeta] = useState<any>(null)
@@ -202,6 +207,41 @@ export default function Clustering() {
 
   const stale = Boolean(resultKey && result && configSignature(config) !== resultKey)
   const rangeBlocked = rangeInfo?.valid === false
+
+  const resetConfiguration = async () => {
+    const next: Record<string, unknown> = {
+      ...DEFAULT_CONFIG,
+      features: [...DEFAULT_FEATURES],
+    }
+    try {
+      const data = await api.get<any>(ENDPOINTS.sources)
+      const source = data.sources?.find((item: any) => item.key === 'milano')
+      if (source?.time_start) {
+        const start = dayjs(source.time_start)
+        const availableEnd = source.time_end ? dayjs(source.time_end) : null
+        const nativeMinutes = Number(source.native_frequency_minutes ?? 10)
+        const weekEnd = start.add(7, 'day').subtract(nativeMinutes, 'minute')
+        const defaultEnd = availableEnd && weekEnd.isAfter(availableEnd) ? availableEnd : weekEnd
+        next.time_start = start.format('YYYY-MM-DD HH:mm:ss')
+        next.time_end = defaultEnd.format('YYYY-MM-DD HH:mm:ss')
+      }
+    } catch {
+      // Keep the schema defaults; the source metadata effect will retry the range.
+    }
+    skipSourceDateReset.current = false
+    pendingHistoryResultKey.current = false
+    setConfig(next)
+    setDrafts({})
+    setResult(null)
+    setResultKey(null)
+    setServerIssues([])
+    setSelectedRegion(null)
+    setFocusRegion(null)
+    setNormalizedPatterns(false)
+    setRegionSearch('')
+    setClusterFilter('all')
+    setTab('overview')
+  }
 
   useEffect(() => {
     if (!pendingHistoryResultKey.current) return
@@ -524,12 +564,7 @@ export default function Clustering() {
             <PaneHead
               title={bilingual('配置', 'Configuration')}
               extra={
-                <Button size="small" onClick={() => {
-                  setConfig((prev) => ({ ...prev, algorithm: 'kmeans', n_clusters: 4, features: DEFAULT_FEATURES, standardize: true, eps: 1.2, min_samples: 3, gmm_n_components: 4, linkage: 'ward', metric: 'euclidean' }))
-                  setDrafts({})
-                  setResult(null)
-                  setResultKey(null)
-                }}>
+                <Button size="small" onClick={resetConfiguration}>
                   {ACTION_LABELS.reset}
                 </Button>
               }
