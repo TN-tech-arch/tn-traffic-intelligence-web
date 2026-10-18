@@ -51,7 +51,8 @@ check('3 首页不再用 Start Exploring 作为主按钮', !(await page.locator(
 check(
   '4 首页统计与卡片标题中英文主次一致',
   (await page.locator('body').innerText()).includes('数据源（Data Sources）') &&
-    (await page.locator('body').innerText()).includes('最近活动（Recent Activity）') &&
+    (await page.locator('body').innerText()).includes('数据源概览（Dataset Overview）') &&
+    !(await page.locator('body').innerText()).includes('Recent Activity') &&
     (await page.locator('body').innerText()).includes('五模块工作流（Five-Module Workflow）'),
   'home titles',
 )

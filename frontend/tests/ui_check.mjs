@@ -99,13 +99,46 @@ try {
     statValues.slice(0, 4).join(',') === '3,459,12,5',
     statValues.slice(0, 6).join(','),
   )
-  const recentText = await page.locator('.ant-timeline, .tn-empty').first().innerText().catch(() => '')
-  record('T32 Recent Activity 显示真实数据库记录（空态或真实 ID）', recentText.length > 0, recentText.slice(0, 80))
+  const homeText = await page.locator('body').innerText()
+  record(
+    'T33 首页不再显示 Recent Activity',
+    !homeText.includes('最近活动') &&
+      !homeText.includes('Recent Activity') &&
+      (await page.locator('.ant-timeline').count()) === 0,
+    'recent activity removed',
+  )
+  const sourceCard = page.locator('.ant-card').filter({ hasText: '数据源概览（Dataset Overview）' }).first()
+  const sourceBox = await sourceCard.boundingBox()
+  record(
+    'T33 数据源概览使用整行面板并显示三个真实数据源',
+    Boolean(sourceBox && sourceBox.width > 1200) &&
+      (await sourceCard.locator('tbody tr').count()) === 3,
+    `width=${sourceBox?.width ?? 0}`,
+  )
+  const taskButton = page.locator('.tn-hero-right button').filter({ hasText: '任务进程' }).first()
+  await taskButton.hover()
+  await page.waitForTimeout(350)
+  record(
+    'T33 顶部任务进程入口仍可访问 Worker 状态',
+    (await taskButton.count()) === 1 &&
+      (await page.locator('.ant-tooltip:visible').innerText().catch(() => '')).includes('待处理任务'),
+    'task process entry',
+  )
   await page.screenshot({ path: path.join(SHOTS, '01-home.png'), fullPage: true })
 
   // ---------------------------------------------------- Module 1 (three panes)
   await page.click('.tn-nav-item >> text=Exploration')
   await page.waitForTimeout(2500)
+  await page
+    .waitForFunction(() => document.body.innerText.includes('Multi-City Comparison'), null, {
+      timeout: 30000,
+    })
+    .catch(() => undefined)
+  await page
+    .locator('.leaflet-container canvas')
+    .first()
+    .waitFor({ state: 'visible', timeout: 30000 })
+    .catch(() => undefined)
   const paneCount = await page.locator('.tn-three-pane > section').count()
   record('T31/T44 模块工作区仅三栏（Configuration/Visualization/Information）', paneCount === 3, `${paneCount} panes`)
   const moduleTabs = await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()
@@ -192,7 +225,10 @@ try {
   const ratioError = await fieldErrorText(page, 'm3.test_ratio')
   record('T09/T46 比例之和≠100% 时字段下方报错', Boolean(ratioError && ratioError.includes('100%')), ratioError ?? 'no error')
   await setField(page, 'm3.test_ratio', 0.1)
-  await page.waitForTimeout(600)
+  await page
+    .locator('[data-field="m3.test_ratio"] .tn-error-text')
+    .waitFor({ state: 'hidden', timeout: 10000 })
+    .catch(() => undefined)
   const ratioCleared = await fieldErrorText(page, 'm3.test_ratio')
   record('T09 比例修正后错误清除', !ratioCleared, ratioCleared ?? 'cleared')
   await setField(page, 'm3.input_length', 0)

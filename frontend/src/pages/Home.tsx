@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, Col, Row, Spin, Tag, Timeline, Alert } from 'antd'
+import { Button, Card, Col, Row, Spin, Tag, Alert } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { ENDPOINTS, api } from '../api/client'
-import StatusTag from '../components/StatusTag'
-import { EmptyState } from '../components/Panes'
-import HelpTip from '../components/HelpTip'
 import {
-  MODULE_META, activityKindLabel, bilingual, localizeUserText, modeLabel, sourceDisplayName, unitDisplayLabel,
+  MODULE_META, bilingual, localizeUserText, modeLabel, sourceDisplayName, unitDisplayLabel,
 } from '../i18n/terms'
 
 interface DashboardPayload {
@@ -24,7 +21,6 @@ interface DashboardPayload {
     no_data_region_count: number
   }>
   counts: Record<string, number>
-  recent_activity: Array<{ id: string; kind: string; title: string; status: string; created_at: string; meta: string }>
   workflow: Array<{ step: number; module: string; title: string; route: string; description_zh: string }>
   algorithms: Array<{ key: string; label: string; category: string; category_label_zh: string; default_mode: string }>
   environment: Record<string, any>
@@ -50,21 +46,6 @@ export default function Home() {
         <Spin tip="正在读取真实数据概况..." />
       </div>
     )
-
-  const activityTitle = (item: DashboardPayload['recent_activity'][number]) => {
-    if (item.kind === 'Evaluation') {
-      return item.title.startsWith('all') ? '全部区域评价' : '单区域评价'
-    }
-    if (item.kind === 'Batch') {
-      const count = item.title.match(/(\d+)\s+algorithms?/)?.[1]
-      return count ? `全部模型 · ${count} 个算法` : '全部模型批量任务'
-    }
-    if (item.kind === 'Experiment' && item.title.includes('·')) {
-      const [algorithm, mode] = item.title.split('·').map((part) => part.trim())
-      return `${algorithm} · ${modeLabel(mode)}`
-    }
-    return item.title
-  }
 
   return (
     <div className="tn-stack">
@@ -124,10 +105,9 @@ export default function Home() {
         </div>
       </div>
 
-      <Row gutter={14}>
-        <Col xs={24} lg={14}>
-          <Card title={bilingual('数据源概览', 'Dataset Overview')} size="small">
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+      <Card title={bilingual('数据源概览', 'Dataset Overview')} size="small">
+        <div className="tn-home-source-wrap">
+          <table className="tn-home-source-table">
               <thead>
                 <tr style={{ textAlign: 'left', color: '#5b7095' }}>
                   <th>来源</th>
@@ -160,58 +140,14 @@ export default function Home() {
                   </tr>
                 ))}
               </tbody>
-            </table>
-            <div className="tn-muted" style={{ marginTop: 8 }}>
-              {data.disclaimer_zh.map((line) => (
-                <div key={line}>· {line}</div>
-              ))}
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} lg={10}>
-          <Card
-            title={(
-              <span className="tn-inline">
-                {bilingual('最近活动', 'Recent Activity')}
-                <HelpTip
-                  label="最近活动"
-                  title="按创建时间倒序显示数据库中的数据集、实验、批量任务和评价记录。"
-                  detail="这里没有示例数据；状态使用统一中文名称，ID 与技术字段会保留以便追溯。"
-                />
-              </span>
-            )}
-            size="small"
-          >
-            <div className="tn-muted" style={{ marginBottom: 10 }}>
-              最近创建的数据集、实验、批量任务和评价记录，直接来自数据库。
-            </div>
-            {data.recent_activity.length === 0 ? (
-              <EmptyState text="暂无历史记录：还没有创建任何数据集、实验或评价。" />
-            ) : (
-              <Timeline
-                items={data.recent_activity.map((item) => ({
-                  children: (
-                    <div>
-                      <div className="tn-inline">
-                        <Tag color="blue">{activityKindLabel(item.kind)}</Tag>
-                        <span>{activityTitle(item)}</span>
-                        <StatusTag status={item.status} />
-                      </div>
-                      <div className="tn-code" style={{ marginTop: 4 }}>
-                        {item.id}
-                      </div>
-                      <div className="tn-muted">
-                        {item.created_at} · {item.meta}
-                      </div>
-                    </div>
-                  ),
-                }))}
-              />
-            )}
-          </Card>
-        </Col>
-      </Row>
-
+          </table>
+        </div>
+        <div className="tn-muted" style={{ marginTop: 8 }}>
+          {data.disclaimer_zh.map((line) => (
+            <div key={line}>· {line}</div>
+          ))}
+        </div>
+      </Card>
       <Card title={bilingual('五模块工作流', 'Five-Module Workflow')} size="small">
         <Row gutter={12}>
           {data.workflow.map((step) => (
