@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Popconfirm, Table, Tabs, Tag, Tooltip, message } from 'antd'
+import { Alert, Button, Card, Collapse, Popconfirm, Switch, Table, Tabs, Tag, Tooltip, message } from 'antd'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
-import MapView, { CLUSTER_PALETTE } from '../components/MapView'
+import MapView, {
+  CLUSTER_NOISE_COLOR, CLUSTER_NO_DATA_COLOR, clusterColor,
+} from '../components/MapView'
 import { LineChart, ScatterChart } from '../components/Charts'
+import InsightCard from '../components/InsightCard'
 import StatusTag from '../components/StatusTag'
 import BiLabel from '../components/BiLabel'
 import { useGroupValidation } from '../validation/useValidation'
@@ -52,6 +55,8 @@ export default function Clustering() {
   const [result, setResult] = useState<any>(null)
   const [runs, setRuns] = useState<any[]>([])
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null)
+  const [focusRegion, setFocusRegion] = useState<string | null>(null)
+  const [normalizedPatterns, setNormalizedPatterns] = useState(false)
   const [tab, setTab] = useState('overview')
   const [busy, setBusy] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
@@ -175,14 +180,57 @@ export default function Clustering() {
       x: result.feature_matrix[index][0],
       y: second ? result.feature_matrix[index][1] : result.feature_matrix[index][0],
       group: label,
-      name: result.region_ids?.[index] ?? result.regions[index]?.region_id,
-      xName: first,
-      yName: second,
+      name: result.regions[index]?.region_id,
+      regionId: result.regions[index]?.region_id,
+      extra: second
+        ? `${featureLabel(first)} ${Number(result.feature_matrix[index][0]).toFixed(3)} · ${featureLabel(second)} ${Number(result.feature_matrix[index][1]).toFixed(3)}`
+        : `${featureLabel(first)} ${Number(result.feature_matrix[index][0]).toFixed(3)}`,
     }))
   }, [result])
 
   const clusterOf = (regionId: string | null) =>
     regionId ? result?.regions?.find((r: any) => r.region_id === regionId)?.cluster_id : undefined
+
+  const normalClusters = (result?.clusters ?? []).filter((cluster: any) => cluster.cluster_id >= 0)
+  const noiseCluster = (result?.clusters ?? []).find((cluster: any) => cluster.cluster_id < 0)
+  const clusterById: Map<number, any> = new Map(
+    (result?.clusters ?? []).map((cluster: any) => [Number(cluster.cluster_id), cluster]),
+  )
+  const featureAxes = result?.feature_names?.length
+    ? [
+        { key: result.feature_names[0], label: featureLabel(result.feature_names[0]) },
+        { key: result.feature_names[1], label: featureLabel(result.feature_names[1]) },
+      ]
+    : []
+  const clusterColorMap = Object.fromEntries(
+    normalClusters.map((cluster: any) => [String(cluster.cluster_id), clusterColor(cluster.cluster_id)]),
+  )
+
+  const clusterLegend = (
+    <div className="tn-inline" style={{ gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+      {normalClusters.map((cluster: any) => (
+        <span key={cluster.cluster_id} className="tn-inline" style={{ gap: 4 }}>
+          <span
+            className="tn-legend-swatch"
+            data-cluster-id={cluster.cluster_id}
+            data-cluster-color={clusterColor(cluster.cluster_id)}
+            style={{ background: clusterColor(cluster.cluster_id) }}
+          />
+          簇 {cluster.cluster_id} · {cluster.region_count} 区
+        </span>
+      ))}
+      {noiseCluster ? (
+        <span className="tn-inline" style={{ gap: 4 }}>
+          <span className="tn-legend-swatch" style={{ background: CLUSTER_NOISE_COLOR }} />
+          噪声 · {noiseCluster.region_count} 区
+        </span>
+      ) : null}
+      <span className="tn-inline" style={{ gap: 4 }}>
+        <span className="tn-legend-swatch" style={{ background: CLUSTER_NO_DATA_COLOR }} />
+        无数据
+      </span>
+    </div>
+  )
 
   return (
     <div>
@@ -211,7 +259,11 @@ export default function Clustering() {
                 </Button>
               }
             />
-            {visibleFields(schema, config).map((spec) => (
+            {visibleFields(schema, config)
+              .filter((spec) => (
+                spec.key !== 'random_state' || ['kmeans', 'gmm'].includes(String(config.algorithm))
+              ))
+              .map((spec) => (
               <ParamField
                 key={spec.key}
                 spec={spec}
@@ -222,7 +274,12 @@ export default function Clustering() {
                 disabledReason={fieldDisabledReason(spec, config)}
                 compact
               />
-            ))}
+              ))}
+            {config.algorithm === 'hierarchical' ? (
+              <div className="tn-muted" style={{ marginTop: -4, marginBottom: 8 }}>
+                实际算法：Ward 层次聚类 + 欧氏距离；该算法不使用随机种子。
+              </div>
+            ) : null}
             <Button type="primary" block onClick={runClustering} loading={busy} disabled={!valid} style={{ marginTop: 8 }}>
               {ACTION_LABELS.startClustering}
             </Button>
@@ -275,38 +332,56 @@ export default function Clustering() {
               selected={selectedRegion ? [selectedRegion] : []}
               onToggle={(regionId) => setSelectedRegion(regionId === selectedRegion ? null : regionId)}
               height={400}
-              colorFor={(entry) => {
-                if (!entry) return '#c9d3e2'
-                if (entry.group === undefined || entry.group === null) return '#e2e8f2'
-                if (entry.group === -1) return '#8b8b8b'
-                return CLUSTER_PALETTE[Math.abs(entry.group) % CLUSTER_PALETTE.length]
-              }}
+              focus={focusRegion}
+              colorFor={(entry) => (
+                entry?.group === undefined || entry?.group === null
+                  ? CLUSTER_NO_DATA_COLOR
+                  : clusterColor(entry.group)
+              )}
               formatTooltip={(entry, regionId) =>
                 `${regionId}: ${entry?.group === undefined ? '无数据 / 未参与聚类' : entry.group === -1 ? '噪声（DBSCAN）' : `簇 ${entry.group}`}`
               }
               legend={
                 <>
-                  {CLUSTER_PALETTE.slice(0, 6).map((color, index) => (
-                    <span key={color}>
-                      <span className="tn-legend-swatch" style={{ background: color }} />簇 {index}
+                  {normalClusters.map((cluster: any) => (
+                    <span key={cluster.cluster_id}>
+                      <span
+                        className="tn-legend-swatch"
+                        data-cluster-id={cluster.cluster_id}
+                        data-cluster-color={clusterColor(cluster.cluster_id)}
+                        style={{ background: clusterColor(cluster.cluster_id) }}
+                      />
+                      簇 {cluster.cluster_id}
                     </span>
                   ))}
+                  {noiseCluster ? (
+                    <span>
+                      <span className="tn-legend-swatch" style={{ background: CLUSTER_NOISE_COLOR }} />
+                      噪声（-1）
+                    </span>
+                  ) : null}
                   <span>
-                    <span className="tn-legend-swatch" style={{ background: '#8b8b8b' }} />噪声 -1
-                  </span>
-                  <span>
-                    <span className="tn-legend-swatch" style={{ background: '#c9d3e2' }} />无数据
+                    <span className="tn-legend-swatch" style={{ background: CLUSTER_NO_DATA_COLOR }} />无数据
                   </span>
                 </>
               }
             />
             <Card size="small" title={bilingual('特征空间', 'Feature Space')} style={{ marginTop: 10 }}>
               {scatter.length ? (
-                <ScatterChart
-                  points={scatter}
-                  xName={result?.feature_names?.[0] ? featureLabel(result.feature_names[0]) : undefined}
-                  yName={result?.feature_names?.[1] ? featureLabel(result.feature_names[1]) : undefined}
-                />
+                <>
+                  <ScatterChart
+                    points={scatter}
+                    xName={featureAxes[0]?.label}
+                    yName={featureAxes[1]?.label}
+                    colorFor={(groupId) => clusterColor(groupId)}
+                    onSelect={(regionId) => setFocusRegion(regionId)}
+                  />
+                  <div className="tn-muted">
+                    二维展示仅使用 {featureAxes[0]?.label ?? '—'} 与 {featureAxes[1]?.label ?? '—'} 两个维度；
+                    实际聚类使用 {result?.feature_names?.length ?? 0} 个标准化特征。
+                    二维距离接近不等于必须属于同一簇。点击散点可在 GIS 地图中定位。
+                  </div>
+                </>
               ) : (
                 <EmptyState text="运行聚类后显示特征散点。" />
               )}
@@ -326,27 +401,102 @@ export default function Clustering() {
                 children: result ? (
                   <div className="tn-stack">
                     <div className="tn-muted">
-                      实际簇数 {result.clusters.filter((c: any) => c.cluster_id >= 0).length} · 参与区域 {result.regions.length} · 丢弃区域{' '}
+                      实际簇数 {normalClusters.length} · 参与区域 {result.regions.length} · 丢弃区域{' '}
                       {result.dropped_regions?.length ?? 0} · 无数据 {result.no_data_regions?.length ?? 0}
+                      {result.assignment ? (
+                        <> · 归属检查 {result.assignment.assigned_regions}/{result.assignment.total_regions}
+                          {result.assignment.all_regions_assigned_once ? '（全部唯一归属）' : '（存在未归属）'}
+                        </>
+                      ) : null}
                     </div>
-                    {result.clusters.map((cluster: any) => (
-                      <Card size="small" key={cluster.cluster_id} title={`${cluster.label_zh} · ${cluster.region_count} 区域`}>
-                        <div className="tn-muted">
-                          {cluster.inferred_zone_type?.label ? (
-                            <Tag color="purple">{cluster.inferred_zone_type.label}</Tag>
-                          ) : null}
+                    {normalClusters.map((cluster: any) => (
+                      <Card
+                        size="small"
+                        key={cluster.cluster_id}
+                        title={(
+                          <span className="tn-inline">
+                            <span
+                              className="tn-legend-swatch"
+                              data-cluster-id={cluster.cluster_id}
+                              data-cluster-color={clusterColor(cluster.cluster_id)}
+                              style={{ background: clusterColor(cluster.cluster_id) }}
+                            />
+                            {cluster.label_zh} · {cluster.region_count} 个区域
+                          </span>
+                        )}
+                      >
+                        <div className="tn-inline" style={{ marginBottom: 6, flexWrap: 'wrap' }}>
+                          <Tag color="purple">
+                            {cluster.pattern_type?.label ?? cluster.inferred_zone_type?.label ?? '模式未知'}
+                            {cluster.pattern_type?.is_hypothesis ? '（假设）' : ''}
+                          </Tag>
+                          {(cluster.characterization?.tags ?? []).map((tag: string) => (
+                            <Tag key={tag} color="blue">{tag}</Tag>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 11.5, lineHeight: 1.65 }}>
+                          {cluster.characterization?.summary_zh ?? '暂无差异化特征摘要。'}
+                        </div>
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                            gap: '2px 10px',
+                            marginTop: 7,
+                            fontSize: 10.5,
+                          }}
+                        >
                           {Object.entries(cluster.feature_means as Record<string, number>).map(([key, value]) => (
                             <div key={key}>
-                              {featureLabel(key)}: {Number(value).toFixed(4)}
+                              {featureLabel(key)}：{Number(value).toFixed(3)}
                             </div>
                           ))}
                         </div>
-                        <div className="tn-muted" style={{ marginTop: 6 }}>
-                          区域：{cluster.regions.slice(0, 8).join(', ')}
-                          {cluster.regions.length > 8 ? ` …（共 ${cluster.regions.length}）` : ''}
-                        </div>
+                        {cluster.pattern_type?.hypothesis_zh ? (
+                          <div className="tn-muted" style={{ marginTop: 6 }}>
+                            假设：{cluster.pattern_type.hypothesis_zh}
+                          </div>
+                        ) : null}
+                        {(cluster.differences ?? []).slice(0, 1).map((difference: any) => (
+                          <div key={difference.other_cluster_id} className="tn-muted" style={{ marginTop: 6 }}>
+                            主要差异：{difference.summary_zh}
+                          </div>
+                        ))}
+                        <Collapse
+                          size="small"
+                          ghost
+                          style={{ marginTop: 3 }}
+                          items={[
+                            {
+                              key: 'details',
+                              label: '展开区域与可靠性说明',
+                              children: (
+                                <div className="tn-insight-details">
+                                  <div>
+                                    <span className="tn-insight-detail-label">包含区域</span>
+                                    <span>{(cluster.regions ?? []).join('、') || '—'}</span>
+                                  </div>
+                                  {(cluster.reliability?.notes ?? []).map((note: string) => (
+                                    <div key={note}>
+                                      <span className="tn-insight-detail-label">可靠性</span>
+                                      <span>{note}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ),
+                            },
+                          ]}
+                        />
                       </Card>
                     ))}
+                    {noiseCluster ? (
+                      <Alert
+                        type="info"
+                        showIcon
+                        message={`噪声点：${noiseCluster.region_count} 个区域`}
+                        description="DBSCAN 噪声点不构成功能区模式，使用独立灰色显示。"
+                      />
+                    ) : null}
                   </div>
                 ) : (
                   <EmptyState text="尚无聚类结果。" />
@@ -357,18 +507,39 @@ export default function Clustering() {
                 label: <BiLabel zh="典型模式" en="Typical Patterns" />,
                 children: result ? (
                   <div className="tn-stack">
-                    <Card size="small" title={bilingual('各簇平均日内模式', 'Cluster Hourly Profiles')}>
-                      <LineChart
-                        height={230}
-                        x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
-                        xName="小时"
-                        yName="流量值"
-                        series={result.clusters.map((cluster: any, index: number) => ({
-                          name: cluster.label_zh,
-                          data: cluster.intraday_profile,
-                          color: CLUSTER_PALETTE[index % CLUSTER_PALETTE.length],
-                        }))}
-                      />
+                    {clusterLegend}
+                    <Card
+                      size="small"
+                      title={bilingual(
+                        normalizedPatterns ? '各簇归一化日内模式' : '各簇平均日内模式',
+                        normalizedPatterns ? 'Normalized Profiles' : 'Cluster Hourly Profiles',
+                      )}
+                      extra={(
+                        <span className="tn-inline" style={{ gap: 5 }}>
+                          <Switch size="small" checked={normalizedPatterns} onChange={setNormalizedPatterns} />
+                          <span className="tn-muted">归一化形状</span>
+                        </span>
+                      )}
+                    >
+                      <div data-testid="cluster-pattern-chart" data-cluster-colors={JSON.stringify(clusterColorMap)}>
+                        <LineChart
+                          height={250}
+                          x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
+                          xName="小时"
+                          xLabelInterval={2}
+                          yName={normalizedPatterns ? '相对水平（各簇均值＝1）' : '流量值'}
+                          series={normalClusters.map((cluster: any) => ({
+                            name: `${cluster.label_zh} · ${cluster.region_count} 区`,
+                            data: normalizedPatterns ? cluster.normalized_profile : cluster.intraday_profile,
+                            color: clusterColor(cluster.cluster_id),
+                          }))}
+                        />
+                      </div>
+                      <div className="tn-muted">
+                        {normalizedPatterns
+                          ? '归一化曲线将每个簇的 24 小时均值除以自身全天均值，用于比较峰谷形状，不比较原始规模。'
+                          : '曲线来自该簇全部成员区域逐小时真实均值的平均；不同簇的原始流量规模可能不同。'}
+                      </div>
                     </Card>
                     <Card size="small" title={bilingual('周内差异', 'Weekly Pattern')}>
                       <LineChart
@@ -376,16 +547,17 @@ export default function Clustering() {
                         x={['周一', '周二', '周三', '周四', '周五', '周六', '周日']}
                         xName="星期"
                         yName="流量值"
-                        series={result.clusters.map((cluster: any, index: number) => ({
-                          name: cluster.label_zh,
+                        series={normalClusters.map((cluster: any) => ({
+                          name: `${cluster.label_zh} · ${cluster.region_count} 区`,
                           data: cluster.weekly_profile,
-                          color: CLUSTER_PALETTE[index % CLUSTER_PALETTE.length],
+                          color: clusterColor(cluster.cluster_id),
                         }))}
                       />
                     </Card>
-                    <div className="tn-muted">
-                      峰值时段与谷值由真实日内均值计算；图例使用真实簇编号与区域数，不使用示意数据。
-                    </div>
+                    <InsightCard
+                      title="聚类模式分析（Cluster Pattern Insights）"
+                      insights={result.pattern_insights}
+                    />
                   </div>
                 ) : (
                   <EmptyState text="尚无聚类结果。" />
@@ -396,18 +568,82 @@ export default function Clustering() {
                 label: <BiLabel zh="质量评估" en="Quality Evaluation" />,
                 children: result ? (
                   <div className="tn-stack">
+                    {!result.cluster_count_check?.matches ? (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message={`请求 ${result.cluster_count_check?.requested ?? '—'} 个簇，实际得到 ${result.cluster_count_check?.actual ?? normalClusters.length} 个有效簇`}
+                        description="请检查参数或数据退化情况；不会用虚假簇补齐请求数量。"
+                      />
+                    ) : null}
                     <Card size="small" title={bilingual('质量指标', 'Clustering Metrics')}>
                       <div className="tn-muted">
                         <div>轮廓系数（Silhouette）：{result.metrics?.silhouette === null || result.metrics?.silhouette === undefined ? '不适用' : Number(result.metrics.silhouette).toFixed(4)}</div>
                         <div>戴维斯-布尔丁指数（Davies-Bouldin）：{result.metrics?.davies_bouldin === null || result.metrics?.davies_bouldin === undefined ? '不适用' : Number(result.metrics.davies_bouldin).toFixed(4)}</div>
                         <div>方差比准则（Calinski-Harabasz）：{result.metrics?.calinski_harabasz === null || result.metrics?.calinski_harabasz === undefined ? '不适用' : Number(result.metrics.calinski_harabasz).toFixed(2)}</div>
                         <div>噪声点：{result.metrics?.noise_points ?? 0}</div>
+                        <div>实际有效簇：{result.metrics?.n_clusters ?? normalClusters.length}（请求 {result.cluster_count_check?.requested ?? '—'}）</div>
+                        <div>
+                          区域归属：{result.assignment?.assigned_regions ?? result.regions.length}/
+                          {result.assignment?.total_regions ?? result.regions.length}
+                          {result.assignment?.all_regions_assigned_once ? '，全部唯一归属' : '，存在未归属或重复'}
+                        </div>
+                        <div>特征窗口：约 {Number(result.sample_window_days ?? 0).toFixed(1)} 天</div>
                       </div>
-                      {(result.metrics?.notes ?? []).map((note: string) => (
+                      {(result.metrics?.interpretation ?? result.metrics?.notes ?? []).map((note: string) => (
                         <div className="tn-muted" key={note}>
                           · {note}
                         </div>
                       ))}
+                    </Card>
+                    <Card size="small" title={bilingual('标准化与算法配置', 'Standardization & Algorithm')}>
+                      <div className="tn-muted">
+                        <div>
+                          特征标准化：{result.standardization?.applied ? '已启用' : '未启用'}
+                          {result.standardization?.applied
+                            ? `，${result.feature_names?.length ?? 0} 个特征逐列 Z-score 标准化`
+                            : '，聚类距离使用原始特征量级'}
+                        </div>
+                        <div>
+                          算法：{result.algorithm_label ?? result.algorithm}
+                          {result.algorithm === 'hierarchical'
+                            ? ` · 连接方式 ${result.algorithm_detail?.linkage ?? '—'} · 距离 ${result.algorithm_detail?.metric ?? '—'} · 不使用随机种子`
+                            : ''}
+                        </div>
+                        <div>
+                          标准化后各特征均值绝对值最大{' '}
+                          {Math.max(
+                            0,
+                            ...Object.values(result.standardization?.feature_stats ?? {}).map((item: any) =>
+                              item.scaled_mean === null || item.scaled_mean === undefined ? 0 : Math.abs(item.scaled_mean),
+                            ),
+                          ).toFixed(3)}
+                          ，非零方差特征标准差接近 1。
+                        </div>
+                      </div>
+                      <Collapse
+                        size="small"
+                        ghost
+                        items={[
+                          {
+                            key: 'feature-standardization',
+                            label: '查看各特征标准化参数',
+                            children: (
+                              <div className="tn-insight-details">
+                                {Object.entries(result.standardization?.feature_stats ?? {}).map(([key, item]: [string, any]) => (
+                                  <div key={key}>
+                                    <span className="tn-insight-detail-label">{featureLabel(key)}</span>
+                                    <span>
+                                      原始均值 {Number(item.mean).toFixed(3)}，原始标准差 {Number(item.std).toFixed(3)}
+                                      {item.zero_variance ? '，零方差（标准差按 1 处理）' : `，标准化后均值 ${Number(item.scaled_mean).toFixed(3)} / 标准差 ${Number(item.scaled_std).toFixed(3)}`}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ),
+                          },
+                        ]}
+                      />
                     </Card>
                     <Card size="small" title={bilingual('算法细节', 'Algorithm Details')}>
                       <pre className="tn-code">{JSON.stringify(result.algorithm_detail, null, 2)}</pre>
@@ -423,33 +659,60 @@ export default function Clustering() {
                 children: result ? (
                   <Table
                     size="small"
+                    tableLayout="fixed"
                     rowKey="region_id"
                     pagination={{ pageSize: 12, size: 'small' }}
                     dataSource={result.regions}
-                    onRow={(record: any) => ({ onClick: () => setSelectedRegion(record.region_id) })}
+                    onRow={(record: any) => ({
+                      onClick: () => {
+                        setSelectedRegion(record.region_id)
+                        setFocusRegion(record.region_id)
+                      },
+                    })}
                     columns={[
-                      { title: '区域', dataIndex: 'region_id', sorter: (a: any, b: any) => String(a.region_id).localeCompare(String(b.region_id)) },
+                      { title: '区域', dataIndex: 'region_id', width: '22%', ellipsis: true, sorter: (a: any, b: any) => String(a.region_id).localeCompare(String(b.region_id)) },
                       {
                         title: '簇',
                         dataIndex: 'cluster_id',
+                        width: '14%',
                         sorter: (a: any, b: any) => a.cluster_id - b.cluster_id,
-                        render: (value: number) => (value === -1 ? <Tag>噪声</Tag> : <Tag color="blue">{value}</Tag>),
+                        render: (value: number) => (
+                          <Tag color={clusterColor(value)}>{value === -1 ? '噪声（-1）' : `簇 ${value}`}</Tag>
+                        ),
                       },
                       {
-                        title: featureLabel(result.feature_names[0]),
-                        render: (_: unknown, record: any) => Number(record.features[result.feature_names[0]]).toFixed(3),
+                        title: '模式类型',
+                        width: '21%',
+                        ellipsis: true,
+                        render: (_: unknown, record: any) =>
+                          clusterById.get(record.cluster_id)?.pattern_type?.label ?? '—',
+                      },
+                      {
+                        title: '平均值',
+                        width: '18%',
+                        render: (_: unknown, record: any) => Number(record.features[result.feature_names[0]]).toFixed(1),
                         sorter: (a: any, b: any) => a.features[result.feature_names[0]] - b.features[result.feature_names[0]],
                       },
                       {
-                        title: result.feature_names[1] ? featureLabel(result.feature_names[1]) : '—',
+                        title: 'CV',
+                        width: '13%',
                         render: (_: unknown, record: any) =>
-                          result.feature_names[1] ? Number(record.features[result.feature_names[1]]).toFixed(3) : '—',
+                          result.feature_names.includes('cv') ? Number(record.features.cv).toFixed(3) : '—',
                       },
                       {
                         title: '定位',
+                        width: '12%',
                         render: (_: unknown, record: any) => (
                           <Tooltip title="在地图上高亮">
-                            <Button size="small" onClick={() => setSelectedRegion(record.region_id)}>定位</Button>
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                setSelectedRegion(record.region_id)
+                                setFocusRegion(record.region_id)
+                              }}
+                            >
+                              定位
+                            </Button>
                           </Tooltip>
                         ),
                       },

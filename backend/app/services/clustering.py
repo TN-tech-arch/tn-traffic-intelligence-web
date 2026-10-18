@@ -91,7 +91,7 @@ def _quality_metrics(matrix: np.ndarray, labels: np.ndarray) -> dict[str, Any]:
         "notes": [],
     }
     if len(unique) < 2:
-        metrics["notes"].append("有效簇少于 2 个，轮廓系数/DB/CH 指标不适用（N/A）。")
+        metrics["notes"].append("有效簇少于 2 个，轮廓系数、Davies-Bouldin 和 Calinski-Harabasz 指标不适用。")
         return metrics
     mask = labels >= 0
     if mask.sum() < len(unique):
@@ -112,6 +112,446 @@ def _quality_metrics(matrix: np.ndarray, labels: np.ndarray) -> dict[str, Any]:
     except Exception as exc:
         metrics["notes"].append(f"Calinski-Harabasz 无法计算：{exc}")
     return metrics
+
+
+def _fmt(value: float | None, *, digits: int = 2) -> str:
+    if value is None or not np.isfinite(value):
+        return "—"
+    return f"{value:,.{digits}f}"
+
+
+def _pct_diff(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None or not np.isfinite(left) or not np.isfinite(right):
+        return None
+    if abs(right) <= 1e-12:
+        return None
+    return (left - right) / abs(right) * 100.0
+
+
+def _rank_word(index: int, count: int, words: list[str]) -> str:
+    if count <= 1:
+        return words[0]
+    if count == 2:
+        return words[0] if index == 0 else words[-1]
+    if count == 3:
+        return [words[0], words[1], words[-1]][index]
+    scaled = round(index * (len(words) - 1) / max(1, count - 1))
+    return words[scaled]
+
+
+def _pattern_type(feature_means: dict[str, float]) -> dict[str, Any]:
+    """Coarse temporal shape only; land-use wording is an explicit hypothesis."""
+    peak = float(feature_means.get("intraday_peak_ratio") or 0.0)
+    day_night = float(feature_means.get("day_night_ratio") or 0.0)
+    weekday_weekend = float(feature_means.get("weekday_weekend_ratio") or 0.0)
+    cv = float(feature_means.get("cv") or 0.0)
+    seasonality = float(feature_means.get("daily_seasonality") or 0.0)
+    if peak >= 1.4 and day_night >= 1.35 and weekday_weekend >= 1.2:
+        key = "daytime_peak"
+        label = "日间高峰型"
+        hypothesis = "可能与通勤或办公活动有关（假设，未验证真实土地用途）"
+    elif peak >= 1.25 and day_night >= 1.12:
+        key = "daytime_biased"
+        label = "日间偏强型"
+        hypothesis = None
+    elif day_night < 0.9:
+        key = "night_active"
+        label = "夜间活跃型"
+        hypothesis = None
+    elif cv < 0.32 and peak < 1.3:
+        key = "steady"
+        label = "平稳均衡型"
+        hypothesis = None
+    else:
+        key = "mixed"
+        label = "混合波动型"
+        hypothesis = None
+    return {
+        "key": key,
+        "label": label,
+        "is_hypothesis": hypothesis is not None,
+        "hypothesis_zh": hypothesis,
+        "evidence": {
+            "intraday_peak_ratio": peak,
+            "day_night_ratio": day_night,
+            "weekday_weekend_ratio": weekday_weekend,
+            "cv": cv,
+            "daily_seasonality": seasonality,
+        },
+        "rule_zh": (
+            "日内峰值比≥1.40、昼夜比≥1.35 且工作日/周末比≥1.20 => 日间高峰型；"
+            "日内峰值比≥1.25 且昼夜比≥1.12 => 日间偏强型；"
+            "否则按夜间活跃、平稳均衡或混合波动归类。"
+        ),
+    }
+
+
+def _profile_extremes(profile: list[float | None]) -> dict[str, Any]:
+    pairs = [(hour, float(value)) for hour, value in enumerate(profile) if value is not None]
+    if not pairs:
+        return {"peak_hour": None, "peak_value": None, "trough_hour": None, "trough_value": None}
+    peak_hour, peak_value = max(pairs, key=lambda item: item[1])
+    trough_hour, trough_value = min(pairs, key=lambda item: item[1])
+    return {
+        "peak_hour": peak_hour,
+        "peak_value": peak_value,
+        "trough_hour": trough_hour,
+        "trough_value": trough_value,
+    }
+
+
+def _profile_correlation(left: list[float | None], right: list[float | None]) -> float | None:
+    pairs = [
+        (float(a), float(b))
+        for a, b in zip(left, right)
+        if a is not None and b is not None
+    ]
+    if len(pairs) < 3:
+        return None
+    array_a = np.asarray([item[0] for item in pairs], dtype="float64")
+    array_b = np.asarray([item[1] for item in pairs], dtype="float64")
+    if array_a.std() <= 1e-12 or array_b.std() <= 1e-12:
+        return None
+    return float(np.corrcoef(array_a, array_b)[0, 1])
+
+
+def _characterization(
+    cluster_id: int,
+    feature_means: dict[str, dict[str, float]],
+) -> dict[str, Any]:
+    ids = sorted(feature_means)
+    if not ids:
+        return {"summary_zh": "", "tags": []}
+
+    def ordered(key: str, *, reverse: bool = True) -> list[int]:
+        return sorted(ids, key=lambda cid: feature_means[cid].get(key, 0.0), reverse=reverse)
+
+    mean_order = ordered("mean")
+    cv_order = ordered("cv")
+    weekday_order = ordered("weekday_weekend_ratio")
+    seasonality_order = ordered("daily_seasonality")
+    peak_order = ordered("intraday_peak_ratio")
+    count = len(ids)
+    flow = _rank_word(mean_order.index(cluster_id), count, ["最高", "较高", "较低", "最低"])
+    volatility = _rank_word(cv_order.index(cluster_id), count, ["最强", "较强", "较弱", "最弱"])
+    weekday_effect = _rank_word(
+        weekday_order.index(cluster_id), count, ["最强", "较强", "较弱", "最弱"]
+    )
+    seasonality = _rank_word(
+        seasonality_order.index(cluster_id), count, ["最清晰", "较清晰", "较弱", "最弱"]
+    )
+    peak = _rank_word(peak_order.index(cluster_id), count, ["最突出", "较突出", "较弱", "最弱"])
+    own = feature_means[cluster_id]
+    tags = [
+        f"流量{flow}",
+        f"波动{volatility}",
+        f"工作日效应{weekday_effect}",
+        f"日周期{seasonality}",
+    ]
+    summary = (
+        f"{'·'.join(tags)}；"
+        f"平均流量 {_fmt(own.get('mean'))}，CV {_fmt(own.get('cv'), digits=3)}，"
+        f"日内峰值比 {_fmt(own.get('intraday_peak_ratio'), digits=3)}，"
+        f"昼夜比 {_fmt(own.get('day_night_ratio'), digits=3)}，"
+        f"工作日/周末比 {_fmt(own.get('weekday_weekend_ratio'), digits=3)}，"
+        f"日周期强度 {_fmt(own.get('daily_seasonality'), digits=3)}"
+    )
+    return {
+        "summary_zh": summary,
+        "tags": tags,
+        "rank_notes": {
+            "mean": f"流量{flow}",
+            "cv": f"波动{volatility}",
+            "weekday_weekend_ratio": f"工作日效应{weekday_effect}",
+            "daily_seasonality": f"日周期{seasonality}",
+            "intraday_peak_ratio": f"日内峰谷{peak}",
+        },
+    }
+
+
+def _quality_interpretation(quality: dict[str, Any], span_days: float) -> list[str]:
+    notes: list[str] = []
+    silhouette = quality.get("silhouette")
+    if silhouette is not None:
+        if silhouette < 0.25:
+            notes.append(f"轮廓系数 {silhouette:.3f}，簇间分离度偏弱，簇边界需要结合业务解释谨慎使用。")
+        elif silhouette < 0.5:
+            notes.append(f"轮廓系数 {silhouette:.3f}，簇间存在一定分离，但仍有重叠。")
+        else:
+            notes.append(f"轮廓系数 {silhouette:.3f}，簇间分离较清晰。")
+    else:
+        notes.append("轮廓系数不可计算：有效簇不足、样本不足或存在退化簇。")
+    db = quality.get("davies_bouldin")
+    if db is not None:
+        notes.append(f"Davies-Bouldin={db:.3f}，该指标越低越好。")
+    else:
+        notes.append("Davies-Bouldin 不可计算：有效簇不足或聚类退化。")
+    ch = quality.get("calinski_harabasz")
+    if ch is not None:
+        notes.append(f"Calinski-Harabasz={ch:.2f}，该指标越高通常表示簇间分散程度更好。")
+    else:
+        notes.append("Calinski-Harabasz 不可计算：有效簇不足或聚类退化。")
+    if span_days < 14:
+        notes.append(f"当前特征窗口约 {span_days:.1f} 天，周周期与功能区类型只能作为初步假设。")
+    return notes
+
+
+def _build_pairwise_analysis(
+    summaries: list[dict[str, Any]],
+    scaled: np.ndarray,
+    cluster_index: dict[int, list[int]],
+    names: list[str],
+) -> tuple[list[dict[str, Any]], dict[int, list[dict[str, Any]]]]:
+    normal = [summary for summary in summaries if int(summary["cluster_id"]) >= 0]
+    centroids = {
+        int(summary["cluster_id"]): np.mean(
+            scaled[cluster_index[int(summary["cluster_id"])]], axis=0
+        )
+        for summary in normal
+    }
+    pairs: list[dict[str, Any]] = []
+    by_cluster: dict[int, list[dict[str, Any]]] = {int(summary["cluster_id"]): [] for summary in normal}
+    for index, left in enumerate(normal):
+        left_id = int(left["cluster_id"])
+        for right in normal[index + 1:]:
+            right_id = int(right["cluster_id"])
+            a = left["feature_means"]
+            b = right["feature_means"]
+            centroid_gap = np.abs(centroids[left_id] - centroids[right_id])
+            gap_index = int(np.argmax(centroid_gap))
+            gap_feature = names[gap_index]
+            gap_label = FEATURE_LABELS.get(gap_feature, {}).get("zh", gap_feature)
+            correlation = _profile_correlation(left["intraday_profile"], right["intraday_profile"])
+            mean_pct = _pct_diff(a.get("mean"), b.get("mean"))
+            cv_delta = (a.get("cv") or 0.0) - (b.get("cv") or 0.0)
+            weekday_delta = (
+                (a.get("weekday_weekend_ratio") or 0.0)
+                - (b.get("weekday_weekend_ratio") or 0.0)
+            )
+            seasonality_delta = (
+                (a.get("daily_seasonality") or 0.0)
+                - (b.get("daily_seasonality") or 0.0)
+            )
+            same_type = left["pattern_type"]["key"] == right["pattern_type"]["key"]
+            def difference_summary(
+                own_id: int,
+                other_id: int,
+                own: dict[str, float],
+                other: dict[str, float],
+            ) -> tuple[str, float | None]:
+                signed_mean = _pct_diff(own.get("mean"), other.get("mean"))
+                signed_cv = (own.get("cv") or 0.0) - (other.get("cv") or 0.0)
+                signed_weekday = (
+                    (own.get("weekday_weekend_ratio") or 0.0)
+                    - (other.get("weekday_weekend_ratio") or 0.0)
+                )
+                signed_seasonality = (
+                    (own.get("daily_seasonality") or 0.0)
+                    - (other.get("daily_seasonality") or 0.0)
+                )
+                text = (
+                    f"与簇 {other_id} 相比：平均流量"
+                    + (f"{signed_mean:+.1f}%" if signed_mean is not None else "无法计算百分比")
+                    + f"，CV 差 {signed_cv:+.3f}，工作日/周末比差 {signed_weekday:+.3f}，"
+                    f"日周期强度差 {signed_seasonality:+.3f}；"
+                    f"标准化质心差异最大的是{gap_label}（z 差 {float(centroid_gap[gap_index]):.3f}）。"
+                )
+                return text, signed_mean
+
+            summary_text, _ = difference_summary(left_id, right_id, a, b)
+            reverse_summary, _ = difference_summary(right_id, left_id, b, a)
+            pattern_prefix = (
+                f"两簇的粗粒度模式均为“{left['pattern_type']['label']}”，"
+                if same_type
+                else f"两簇的粗粒度模式分别为“{left['pattern_type']['label']}”与“{right['pattern_type']['label']}”，"
+            )
+            why = (
+                pattern_prefix
+                + f"聚类使用的是 {len(names)} 维标准化特征，不是簇名称。"
+                f"标准化质心最大差异为{gap_label}（z 差 {float(centroid_gap[gap_index]):.3f}），"
+                + (
+                    f"平均流量相差 {abs(mean_pct):.1f}%，"
+                    if mean_pct is not None
+                    else "平均流量百分比无法计算，"
+                )
+                + f"CV 差 {cv_delta:+.3f}，工作日/周末比差 {weekday_delta:+.3f}，"
+                f"日周期强度差 {seasonality_delta:+.3f}。"
+                + (
+                    f" 两条 24 小时曲线相关 r={correlation:.3f}，"
+                    if correlation is not None
+                    else " 曲线相关无法计算，"
+                )
+                + "因此算法仍将它们保留为独立簇，不能仅凭粗粒度模式名合并。"
+            )
+            pair = {
+                "left_cluster_id": left_id,
+                "right_cluster_id": right_id,
+                "same_pattern_type": same_type,
+                "pattern_type": left["pattern_type"]["label"] if same_type else None,
+                "centroid_distance": float(np.linalg.norm(centroids[left_id] - centroids[right_id])),
+                "largest_centroid_gap": {
+                    "feature": gap_feature,
+                    "feature_label_zh": gap_label,
+                    "absolute_z_difference": float(centroid_gap[gap_index]),
+                },
+                "mean_difference_pct": None if mean_pct is None else float(mean_pct),
+                "cv_difference": float(cv_delta),
+                "weekday_weekend_ratio_difference": float(weekday_delta),
+                "daily_seasonality_difference": float(seasonality_delta),
+                "profile_correlation": correlation,
+                "summary_zh": summary_text,
+                "why_separated_zh": why,
+            }
+            pairs.append(pair)
+            by_cluster[left_id].append({
+                **pair,
+                "other_cluster_id": right_id,
+                "summary_zh": summary_text,
+            })
+            by_cluster[right_id].append({
+                **pair,
+                "other_cluster_id": left_id,
+                "summary_zh": reverse_summary,
+            })
+    for cluster_id, rows in by_cluster.items():
+        rows.sort(key=lambda row: row["centroid_distance"])
+    return pairs, by_cluster
+
+
+def _build_pattern_insights(
+    summaries: list[dict[str, Any]],
+    pairwise: list[dict[str, Any]],
+    quality: dict[str, Any],
+    *,
+    span_days: float,
+    assignment: dict[str, Any],
+) -> dict[str, Any]:
+    normal = [summary for summary in summaries if int(summary["cluster_id"]) >= 0]
+    if not normal:
+        return {
+            "available": False,
+            "items": [],
+            "warnings": ["没有有效簇，无法生成典型模式分析。"],
+            "details": [],
+            "reliability": {"level": "none", "notes": ["有效簇数量为 0。"]},
+        }
+    items: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    details: list[dict[str, Any]] = []
+
+    peak_parts = [
+        f"簇 {summary['cluster_id']} 峰值 {summary['peak_hour']:02d}:00、"
+        f"谷值 {summary['trough_hour']:02d}:00"
+        for summary in normal
+        if summary.get("peak_hour") is not None and summary.get("trough_hour") is not None
+    ]
+    items.append(
+        {
+            "key": "peak_trough",
+            "label": "峰谷时刻",
+            "text": "各簇真实 24 小时典型曲线：" + "；".join(peak_parts)
+            + "。峰值和谷值来自该簇全部成员区域逐小时真实均值的平均曲线。",
+            "level": "info",
+            "metrics": {
+                str(summary["cluster_id"]): {
+                    "peak_hour": summary.get("peak_hour"),
+                    "trough_hour": summary.get("trough_hour"),
+                }
+                for summary in normal
+            },
+        }
+    )
+
+    repeated = [pair for pair in pairwise if pair.get("same_pattern_type")]
+    for pair in repeated[:2]:
+        items.append(
+            {
+                "key": f"pair_{pair['left_cluster_id']}_{pair['right_cluster_id']}",
+                "label": f"簇 {pair['left_cluster_id']} 与簇 {pair['right_cluster_id']}",
+                "text": pair["why_separated_zh"],
+                "level": "info",
+                "metrics": pair,
+            }
+        )
+
+    if len(items) < 3:
+        nearest = min(pairwise, key=lambda pair: pair["centroid_distance"], default=None)
+        items.append(
+            {
+                "key": "pairwise_center",
+                "label": "标准化质心差异",
+                "text": nearest["summary_zh"] if nearest else "没有可比较的簇。",
+                "level": "info",
+                "metrics": nearest or {},
+            }
+        )
+
+    min_size = min(int(summary["region_count"]) for summary in normal)
+    reliability_level = "high"
+    if span_days < 14:
+        warnings.append(
+            f"当前特征窗口约 {span_days:.1f} 天，周周期和功能区类型只能作为初步假设。"
+        )
+        reliability_level = "medium"
+    if min_size < 5:
+        warnings.append(f"最小簇只有 {min_size} 个区域，簇均值可能受个别区域影响。")
+        reliability_level = "low"
+    silhouette = quality.get("silhouette")
+    if silhouette is not None and silhouette < 0.25:
+        warnings.append(
+            f"轮廓系数 {silhouette:.3f}，簇间分离度偏弱，不宜把簇差异解释为明确的城市功能分区。"
+        )
+        reliability_level = "low"
+    items.append(
+        {
+            "key": "reliability",
+            "label": "可靠性",
+            "text": (
+                f"实际得到 {quality.get('n_clusters', len(normal))} 个有效簇，"
+                f"{assignment['assigned_regions']}/{assignment['total_regions']} 个区域均有唯一归属。"
+                f"观测窗口约 {span_days:.1f} 天；"
+                + (
+                    f"轮廓系数 {silhouette:.3f}。" if silhouette is not None
+                    else "轮廓系数不可计算。"
+                )
+                + " 粗粒度模式名与土地用途假设均需更长时间数据验证。"
+            ),
+            "level": "warning" if warnings else "info",
+            "metrics": {"span_days": span_days, "silhouette": silhouette},
+        }
+    )
+
+    for summary in normal:
+        details.append(
+            {
+                "label": f"簇 {summary['cluster_id']}",
+                "value": (
+                    f"{summary['region_count']} 区域；{summary['pattern_type']['label']}；"
+                    f"{summary['characterization']['summary_zh']}"
+                ),
+            }
+        )
+    for pair in pairwise:
+        details.append(
+            {
+                "label": f"簇 {pair['left_cluster_id']} vs 簇 {pair['right_cluster_id']}",
+                "value": pair["why_separated_zh"],
+            }
+        )
+    return {
+        "available": True,
+        "items": items[:4],
+        "warnings": warnings,
+        "details": details,
+        "reliability": {
+            "level": reliability_level,
+            "notes": [
+                f"特征窗口约 {span_days:.1f} 天，覆盖一个小样本周期。",
+                f"最小簇包含 {min_size} 个区域。",
+                "聚类名称是对时间模式的描述，不等同于真实土地使用或功能区验证。",
+            ],
+        },
+    }
 
 
 def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progress=None) -> dict[str, Any]:
@@ -152,9 +592,10 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
         raise RuntimeError("已按用户请求停止")
 
     scaler_mean = matrix.mean(axis=0)
-    scaler_std = matrix.std(axis=0)
-    scaler_std = np.where(scaler_std < 1e-12, 1.0, scaler_std)
-    scaled = (matrix - scaler_mean) / scaler_std if params.get("standardize", True) else matrix
+    raw_scaler_std = matrix.std(axis=0)
+    scaler_std = np.where(raw_scaler_std < 1e-12, 1.0, raw_scaler_std)
+    standardize_applied = bool(params.get("standardize", True))
+    scaled = (matrix - scaler_mean) / scaler_std if standardize_applied else matrix
     report("Clustering", 45.0, f"运行 {ALGORITHM_LABELS[params['algorithm']]}")
     labels, algo_detail = _cluster_labels(scaled, params)
     quality = _quality_metrics(scaled, labels)
@@ -162,6 +603,11 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
 
     profile = intraday_profile(ts, values)
     weekly = weekly_profile(ts, values)
+    span_days = (
+        float(ts[-1] - ts[0]) / 86400.0 + frequency_minutes / 1440.0
+        if ts.size > 1
+        else 0.0
+    )
     cluster_index = {int(c): [] for c in sorted({int(x) for x in labels.tolist()})}
     for position, label in enumerate(labels.tolist()):
         cluster_index.setdefault(int(label), []).append(position)
@@ -170,6 +616,13 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
     for label, positions in sorted(cluster_index.items()):
         region_position = list(positions)
         member_regions = [kept_regions[p] for p in positions]
+        intraday = [
+            float(v) if np.isfinite(v) else None
+            for v in np.nanmean(profile[:, region_position], axis=1)
+        ]
+        extremes = _profile_extremes(intraday)
+        finite_profile = [value for value in intraday if value is not None]
+        profile_mean = float(np.mean(finite_profile)) if finite_profile else None
         summary = {
             "cluster_id": label,
             "label_zh": "噪声点" if label == -1 else f"簇 {label}",
@@ -178,15 +631,136 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
             "feature_means": {
                 names[f]: float(np.nanmean(matrix[positions, f])) for f in range(len(names))
             },
-            "intraday_profile": [float(v) if np.isfinite(v) else None
-                                 for v in np.nanmean(profile[:, region_position], axis=1)],
+            "intraday_profile": intraday,
+            "normalized_profile": [
+                (value / profile_mean) if value is not None and profile_mean and abs(profile_mean) > 1e-12 else None
+                for value in intraday
+            ],
             "weekly_profile": [float(v) if np.isfinite(v) else None
                                for v in np.nanmean(weekly[:, region_position], axis=1)],
             "mean_level": float(np.nanmean(matrix[positions, 0])) if positions else None,
+            "peak_hour": extremes["peak_hour"],
+            "peak_value": extremes["peak_value"],
+            "trough_hour": extremes["trough_hour"],
+            "trough_value": extremes["trough_value"],
             "inferred_zone_type": None,
         }
-        summary["inferred_zone_type"] = _infer_zone_type(summary["feature_means"])
         cluster_summaries.append(summary)
+
+    feature_means_by_cluster = {
+        int(summary["cluster_id"]): summary["feature_means"]
+        for summary in cluster_summaries
+        if int(summary["cluster_id"]) >= 0
+    }
+    for summary in cluster_summaries:
+        cluster_id = int(summary["cluster_id"])
+        if cluster_id < 0:
+            summary["pattern_type"] = {
+                "key": "noise",
+                "label": "噪声点",
+                "is_hypothesis": False,
+                "hypothesis_zh": None,
+                "evidence": {},
+                "rule_zh": "DBSCAN 噪声点不构成功能模式。",
+            }
+            summary["characterization"] = {"summary_zh": "未归入稳定簇的噪声点", "tags": ["噪声"]}
+            summary["differences"] = []
+            summary["reliability"] = {
+                "level": "low",
+                "notes": ["噪声点不参与典型功能区模式解释。"],
+            }
+            summary["inferred_zone_type"] = {
+                "label": "噪声点",
+                "is_inferred": False,
+                "evidence": {},
+                "disclaimer_zh": "噪声点是算法输出，不代表功能区类型。",
+            }
+            continue
+        pattern_type = _pattern_type(summary["feature_means"])
+        characterization = _characterization(cluster_id, feature_means_by_cluster)
+        summary["pattern_type"] = pattern_type
+        summary["characterization"] = characterization
+        summary["inferred_zone_type"] = {
+            "label": pattern_type["label"],
+            "is_inferred": True,
+            "hypothesis_zh": pattern_type["hypothesis_zh"],
+            "evidence": pattern_type["evidence"],
+            "disclaimer_zh": (
+                "该名称仅描述真实时间模式；涉及通勤、办公、商业或住宅的词均为未验证假设。"
+            ),
+        }
+        notes = [f"该簇包含 {summary['region_count']} 个区域。"]
+        level = "medium"
+        if summary["region_count"] < 5:
+            level = "low"
+            notes.append("成员区域少于 5 个，簇均值容易受个别区域影响。")
+        if span_days < 14:
+            notes.append(f"观测窗口约 {span_days:.1f} 天，尚不足以稳定验证周周期。")
+        notes.append("模式类型用于描述流量形状，不代表已验证的土地用途。")
+        summary["reliability"] = {"level": level, "notes": notes}
+
+    pairwise, pair_by_cluster = _build_pairwise_analysis(
+        cluster_summaries, scaled, cluster_index, names
+    )
+    for summary in cluster_summaries:
+        summary["differences"] = pair_by_cluster.get(int(summary["cluster_id"]), [])
+
+    sizes = {
+        int(summary["cluster_id"]): int(summary["region_count"])
+        for summary in cluster_summaries
+        if int(summary["cluster_id"]) >= 0
+    }
+    assigned_regions = sum(sizes.values())
+    assignment = {
+        "total_regions": len(kept_regions),
+        "assigned_regions": assigned_regions,
+        "unique_region_count": len(set(kept_regions)),
+        "cluster_sizes": sizes,
+        "sum_cluster_counts": assigned_regions,
+        "all_regions_assigned_once": assigned_regions == len(kept_regions),
+    }
+    expected_clusters = None
+    if params["algorithm"] == "kmeans":
+        expected_clusters = int(params.get("n_clusters", 4))
+    elif params["algorithm"] == "hierarchical":
+        expected_clusters = int(params.get("hierarchical_n_clusters", 4))
+    elif params["algorithm"] == "gmm":
+        expected_clusters = int(params.get("gmm_n_components", 4))
+    cluster_count_check = {
+        "requested": expected_clusters,
+        "actual": int(quality["n_clusters"]),
+        "matches": expected_clusters is None or expected_clusters == int(quality["n_clusters"]),
+    }
+    quality["sample_window_days"] = span_days
+    quality["assignment_check"] = assignment
+    quality["interpretation"] = _quality_interpretation(quality, span_days)
+    quality["notes"].extend(quality["interpretation"])
+    standardization = {
+        "applied": standardize_applied,
+        "method": "Z-score（每个特征减去区域均值并除以总体标准差 ddof=0）",
+        "feature_stats": {
+            names[index]: {
+                "mean": float(scaler_mean[index]),
+                "std": float(raw_scaler_std[index]),
+                "zero_variance": bool(raw_scaler_std[index] < 1e-12),
+                "scaled_mean": float(np.mean(scaled[:, index])) if standardize_applied else None,
+                "scaled_std": float(np.std(scaled[:, index])) if standardize_applied else None,
+            }
+            for index in range(len(names))
+        },
+        "note_zh": (
+            "聚类在标准化后的特征矩阵上执行；原始 Mean/Std 等数值用于解释，不直接决定距离。"
+            if standardize_applied
+            else "本次未启用标准化，聚类距离直接使用原始特征量级。"
+        ),
+    }
+    pattern_insights = _build_pattern_insights(
+        cluster_summaries,
+        pairwise,
+        quality,
+        span_days=span_days,
+        assignment=assignment,
+    )
 
     region_records = []
     for position, label in enumerate(labels.tolist()):
@@ -209,6 +783,12 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
         "scaled_matrix": scaled.tolist(),
         "algorithm_detail": algo_detail,
         "quality": quality,
+        "standardization": standardization,
+        "assignment": assignment,
+        "cluster_count_check": cluster_count_check,
+        "pairwise_differences": pairwise,
+        "pattern_insights": pattern_insights,
+        "sample_window_days": span_days,
         "dropped_regions": dropped,
         "no_data_regions": [r["region_id"] for r in regions_for(source["source_id"], has_timeseries=False)],
         "time_start": str(ts[0]) if ts.size else None,
@@ -216,7 +796,7 @@ def run_clustering(cluster_run_id: str, *, job_id: str, cancel_requested, progre
         "frequency": frequency,
         "aggregation": aggregation,
         "feature_help": {key: FEATURE_LABELS[key] for key in names if key in FEATURE_LABELS},
-        "disclaimer_zh": "簇类型标签仅依据流量模式的推测，不代表真实土地使用数据。",
+        "disclaimer_zh": "簇模式名来自真实流量特征；通勤、办公、商业、住宅等土地用途表述均为未验证假设。",
     }
     get_connection().execute(
         """

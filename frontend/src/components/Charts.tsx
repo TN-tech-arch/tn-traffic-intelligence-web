@@ -6,6 +6,7 @@ export function LineChart({
   x,
   height = 260,
   xName = '时间',
+  xLabelInterval,
   yName,
   loading,
   empty,
@@ -14,6 +15,7 @@ export function LineChart({
   x: string[]
   height?: number
   xName?: string
+  xLabelInterval?: number
   yName?: string
   loading?: boolean
   empty?: boolean
@@ -29,7 +31,11 @@ export function LineChart({
       data: x,
       name: xName,
       nameTextStyle: { fontSize: 10 },
-      axisLabel: { fontSize: 10, hideOverlap: true },
+      axisLabel: {
+        fontSize: 10,
+        hideOverlap: true,
+        ...(xLabelInterval === undefined ? {} : { interval: xLabelInterval }),
+      },
     },
     yAxis: { type: 'value', name: yName ?? '数值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
     dataZoom: [
@@ -85,16 +91,45 @@ export function ScatterChart({
   height = 280,
   xName,
   yName,
+  colorFor,
+  onSelect,
 }: {
-  points: Array<{ x: number; y: number; group: number }>
+  points: Array<{
+    x: number
+    y: number
+    group: number
+    name?: string
+    regionId?: string
+    extra?: string
+  }>
   height?: number
   xName?: string
   yName?: string
+  colorFor?: (group: number) => string
+  onSelect?: (regionId: string) => void
 }) {
   if (!points.length) return <Empty description="暂无真实数据" />
   const groups = Array.from(new Set(points.map((p) => p.group)))
+  const clusterColors = Object.fromEntries(
+    groups.map((group) => [String(group), colorFor?.(group) ?? '']),
+  )
   const option = {
-    tooltip: { trigger: 'item' },
+    tooltip: {
+      trigger: 'item',
+      formatter: (params: any) => {
+        const data = params.data ?? {}
+        return (
+          `<div style="font-size:12px;line-height:1.7">` +
+          `<div><b>${data.name ?? '—'}</b></div>` +
+          `<div>所属簇：<b>${data.group < 0 ? '噪声（-1）' : `簇 ${data.group}`}</b></div>` +
+          `<div>${xName ?? '横轴特征'}：${Number(data.value?.[0]).toFixed(3)}</div>` +
+          `<div>${yName ?? '纵轴特征'}：${Number(data.value?.[1]).toFixed(3)}</div>` +
+          (data.extra ? `<div style="color:#c3cadb">${data.extra}</div>` : '') +
+          `<div style="color:#c3cadb">点击可在 GIS 地图中定位</div>` +
+          `</div>`
+        )
+      },
+    },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
     grid: { left: 56, right: 16, top: 18, bottom: 46 },
     xAxis: { type: 'value', name: xName ?? '特征值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
@@ -103,10 +138,41 @@ export function ScatterChart({
       name: group < 0 ? '噪声（-1）' : `簇 ${group}`,
       type: 'scatter',
       symbolSize: 9,
-      data: points.filter((p) => p.group === group).map((p) => [p.x, p.y]),
+      itemStyle: { color: colorFor?.(group) },
+      data: points
+        .filter((p) => p.group === group)
+        .map((p) => ({
+          value: [p.x, p.y],
+          name: p.name ?? p.regionId ?? '—',
+          regionId: p.regionId,
+          group: p.group,
+          extra: p.extra,
+        })),
     })),
   }
-  return <ReactECharts option={option} style={{ height }} notMerge />
+  return (
+    <div
+      data-testid="cluster-feature-scatter"
+      data-cluster-axes={`${xName ?? '—'}|${yName ?? '—'}`}
+      data-cluster-colors={JSON.stringify(clusterColors)}
+    >
+      <ReactECharts
+        option={option}
+        style={{ height }}
+        notMerge
+        onEvents={
+          onSelect
+            ? {
+                click: (params: any) => {
+                  const regionId = params.data?.regionId
+                  if (regionId) onSelect(String(regionId))
+                },
+              }
+            : undefined
+        }
+      />
+    </div>
+  )
 }
 
 export interface RankItem {
