@@ -355,15 +355,18 @@ await page.screenshot({ path: path.join(SHOTS, '43-m2-quality.png'), fullPage: t
 
 const regionSection = centerPane.locator('section[aria-label="Region List"]')
 const regionText = await regionSection.innerText()
+const regionHeaders = (await regionSection.locator('thead th').allInnerTexts()).map((text) =>
+  text.trim(),
+)
 check(
-  '18 区域列表包含区域、簇、模式类型与真实特征值',
-  regionText.includes('区域') &&
-    regionText.includes('模式类型') &&
-    regionText.includes('Mean') &&
-    regionText.includes('Std') &&
-    regionText.includes('CV') &&
-    regionText.includes('簇 3'),
-  regionText.replace(/\n/g, ' | ').slice(0, 160),
+  '18 区域列表保留区域、簇与真实特征值，并已删除模式类型列',
+  regionHeaders.length === 6 &&
+    ['区域', '簇', 'Mean', 'Std', 'CV', '操作'].every((text) =>
+      regionHeaders.some((header) => header.includes(text)),
+    ) &&
+    !regionHeaders.some((header) => header.includes('模式类型')) &&
+    regionText.includes('簇 3（中流量·平稳型）'),
+  `${regionHeaders.join('|')} · ${regionText.replace(/\n/g, ' | ').slice(0, 120)}`,
 )
 const regionSearch = regionSection.locator('input[placeholder="搜索区域名称或 ID"]')
 await regionSearch.fill('BRERA')

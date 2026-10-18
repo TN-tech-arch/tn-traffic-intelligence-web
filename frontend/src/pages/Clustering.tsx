@@ -372,9 +372,6 @@ export default function Clustering() {
     regionId ? result?.regions?.find((r: any) => r.region_id === regionId)?.cluster_id : undefined
 
   const normalClusters = result?.clusters ?? []
-  const clusterById: Map<number, any> = new Map(
-    (result?.clusters ?? []).map((cluster: any) => [Number(cluster.cluster_id), cluster]),
-  )
   const featureAxes = result?.pca?.available
     ? [
         { key: 'pc1', label: `PC1（${(Number(result.pca.explained_variance_ratio?.[0] ?? 0) * 100).toFixed(1)}%）` },
@@ -393,9 +390,8 @@ export default function Clustering() {
     (result?.regions ?? []).map((row: any) => ({
       ...row,
       display_name: regions.find((region) => region.region_id === row.region_id)?.display_name ?? row.region_id,
-      pattern_type: clusterById.get(row.cluster_id)?.pattern_type?.label ?? '—',
     }))
-  ), [result, regions, clusterById])
+  ), [result, regions])
   const filteredRegionRows = useMemo(() => (
     regionRows.filter((row: any) => {
       const query = regionSearch.trim().toUpperCase()
@@ -410,7 +406,7 @@ export default function Clustering() {
     {
       title: '区域',
       dataIndex: 'region_id',
-      width: '21%',
+      width: '24%',
       ellipsis: true,
       sorter: (a: any, b: any) => String(a.region_id).localeCompare(String(b.region_id)),
       render: (value: string, row: any) => (
@@ -422,7 +418,7 @@ export default function Clustering() {
     {
       title: '簇',
       dataIndex: 'cluster_id',
-      width: '24%',
+      width: '26%',
       sorter: (a: any, b: any) => a.cluster_id - b.cluster_id,
       render: (value: number) => (
         <Tooltip title={clusterDisplayName(value)}>
@@ -433,19 +429,8 @@ export default function Clustering() {
       ),
     },
     {
-      title: '模式类型',
-      dataIndex: 'pattern_type',
-      width: '14%',
-      ellipsis: true,
-      render: (value: string, row: any) => (
-        <Tooltip title={clusterDisplayName(row.cluster_id)}>
-          <span>{value}</span>
-        </Tooltip>
-      ),
-    },
-    {
       title: 'Mean',
-      width: '14%',
+      width: '16%',
       render: (_: unknown, row: any) => Number(row.features[result.feature_names[0]]).toFixed(1),
       sorter: (a: any, b: any) => a.features[result.feature_names[0]] - b.features[result.feature_names[0]],
     },
@@ -458,14 +443,14 @@ export default function Clustering() {
     },
     {
       title: 'CV',
-      width: '11%',
+      width: '10%',
       render: (_: unknown, row: any) => (
         result.feature_names.includes('cv') ? Number(row.features.cv).toFixed(3) : '—'
       ),
     },
     {
       title: '操作',
-      width: '12%',
+      width: '10%',
       render: (_: unknown, row: any) => (
         <Button
           size="small"
