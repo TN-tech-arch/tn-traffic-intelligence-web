@@ -1,4 +1,5 @@
 import { Tag, Tooltip } from 'antd'
+import { statusLabel } from '../i18n/terms'
 
 const COLORS: Record<string, string> = {
   Queued: 'blue',
@@ -19,9 +20,12 @@ const COLORS: Record<string, string> = {
 }
 
 export default function StatusTag({ status, error }: { status: string; error?: string | null }) {
-  const tag = <Tag color={COLORS[status] ?? 'default'}>{status}</Tag>
-  if (!error) return tag
-  return <Tooltip title={error.length > 400 ? `${error.slice(0, 400)}…` : error}>{tag}</Tooltip>
+  const label = statusLabel(status)
+  const tag = <Tag color={COLORS[status] ?? 'default'}>{label}</Tag>
+  const diagnostic = [`状态代码：${status}`, error ? (error.length > 400 ? `${error.slice(0, 400)}…` : error) : null]
+    .filter(Boolean)
+    .join('\n')
+  return <Tooltip title={diagnostic}>{tag}</Tooltip>
 }
 
 export function RealBadge({ real = true, text }: { real?: boolean; text?: string }) {

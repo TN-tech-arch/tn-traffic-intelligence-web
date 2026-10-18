@@ -151,6 +151,14 @@ body {
   font-weight: 700;
 }
 
+.tn-module-title-en {
+  color: var(--tn-text-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.15px;
+  margin-top: 1px;
+}
+
 .tn-module-desc {
   color: var(--tn-text-soft);
   font-size: 12px;
@@ -534,6 +542,32 @@ body {
 
 .tn-tabs-tight .ant-tabs-nav {
   margin-bottom: 8px;
+}
+
+.tn-bi-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.15;
+  padding: 2px 0;
+}
+
+.tn-bi-label-zh {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tn-bi-label-en {
+  color: #7a8bab;
+  font-size: 9.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ant-tabs-tab-active .tn-bi-label-en {
+  color: #3c6fd8;
 }
 
 .tn-history-row {

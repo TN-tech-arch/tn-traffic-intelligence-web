@@ -7,6 +7,8 @@
  * that caused them instead of showing a generic dialog.
  */
 
+import { localizeUserText } from '../i18n/terms'
+
 export type Severity = 'error' | 'warning' | 'info'
 
 export interface Issue {
@@ -55,10 +57,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
   }
   if (!response.ok) {
-    const issues: Issue[] = payload?.issues ?? []
-    const message =
+    const issues: Issue[] = (payload?.issues ?? []).map((item: Issue) => ({
+      ...item,
+      message: localizeUserText(item.message),
+      suggestion: item.suggestion ? localizeUserText(item.suggestion) : item.suggestion,
+    }))
+    const message = localizeUserText(
       payload?.message ??
-      (issues.length ? `请求被拒绝（${issues.filter((i) => i.severity === 'error').length} 个错误）` : response.statusText)
+        (issues.length ? `请求被拒绝（${issues.filter((i) => i.severity === 'error').length} 个错误）` : response.statusText),
+    )
     throw new ApiError(response.status, message, issues, payload?.request_id, payload)
   }
   return payload as T

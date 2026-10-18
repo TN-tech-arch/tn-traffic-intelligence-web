@@ -5,10 +5,15 @@ import { ENDPOINTS, ApiError, api, downloadUrl, type Issue } from '../api/client
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
+import BiLabel from '../components/BiLabel'
 import { BarChart, LineChart } from '../components/Charts'
 import MapView, { BLUE_PALETTE, colorScale, type MapEntry } from '../components/MapView'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, isVisible, visibleFields, type FieldSpec } from '../validation/engine'
+import {
+  ACTION_LABELS, MODULE_META, bilingual, frequencyLabel, missingModeLabel, modeLabel,
+  scalingLabel, scopeLabel, sourceDisplayName, statusLabel, unitDisplayLabel,
+} from '../i18n/terms'
 
 export default function Evaluation() {
   const [messageApi, contextHolder] = message.useMessage()
@@ -42,11 +47,11 @@ export default function Evaluation() {
 
   const schema: FieldSpec[] = useMemo(
     () => [
-      { key: 'experiment_ids', label_zh: 'Experiment IDs（多选）', type: 'array', enum: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => e.experiment_id), enum_labels: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => `${e.algorithm_label} · ${e.mode} · ${e.experiment_id}`), default: [], help_zh: '选择 1..N 个实验参加同口径比较。', suggestion_zh: '可用 Batch ID 一键载入。' },
-      { key: 'scope', label_zh: 'Evaluation Scope', type: 'enum', enum: ['single', 'all'], enum_labels: ['Single Region', 'All Regions'], default: 'single', help_zh: 'Single 评价单个区域；All 只允许来自全区域实验组的模型。', suggestion_zh: '与实验 Scope 保持一致。' },
-      { key: 'region_id', label_zh: 'Region', type: 'enum', enum: dataset?.region_ids ?? [], default: '', required: false, visible_when: { scope: 'single' }, help_zh: 'Single 范围下要评价的区域。', suggestion_zh: '从数据集区域中选择。' },
-      { key: 'test_selection', label_zh: 'Test Range', type: 'enum', enum: ['full', 'range'], enum_labels: ['Full Test（正式成绩）', 'Selected Test Range'], default: 'full', help_zh: 'Full Test 是正式评分；Selected Range 只是可视化子集，会标注子集来源。', suggestion_zh: '提交成绩请用 Full Test。' },
-      { key: 'horizon_step', label_zh: 'Horizon Step（显示）', type: 'integer', min: 1, max: 100, default: 1, help_zh: '图表默认展示的 horizon step，不改变 H，也不影响指标协议。', suggestion_zh: '默认 1。' },
+      { key: 'experiment_ids', label_zh: '实验（可多选）', type: 'array', enum: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => e.experiment_id), enum_labels: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => `${e.algorithm_label} · ${modeLabel(e.mode)} · ${e.experiment_id}`), default: [], help_zh: '选择 1 到 N 个实验参加同口径比较。', suggestion_zh: '可用批量任务一键载入。' },
+      { key: 'scope', label_zh: '评价范围', type: 'enum', enum: ['single', 'all'], enum_labels: ['单区域', '全部区域'], default: 'single', help_zh: '单区域评价一个区域；全部区域只允许来自全区域实验组的模型。', suggestion_zh: '与实验的预测范围保持一致。' },
+      { key: 'region_id', label_zh: '区域', type: 'enum', enum: dataset?.region_ids ?? [], default: '', required: false, visible_when: { scope: 'single' }, help_zh: '单区域范围下要评价的区域。', suggestion_zh: '从数据集区域中选择。' },
+      { key: 'test_selection', label_zh: '测试范围', type: 'enum', enum: ['full', 'range'], enum_labels: ['完整测试集（正式成绩）', '选定测试范围'], default: 'full', help_zh: '完整测试集用于正式评分；选定范围只是可视化子集，会标注子集来源。', suggestion_zh: '提交成绩请使用完整测试集。' },
+      { key: 'horizon_step', label_zh: '显示预测步长', type: 'integer', min: 1, max: 100, default: 1, help_zh: '图表默认展示的预测步长，不改变 H，也不影响指标口径。', suggestion_zh: '默认 1。' },
     ],
     [experiments, dataset],
   )
@@ -132,7 +137,7 @@ export default function Evaluation() {
         setPredictions(data.predictions ?? [])
         if (!['Queued', 'Running', 'Stopping'].includes(data.status)) {
           loadHistory()
-          messageApi.success(`Evaluation ${data.evaluation_id} 状态：${data.status}`)
+          messageApi.success(`评价 ${data.evaluation_id} 状态：${statusLabel(data.status)}`)
         }
       } catch {
         /* keep previous */
@@ -173,7 +178,7 @@ export default function Evaluation() {
     setServerIssues([])
     try {
       const created = await api.post<any>(ENDPOINTS.evaluationRun, values)
-      messageApi.success(`Evaluation ${created.evaluation_id} 已创建（${created.experiment_count} 个实验，${created.region_count} 个区域）`)
+      messageApi.success(`评价 ${created.evaluation_id} 已创建（${created.experiment_count} 个实验，${created.region_count} 个区域）`)
       const data = await api.get<any>(ENDPOINTS.evaluationGet(created.evaluation_id))
       setEvaluation(data)
       setPredictions(data.predictions ?? [])
@@ -199,10 +204,10 @@ export default function Evaluation() {
       if (excluded.length) {
         messageApi.warning(
           `${excluded.length} 个实验无法评价：` +
-            excluded.map((e: any) => `${e.algorithm_label}(${e.status})`).join('、'),
+            excluded.map((e: any) => `${e.algorithm_label}（${statusLabel(e.status)}）`).join('、'),
         )
       } else {
-        messageApi.success(`已载入 Batch ${batchId} 的 ${eligible.length} 个成功实验`)
+        messageApi.success(`已载入批量任务 ${batchId} 的 ${eligible.length} 个成功实验`)
       }
     } catch (err) {
       messageApi.error(err instanceof ApiError ? err.message : String(err))
@@ -252,7 +257,7 @@ export default function Evaluation() {
     const first = filtered[0]?.rows ?? []
     const x = first.map((row) => row.target_at)
     const series = [
-      { name: 'Actual', data: first.map((row) => row.y_true), color: '#142B52' },
+      { name: '真实值', data: first.map((row) => row.y_true), color: '#142B52' },
       ...filtered.map((group, index) => ({
         name: experimentReports.find((e: any) => e.experiment_id === group.experimentId)?.algorithm_label ?? group.experimentId.slice(0, 14),
         data: group.rows.map((row) => row.y_pred),
@@ -350,50 +355,51 @@ export default function Evaluation() {
     <div>
       {contextHolder}
       <ModuleHeader
-        module="Module 5"
-        title="Prediction & Evaluation"
-        description="使用相同 held-out Test 的真实预测、误差分析与公平排名"
-        datasetInfo={evaluation ? `${evaluation.evaluation_id} · ${evaluation.status} · ${evaluation.experiments?.length ?? 0} 个实验` : '尚未运行评价'}
+        module={MODULE_META.m5.index}
+        titleZh={MODULE_META.m5.titleZh}
+        titleEn={MODULE_META.m5.titleEn}
+        description="使用相同留出测试集的真实预测、误差分析与公平排名"
+        datasetInfo={evaluation ? `${evaluation.evaluation_id} · ${statusLabel(evaluation.status)} · ${evaluation.experiments?.length ?? 0} 个实验` : '尚未运行评价'}
       />
       {errors.length > 0 ? (
         <Alert type="error" showIcon style={{ marginBottom: 10 }} message={`${errors.length} 个参数错误（见字段下方提示）`} description={errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join('；')} />
       ) : null}
       {serverIssues.length > 0 ? (
-        <Alert type="error" showIcon style={{ marginBottom: 10 }} message="后端拒绝了请求（未创建 Evaluation ID）" description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')} />
+        <Alert type="error" showIcon style={{ marginBottom: 10 }} message="后端拒绝了请求（未创建评价 ID）" description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')} />
       ) : null}
       <ThreePane
         config={
           <>
             <PaneHead
-              title="Evaluation Setup"
+              title={bilingual('评价设置', 'Evaluation Setup')}
               extra={
                 <Button size="small" onClick={() => { setSelectedExperiments([]); setBatchChoice(''); setTestSelection('full'); setRangeStart(''); setRangeEnd(''); setEvaluation(null); setPredictions([]); setSeriesByExperiment({}) }}>
-                  Reset Selection
+                  重置选择
                 </Button>
               }
             />
             <div className="tn-field">
-              <label className="tn-field-label">Location / Dataset Source</label>
+              <label className="tn-field-label">数据源 / 数据集</label>
               <Select
                 size="small"
                 style={{ width: '100%' }}
                 value={datasetId || undefined}
                 placeholder="选择数据集"
-                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.dataset_id} · ${d.source_display_name} · ${d.scope}` }))}
+                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · ${scopeLabel(d.scope)}` }))}
                 onChange={(value) => { setDatasetId(value); setEvaluation(null) }}
               />
             </div>
             <div className="tn-field">
-              <label className="tn-field-label">Batch ID 快捷入口</label>
+              <label className="tn-field-label">批量任务快捷入口（Batch ID）</label>
               <Select
                 size="small"
                 style={{ width: '100%' }}
                 value={batchChoice || undefined}
-                placeholder="按 Batch ID 一键载入成功实验"
-                options={batches.map((b) => ({ value: b.batch_id, label: `${b.batch_id} · ${b.status} · 完成 ${b.task_summary?.completed ?? 0}` }))}
+                placeholder="按批量任务 ID 一键载入成功实验"
+                options={batches.map((b) => ({ value: b.batch_id, label: `${b.batch_id} · ${statusLabel(b.status)} · 完成 ${b.task_summary?.completed ?? 0}` }))}
                 onChange={loadFromBatch}
               />
-              <div className="tn-muted">失败或被跳过的模型不会被静默吞掉，会显示原因且不进入排名。</div>
+              <div className="tn-muted">失败或被跳过的模型会显示原因，并且不进入排名。</div>
             </div>
             {visibleFields(schema, values).map((spec) => (
               <ParamField
@@ -416,7 +422,7 @@ export default function Evaluation() {
             {testSelection === 'range' ? (
               <>
                 <div className="tn-field">
-                  <label className="tn-field-label">Range Start</label>
+                  <label className="tn-field-label">子集开始时间</label>
                   <input
                     className="ant-input"
                     style={{ width: '100%', height: 28 }}
@@ -426,7 +432,7 @@ export default function Evaluation() {
                   />
                 </div>
                 <div className="tn-field">
-                  <label className="tn-field-label">Range End</label>
+                  <label className="tn-field-label">子集结束时间</label>
                   <input
                     className="ant-input"
                     style={{ width: '100%', height: 28 }}
@@ -438,16 +444,16 @@ export default function Evaluation() {
               </>
             ) : null}
             <div className="tn-field">
-              <label className="tn-field-label">Read-only Snapshot</label>
+              <label className="tn-field-label">只读快照（Read-only Snapshot）</label>
               <div className="tn-muted">
                 {dataset ? (
                   <>
-                    <div>来源：{dataset.source_display_name} · {dataset.unit_label}</div>
-                    <div>Scope：{dataset.scope} · 区域 {dataset.region_count}</div>
-                    <div>L/H/S：{dataset.L}/{dataset.H}/{dataset.S} @ {dataset.frequency}</div>
-                    <div>预处理：{dataset.preprocess?.missing_mode} / {dataset.preprocess?.scaling}</div>
+                    <div>来源：{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</div>
+                    <div>预测范围：{scopeLabel(dataset.scope)} · 区域 {dataset.region_count}</div>
+                    <div>L/H/S：{dataset.L}/{dataset.H}/{dataset.S} · {frequencyLabel(dataset.frequency)}</div>
+                    <div>预处理：{missingModeLabel(dataset.preprocess?.missing_mode)} / {scalingLabel(dataset.preprocess?.scaling)}</div>
                     <div>测试窗口：{dataset.window_counts?.test}</div>
-                    <div>Dataset hash：{String(dataset.hash).slice(0, 16)}…</div>
+                    <div>数据集哈希（Dataset hash）：{String(dataset.hash).slice(0, 16)}…</div>
                   </>
                 ) : (
                   '选择数据集后显示快照'
@@ -459,18 +465,18 @@ export default function Evaluation() {
                 <label className="tn-field-label">兼容性检查</label>
                 <div className="tn-muted">
                   <div>可比较实验：{compatibility.eligible_experiments?.length ?? 0}</div>
-                  <div>同 Dataset：{String(compatibility.same_dataset)} · 同 Scope：{String(compatibility.same_scope)}</div>
-                  <div>允许标准排名：{String(compatibility.standard_ranking_allowed)}</div>
+                  <div>相同数据集：{compatibility.same_dataset ? '是' : '否'} · 相同评价范围：{compatibility.same_scope ? '是' : '否'}</div>
+                  <div>允许标准排名：{compatibility.standard_ranking_allowed ? '是' : '否'}</div>
                   {(compatibility.non_eligible ?? []).map((item: any) => (
                     <div key={item.experiment_id} className="tn-warning-text">
-                      ⚠ {item.experiment_id}（{item.status}）不进入排名
+                      ⚠ {item.experiment_id}（{statusLabel(item.status)}）不进入排名
                     </div>
                   ))}
                 </div>
               </div>
             ) : null}
             <div className="tn-inline">
-              <Button type="primary" onClick={runEvaluation} loading={busy} disabled={!valid}>Run Prediction</Button>
+              <Button type="primary" onClick={runEvaluation} loading={busy} disabled={!valid}>{ACTION_LABELS.startEvaluation}</Button>
               <Button
                 danger
                 onClick={async () => {
@@ -478,10 +484,10 @@ export default function Evaluation() {
                   try { await api.post(ENDPOINTS.evaluationStop(evaluation.evaluation_id)); messageApi.success('已请求停止') } catch (err) { messageApi.error(err instanceof ApiError ? err.message : String(err)) }
                 }}
               >
-                Stop
+                {ACTION_LABELS.stopEvaluation}
               </Button>
               <a href={evaluation ? downloadUrl(ENDPOINTS.evaluationExport(evaluation.evaluation_id)) : '#'}>
-                <Button disabled={!evaluation}>Export Results</Button>
+                <Button disabled={!evaluation}>{ACTION_LABELS.exportResults}</Button>
               </a>
             </div>
             {warnings.map((w) => (
@@ -497,11 +503,11 @@ export default function Evaluation() {
             items={[
               {
                 key: 'comparison',
-                label: 'Prediction Comparison',
+                label: <BiLabel zh="预测对比" en="Prediction Comparison" />,
                 children: (
                   <div className="tn-stack">
                     <div className="tn-inline">
-                      <span className="tn-muted">Horizon step</span>
+                      <span className="tn-muted">预测步长</span>
                       <Select
                         size="small"
                         style={{ width: 90 }}
@@ -509,34 +515,37 @@ export default function Evaluation() {
                         options={Array.from({ length: dataset?.H ?? 1 }, (_, i) => ({ value: i + 1, label: `h=${i + 1}` }))}
                         onChange={setHorizonStep}
                       />
-                      <span className="tn-muted">预测重叠按 (region, window, horizon step) 计一次</span>
+                      <span className="tn-muted">预测重叠按（区域、窗口、预测步长）计一次</span>
                     </div>
                     <LineChart
                       height={280}
                       x={comparisonSeries.x}
                       series={comparisonSeries.series}
-                      yName={dataset?.unit_label}
+                      xName="时间"
+                      yName={dataset?.unit_label ? `流量（${unitDisplayLabel(dataset.unit_label)}）` : '流量值'}
                       empty={!comparisonSeries.series.length}
                     />
                     <div className="tn-muted">
-                      Actual 为 held-out Test 的真实观测（源单位）；All Regions 默认显示区域平均曲线，可切换区域下钻。
+                      真实值为留出测试集的真实观测（源单位）；全部区域默认显示区域平均曲线，可切换区域下钻。
                     </div>
                   </div>
                 ),
               },
               {
                 key: 'error',
-                label: 'Error Analysis',
+                label: <BiLabel zh="误差分析" en="Error Analysis" />,
                 children: (
                   <div className="tn-stack">
-                    <LineChart height={240} x={errorSeries.x} series={errorSeries.series} yName="误差 (Pred - Actual)" empty={!errorSeries.series.length} />
-                    <Card size="small" title="残差分布与模型误差对比（真实样本）">
+                    <LineChart height={240} x={errorSeries.x} series={errorSeries.series} xName="时间" yName="误差（预测值 − 真实值）" empty={!errorSeries.series.length} />
+                    <Card size="small" title={bilingual('模型误差对比', 'Model Error Comparison')}>
                       {experimentReports.length ? (
                         <BarChart
                           height={200}
                           categories={experimentReports.map((e: any) => e.algorithm_label)}
                           values={experimentReports.map((e: any) => e.macro?.mae ?? null)}
                           color="#12A67A"
+                          xName="模型"
+                          yName="平均绝对误差（MAE）"
                         />
                       ) : (
                         <EmptyState text="运行评价后显示误差对比。" />
@@ -556,19 +565,19 @@ export default function Evaluation() {
               },
               {
                 key: 'horizon',
-                label: 'Forecast Horizon Analysis',
+                label: <BiLabel zh="预测时域分析" en="Forecast Horizon Analysis" />,
                 children: (
                   <div className="tn-stack">
-                    <Card size="small" title="各 horizon step 的 MAE 曲线（不修改 H）">
-                      <LineChart height={250} x={horizonCurves.x} series={horizonCurves.series} yName="MAE" empty={!horizonCurves.series.length} />
+                    <Card size="small" title={bilingual('各预测步长的 MAE 曲线', 'MAE by Horizon Step')}>
+                      <LineChart height={250} x={horizonCurves.x} series={horizonCurves.series} xName="预测步长" yName="平均绝对误差（MAE）" empty={!horizonCurves.series.length} />
                     </Card>
-                    <div className="tn-muted">按预测步长汇总；All Regions 时按有效样本数加权。</div>
+                    <div className="tn-muted">按预测步长汇总；全部区域时按有效样本数加权。</div>
                   </div>
                 ),
               },
               {
                 key: 'spatial',
-                label: 'Spatial Evaluation',
+                label: <BiLabel zh="空间评估" en="Spatial Evaluation" />,
                 children: (
                   <div className="tn-stack">
                     {scope === 'all' ? (
@@ -576,7 +585,7 @@ export default function Evaluation() {
                         <div className="tn-inline">
                           {(['actual', 'predicted', 'absolute_error', 'relative_error'] as const).map((layer) => (
                             <Button key={layer} size="small" type={spatialLayer === layer ? 'primary' : 'default'} onClick={() => setSpatialLayer(layer)}>
-                              {layer === 'actual' ? 'Actual' : layer === 'predicted' ? 'Predicted' : layer === 'absolute_error' ? 'Absolute Error' : 'Relative Error'}
+                              {layer === 'actual' ? '真实值' : layer === 'predicted' ? '预测值' : layer === 'absolute_error' ? '绝对误差' : '相对误差'}
                             </Button>
                           ))}
                         </div>
@@ -587,7 +596,7 @@ export default function Evaluation() {
                           onToggle={() => undefined}
                           height={380}
                           colorFor={(entry) => colorScale(entry?.value ?? null, colorBounds.min, colorBounds.max, BLUE_PALETTE)}
-                          formatTooltip={(entry, regionId) => `${regionId}: ${entry?.value === null || entry?.value === undefined ? 'No Data / 无预测' : entry.value.toFixed(2)}`}
+                          formatTooltip={(entry, regionId) => `${regionId}: ${entry?.value === null || entry?.value === undefined ? '无数据 / 无预测' : entry.value.toFixed(2)}`}
                           legend={
                             <>
                               <span>低</span>
@@ -595,13 +604,13 @@ export default function Evaluation() {
                                 <span key={color} className="tn-legend-swatch" style={{ background: color }} />
                               ))}
                               <span>高</span>
-                              <span className="tn-legend-swatch" style={{ background: '#c9d3e2' }} />No Data / Failed
+                              <span className="tn-legend-swatch" style={{ background: '#c9d3e2' }} />无数据 / 失败
                             </>
                           }
                         />
                       </>
                     ) : (
-                      <EmptyState text="Spatial Evaluation 仅对 All Regions 评价可用（Single Region 不绘制空间图层）。" />
+                      <EmptyState text="空间评估仅对全部区域评价可用；单区域评价不绘制空间图层。" />
                     )}
                   </div>
                 ),
@@ -618,7 +627,7 @@ export default function Evaluation() {
               items={[
                 {
                   key: 'metrics',
-                  label: 'Metrics Overview',
+                  label: <BiLabel zh="指标概览" en="Metrics Overview" />,
                   children: experimentReports.length ? (
                     <Table
                       size="small"
@@ -626,11 +635,11 @@ export default function Evaluation() {
                       pagination={false}
                       dataSource={experimentReports}
                       columns={[
-                        { title: 'Model', dataIndex: 'algorithm_label' },
-                        { title: 'MAE', render: (_: unknown, row: any) => (row.macro?.mae === null || row.macro?.mae === undefined ? 'N/A' : Number(row.macro.mae).toFixed(1)) },
-                        { title: 'RMSE', render: (_: unknown, row: any) => (row.macro?.rmse === null || row.macro?.rmse === undefined ? 'N/A' : Number(row.macro.rmse).toFixed(1)) },
-                        { title: 'sMAPE', render: (_: unknown, row: any) => (row.macro?.smape === null || row.macro?.smape === undefined ? 'N/A' : `${Number(row.macro.smape).toFixed(2)}%`) },
-                        { title: 'R²', render: (_: unknown, row: any) => (row.macro?.r2 === null || row.macro?.r2 === undefined ? 'N/A' : Number(row.macro.r2).toFixed(4)) },
+                        { title: '模型', dataIndex: 'algorithm_label' },
+                        { title: '平均绝对误差（MAE）', render: (_: unknown, row: any) => (row.macro?.mae === null || row.macro?.mae === undefined ? '不适用' : Number(row.macro.mae).toFixed(1)) },
+                        { title: '均方根误差（RMSE）', render: (_: unknown, row: any) => (row.macro?.rmse === null || row.macro?.rmse === undefined ? '不适用' : Number(row.macro.rmse).toFixed(1)) },
+                        { title: '对称平均绝对百分比误差（sMAPE）', render: (_: unknown, row: any) => (row.macro?.smape === null || row.macro?.smape === undefined ? '不适用' : `${Number(row.macro.smape).toFixed(2)}%`) },
+                        { title: '决定系数（R²）', render: (_: unknown, row: any) => (row.macro?.r2 === null || row.macro?.r2 === undefined ? '不适用' : Number(row.macro.r2).toFixed(4)) },
                         { title: '样本', dataIndex: ['macro', 'n_samples'] },
                         { title: '区域', dataIndex: 'coverage_regions' },
                       ]}
@@ -641,11 +650,11 @@ export default function Evaluation() {
                 },
                 {
                   key: 'ranking',
-                  label: 'Model Ranking',
+                  label: <BiLabel zh="模型排名" en="Model Ranking" />,
                   children: ranking.length ? (
                     <div>
                       <div className="tn-muted" style={{ marginBottom: 6 }}>
-                        默认按 RMSE 升序；仅相同 Dataset / H / Test 目标时间的实验进入排名（Full Test）。
+                        默认按 RMSE 升序；仅相同数据集、H 和测试目标时间的实验进入排名（完整测试集）。
                       </div>
                       {ranking.map((row: any) => (
                         <div className="tn-history-row" key={row.experiment_id}>
@@ -655,7 +664,7 @@ export default function Evaluation() {
                             </strong>
                             <div className="tn-muted">
                               RMSE {Number(row.macro.rmse).toFixed(1)} · MAE {Number(row.macro.mae).toFixed(1)} · R²{' '}
-                              {row.macro.r2 === null ? 'N/A' : Number(row.macro.r2).toFixed(4)}
+                              {row.macro.r2 === null ? '不适用' : Number(row.macro.r2).toFixed(4)}
                             </div>
                             <div className="tn-code">{row.experiment_id}</div>
                           </div>
@@ -668,7 +677,7 @@ export default function Evaluation() {
                 },
                 {
                   key: 'regional',
-                  label: 'Regional Performance',
+                  label: <BiLabel zh="区域表现" en="Regional Performance" />,
                   children: experimentReports.length ? (
                     <Table
                       size="small"
@@ -678,12 +687,12 @@ export default function Evaluation() {
                         (report.per_region ?? []).map((region: any) => ({ ...region, algorithm_label: report.algorithm_label })),
                       )}
                       columns={[
-                        { title: 'Region', dataIndex: 'region_id' },
-                        { title: 'Model', dataIndex: 'algorithm_label' },
-                        { title: 'MAE', render: (_: unknown, row: any) => (row.mae === null ? 'N/A' : Number(row.mae).toFixed(1)) },
-                        { title: 'RMSE', render: (_: unknown, row: any) => (row.rmse === null ? 'N/A' : Number(row.rmse).toFixed(1)) },
-                        { title: 'sMAPE', render: (_: unknown, row: any) => (row.smape === null ? 'N/A' : `${Number(row.smape).toFixed(2)}%`) },
-                        { title: 'R²', render: (_: unknown, row: any) => (row.r2 === null ? 'N/A' : Number(row.r2).toFixed(4)) },
+                        { title: '区域', dataIndex: 'region_id' },
+                        { title: '模型', dataIndex: 'algorithm_label' },
+                        { title: '平均绝对误差（MAE）', render: (_: unknown, row: any) => (row.mae === null ? '不适用' : Number(row.mae).toFixed(1)) },
+                        { title: '均方根误差（RMSE）', render: (_: unknown, row: any) => (row.rmse === null ? '不适用' : Number(row.rmse).toFixed(1)) },
+                        { title: '对称平均绝对百分比误差（sMAPE）', render: (_: unknown, row: any) => (row.smape === null ? '不适用' : `${Number(row.smape).toFixed(2)}%`) },
+                        { title: '决定系数（R²）', render: (_: unknown, row: any) => (row.r2 === null ? '不适用' : Number(row.r2).toFixed(4)) },
                       ]}
                     />
                   ) : (
@@ -697,26 +706,26 @@ export default function Evaluation() {
               items={[
                 {
                   key: 'history',
-                  label: `Evaluation History / Management（${evaluations.length}）`,
+                  label: `${bilingual('评价历史', 'Evaluation History')}（${evaluations.length}）`,
                   children: evaluations.length ? (
                     evaluations.map((item) => (
                       <div className="tn-history-row" key={item.evaluation_id}>
                         <div>
                           <div className="tn-code">{item.evaluation_id}</div>
                           <div className="tn-muted">
-                            {item.scope === 'all' ? 'All Regions' : `Single (${item.region_id ?? '—'})`} · {item.experiments?.length ?? 0} 实验 ·{' '}
+                            {item.scope === 'all' ? '全部区域' : `单区域（${item.region_id ?? '—'}）`} · {item.experiments?.length ?? 0} 个实验 ·{' '}
                             {item.created_at}
                           </div>
                         </div>
                         <div className="tn-inline">
                           <StatusTag status={item.status} error={item.error} />
-                          <Button size="small" onClick={() => openEvaluation(item.evaluation_id)}>View</Button>
+                          <Button size="small" onClick={() => openEvaluation(item.evaluation_id)}>查看</Button>
                           <a href={downloadUrl(ENDPOINTS.evaluationExport(item.evaluation_id))}>
-                            <Button size="small">Export</Button>
+                            <Button size="small">导出结果</Button>
                           </a>
                           <Popconfirm
-                            title="删除该 Evaluation？"
-                            description="只删除本评价的预测/指标与缓存，不影响 Dataset 与 Experiment。"
+                            title="删除该评价？"
+                            description="只删除本评价的预测、指标与缓存，不影响数据集和实验。"
                             onConfirm={async () => {
                               try {
                                 await api.del(ENDPOINTS.evaluationDelete(item.evaluation_id))
@@ -728,7 +737,7 @@ export default function Evaluation() {
                               }
                             }}
                           >
-                            <Button size="small" danger>Delete</Button>
+                            <Button size="small" danger>{ACTION_LABELS.deleteRecord}</Button>
                           </Popconfirm>
                         </div>
                       </div>
@@ -740,7 +749,7 @@ export default function Evaluation() {
               ]}
             />
             <Button size="small" onClick={() => { setSelectedExperiments([]); setEvaluation(null); setPredictions([]); setSeriesByExperiment({}) }}>
-              Reset Selection
+              重置选择
             </Button>
           </div>
         }

@@ -12,8 +12,12 @@ import {
 } from '../components/Charts'
 import InsightCard, { type InsightPayload } from '../components/InsightCard'
 import HelpTip from '../components/HelpTip'
+import BiLabel from '../components/BiLabel'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
+import {
+  ACTION_LABELS, MODULE_META, bilingual, localizeSourceNames, sourceDisplayName, unitDisplayLabel,
+} from '../i18n/terms'
 
 interface SourceRow {
   key: string
@@ -169,31 +173,31 @@ export default function Exploration() {
     () => [
       {
         key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'],
-        enum_labels: sources.map((s) => `${s.display_name}（${s.native_frequency}）`),
-        default: 'milano', help_zh: '选择要分析的一个地点数据集。',
+        enum_labels: sources.map((s) => `${sourceDisplayName(s.key, s.display_name)}（${s.native_frequency}）`),
+        default: 'milano', help_zh: '选择要分析的一个数据源。',
         suggestion_zh: '三个来源单位不同，不能直接比较绝对数值。',
       },
       {
         key: 'region_ids', label_zh: '区域（可多选对比）', type: 'array',
         enum: regions.map((r) => r.region_id),
-        enum_labels: regions.map((r) => `${r.region_id}${r.has_timeseries ? '' : '（No Data）'}`),
+        enum_labels: regions.map((r) => `${r.region_id}${r.has_timeseries ? '' : '（无数据）'}`),
         default: [], required: false,
         help_zh: '在地图上点选区域，或用下拉框搜索；最多可同时选择 12 个区域。',
-        suggestion_zh: 'No Data 区域没有时序数据，不能用于分析。',
+        suggestion_zh: '无数据区域没有时序数据，不能用于分析。',
       },
       {
         key: 'frequency', label_zh: '时间分辨率', type: 'enum',
         enum: ['native', '30min', '60min', '1day'], enum_labels: ['原生频率', '30 分钟', '1 小时', '1 天'],
         default: 'native',
-        help_zh: '时间重采样：把原始观测聚合成更粗的桶（sum=桶内求和，mean=桶内平均）。' +
+        help_zh: '时间重采样：把原始观测聚合成更粗的桶（求和为桶内相加，均值为桶内平均）。' +
                  '它与“日内小时画像的跨日期平均”是两件事：前者改变时间点，后者只是按时钟小时分组统计。',
         suggestion_zh: '探索分析建议先用原生频率，避免丢失细节。',
       },
       {
         key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'],
-        enum_labels: ['均值 mean', '求和 sum'], default: 'mean',
-        help_zh: '重采样时每个时间桶的合并方式。mean 为桶内样本平均，sum 为桶内样本求和；' +
-                 '源单位未确认时，sum 不代表物理总量。',
+        enum_labels: ['均值', '求和'], default: 'mean',
+        help_zh: '重采样时每个时间桶的合并方式。均值为桶内样本平均，求和为桶内样本相加；' +
+                 '源单位未确认时，求和结果不代表物理总量。',
         suggestion_zh: '原生频率下该参数无影响。',
       },
       {
@@ -208,9 +212,9 @@ export default function Exploration() {
         suggestion_zh: '通常直接用日期时间范围更方便。',
       },
       {
-        key: 'acf_max_lag', label_zh: 'ACF 最大滞后（Max Lag）', type: 'integer', min: 0, max: 5000,
+        key: 'acf_max_lag', label_zh: '最大滞后步数', type: 'integer', min: 0, max: 5000,
         default: 0,
-        help_zh: '自相关最多算到第几个滞后步；0＝自动。Lag 是同一序列内部“向后错几步”的步数，' +
+        help_zh: '自相关最多算到第几个滞后步；0 表示自动。滞后步数是同一序列内部“向后错几步”，' +
                  '不是只使用这么多时间点。10 分钟频率：Lag 6=1 小时、Lag 144=24 小时、Lag 1008=7 天；' +
                  '15 分钟频率：Lag 4=1 小时、Lag 96=24 小时、Lag 672=7 天。',
         suggestion_zh: '看日周期至少覆盖 24 小时；看周周期需要覆盖 7 天且至少两周观测。',
@@ -449,7 +453,7 @@ export default function Exploration() {
   const toggleRegion = (regionId: string) => {
     const region = regions.find((r) => r.region_id === regionId)
     if (region && !region.has_timeseries) {
-      messageApi.warning(`区域 ${regionId} 没有时序数据（No Data），无法用于分析。`)
+      messageApi.warning(`区域 ${regionId} 没有时序数据（无数据），无法用于分析。`)
       return
     }
     setConfig((prev) => {
@@ -524,12 +528,13 @@ export default function Exploration() {
     <div>
       {contextHolder}
       <ModuleHeader
-        module="Module 1"
-        title="Exploratory Traffic Analysis"
+        module={MODULE_META.m1.index}
+        titleZh={MODULE_META.m1.titleZh}
+        titleEn={MODULE_META.m1.titleEn}
         description="GIS 区域、时序、空间与跨地点模式分析（真实数据，无模拟统计）"
         datasetInfo={
           source
-            ? `${source.display_name} · ${source.unit_label} · 原生 ${source.native_frequency}`
+            ? `${sourceDisplayName(source.key, source.display_name)} · ${unitDisplayLabel(source.unit_label)} · 原生 ${source.native_frequency}`
             : ''
         }
       />
@@ -565,7 +570,7 @@ export default function Exploration() {
         config={
           <>
             <PaneHead
-              title="Configuration"
+              title={bilingual('配置', 'Configuration')}
               extra={
                 <Button
                   size="small"
@@ -589,7 +594,7 @@ export default function Exploration() {
                     setAutoLag(true)
                   }}
                 >
-                  Reset 配置
+                  {ACTION_LABELS.reset}
                 </Button>
               }
             />
@@ -679,12 +684,12 @@ export default function Exploration() {
 
             <div className="tn-inline" style={{ marginTop: 10 }}>
               <Button type="primary" block onClick={() => runAnalysis(true)} loading={loading} disabled={!valid}>
-                运行分析
+                {ACTION_LABELS.runAnalysis}
               </Button>
             </div>
             <div className="tn-inline" style={{ marginTop: 6 }}>
               <Button block onClick={() => updateConfig({ region_ids: [], insight_region_id: null })}>
-                清空区域选择
+                {ACTION_LABELS.clearRegions}
               </Button>
             </div>
             {warnings.map((w) => (
@@ -697,7 +702,7 @@ export default function Exploration() {
         visual={
           <>
             <PaneHead
-              title="GIS & Temporal Visualization"
+              title={bilingual('GIS 与时间可视化', 'GIS & Temporal Visualization')}
               extra={<span className="tn-muted">{spatial?.time_at ? `空间截面：${spatial.time_at}` : '加载中'}</span>}
             />
             <MapView
@@ -710,8 +715,8 @@ export default function Exploration() {
               focus={focusRegion}
               colorFor={(entry) => colorScale(entry?.value ?? null, colorBounds.min, colorBounds.max, BLUE_PALETTE)}
               formatTooltip={(entry, regionId) =>
-                `${entry?.label ?? regionId}: ${entry?.value === null || entry?.value === undefined ? 'No Data' : entry.value.toFixed(2)}${
-                  source ? ` (${source.unit_label})` : ''
+                `${entry?.label ?? regionId}: ${entry?.value === null || entry?.value === undefined ? '无数据' : entry.value.toFixed(2)}${
+                  source ? `（${unitDisplayLabel(source.unit_label)}）` : ''
                 }`
               }
               legend={
@@ -722,7 +727,7 @@ export default function Exploration() {
                   ))}
                   <span>高</span>
                   <span className="tn-legend-swatch" style={{ background: '#c9d3e2' }} />
-                  <span>No Data</span>
+                  <span>无数据</span>
                   <span>· 点击区域加入对比</span>
                 </>
               }
@@ -752,15 +757,15 @@ export default function Exploration() {
                 style={{ flex: 1 }}
                 aria-label="时间截面位置"
               />
-              <span className="tn-muted">{spatial?.time_at ?? `index ${sliceValue}`}</span>
+              <span className="tn-muted">{spatial?.time_at ?? `时间索引 ${sliceValue}`}</span>
             </div>
-            <Card size="small" title="多区域时序曲线（真实观测）" style={{ marginTop: 10 }}>
+            <Card size="small" title="多区域时序曲线（Multi-Region Time Series）" style={{ marginTop: 10 }}>
               <div className={stale ? 'tn-stale' : undefined}>
                 <LineChart
                   loading={loading && !result}
                   empty={!result}
                   height={240}
-                  yName={source?.unit_label}
+                  yName={source?.unit_label ? `流量（${unitDisplayLabel(source.unit_label)}）` : '流量值'}
                   x={seriesChart.x}
                   series={seriesChart.series}
                 />
@@ -775,11 +780,11 @@ export default function Exploration() {
                 {result?.statistics?.length ? (
                   <>
                     <div className="tn-muted" style={{ marginBottom: 6 }}>
-                      数据源 {source?.display_name} · 参与区域 {result.statistics.length} · 范围 {range?.start_at} →{' '}
+                      数据源 {sourceDisplayName(source?.key, source?.display_name)} · 参与区域 {result.statistics.length} · 范围 {range?.start_at} →{' '}
                       {range?.end_at} · 每点 {range?.interval_minutes ?? '—'} 分钟 · 有效样本{' '}
                       {Math.min(...result.statistics.map((s: any) => s.valid_points ?? 0))}–
                       {Math.max(...result.statistics.map((s: any) => s.valid_points ?? 0))} · 单位{' '}
-                      {source?.unit_label}
+                      {unitDisplayLabel(source?.unit_label)}
                     </div>
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', minWidth: 520, fontSize: 11 }}>
@@ -790,8 +795,18 @@ export default function Exploration() {
                             <th style={{ whiteSpace: 'nowrap' }}>最大</th>
                             <th style={{ whiteSpace: 'nowrap' }}>最小</th>
                             <th style={{ whiteSpace: 'nowrap' }}>标准差</th>
-                            <th style={{ whiteSpace: 'nowrap' }}>P95</th>
-                            <th style={{ whiteSpace: 'nowrap' }}>CV</th>
+                            <th style={{ whiteSpace: 'nowrap' }}>
+                              <span className="tn-inline">
+                                P95
+                                <HelpTip label="P95" title="第 95 百分位数（P95）" detail="把有效观测从小到大排序后，95% 的观测不超过该值。" />
+                              </span>
+                            </th>
+                            <th style={{ whiteSpace: 'nowrap' }}>
+                              <span className="tn-inline">
+                                CV
+                                <HelpTip label="CV" title="变异系数（Coefficient of Variation, CV）" detail="标准差除以均值的绝对值，用于比较相对波动程度。" />
+                              </span>
+                            </th>
                             <th style={{ whiteSpace: 'nowrap' }}>零值</th>
                           </tr>
                         </thead>
@@ -800,7 +815,7 @@ export default function Exploration() {
                             const noData = !(row.valid_points > 0)
                             const display = regions.find((r) => r.region_id === row.region_id)?.display_name
                             const cell = (value: any, digits = 2) =>
-                              noData ? 'No Data' : value === null || value === undefined ? 'N/A' : Number(value).toFixed(digits)
+                              noData ? '无数据' : value === null || value === undefined ? '不适用' : Number(value).toFixed(digits)
                             return (
                               <tr
                                 key={row.region_id}
@@ -822,14 +837,14 @@ export default function Exploration() {
                                 <td>{cell(row.std)}</td>
                                 <td>{cell(row.p95)}</td>
                                 <td>{cell(row.cv, 3)}</td>
-                                <td>{noData ? 'No Data' : row.zero_points}</td>
+                                <td>{noData ? '无数据' : row.zero_points}</td>
                               </tr>
                             )
                           })}
                         </tbody>
                       </table>
                     </div>
-                    <InsightCard title="Statistical Summary Insights" insights={summaryInsight} loading={loading} />
+                    <InsightCard title="多区域统计分析（Statistical Summary Insights）" insights={summaryInsight} loading={loading} />
                   </>
                 ) : (
                   <EmptyState text="选择区域后显示多区域真实统计量。" />
@@ -850,14 +865,14 @@ export default function Exploration() {
             items={[
               {
                 key: 'temporal',
-                label: '时间分析（Temporal Analysis）',
+                label: <BiLabel zh="时间分析" en="Temporal Analysis" />,
                 children: (
                   <div className={stale ? 'tn-stale' : undefined}>
                     <div className="tn-analysis-target">
                       <label className="tn-field-label" htmlFor="analysis-target">
-                        分析对象（Analysis Target）
+                        分析对象
                         <HelpTip
-                          title="工作日/周末对比与 ACF & Trend 的图表和自动结论只针对这一个区域；日内小时画像同时显示左侧已选的全部区域。"
+                          title="工作日与周末对比、自相关与趋势的图表和自动结论只针对这一个区域；日内小时画像同时显示左侧已选的全部区域。"
                           detail="切换不会改变左侧选择，也不会改变中央的多区域统计。"
                           label="分析对象"
                         />
@@ -874,7 +889,7 @@ export default function Exploration() {
                       />
                       <div className="tn-muted" style={{ marginTop: 4 }}>
                         {primaryId
-                          ? `${primaryId} · ${source?.display_name ?? '—'} · ${range?.start_at ?? '—'} → ${range?.end_at ?? '—'}`
+                          ? `${primaryId} · ${sourceDisplayName(source?.key, source?.display_name)} · ${range?.start_at ?? '—'} → ${range?.end_at ?? '—'}`
                           : '当前没有有效区域，请先在左侧选择。'}
                       </div>
                     </div>
@@ -892,7 +907,7 @@ export default function Exploration() {
                                     <span className="tn-inline" style={{ gap: 6 }}>
                                       <HelpTip
                                         title="把当前时间范围内所有观测按「一天中的第几小时」分组求平均，得到典型日内模式；这不是某一天的原始曲线。"
-                                        detail="某个小时没有有效观测时显示为断点（No Data），不会补 0。"
+                                        detail="某个小时没有有效观测时显示为断点（无数据），不会补 0。"
                                         label="Hourly Profile 方法说明"
                                       />
                                       <Button size="small" type="link" onClick={() => setExpanded('hourly')}>
@@ -904,6 +919,7 @@ export default function Exploration() {
                               >
                                 <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
                                 <HourlyChart
+                                  yName={source?.unit_label ? `流量（${unitDisplayLabel(source.unit_label)}）` : '流量值'}
                                   regions={(result?.hourly ?? []).map((h: any) => ({
                                     region_id: h.region_id,
                                     hours: h.hours,
@@ -911,7 +927,7 @@ export default function Exploration() {
                                 />
                               </Card>
                               <InsightCard
-                                title="Hourly Pattern Insights"
+                                title="日内流量规律分析（Hourly Pattern Insights）"
                                 insights={hourlyInsight}
                                 loading={loading}
                                 subtitle={`上方曲线显示全部已选区域；以下结论针对分析对象 ${primaryId ?? '—'}`}
@@ -928,11 +944,11 @@ export default function Exploration() {
                                 size="small"
                                 title={
                                   <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
-                                    工作日 vs 周末
+                                    工作日与周末对比（Weekday vs Weekend）
                                     <span className="tn-inline" style={{ gap: 6 }}>
                                       <HelpTip
                                         title="只使用当前时间范围内的数据：周一至周五为工作日，周六/周日为周末，分别按 0–23 小时求平均。"
-                                        detail="范围内没有周末（或工作日）时对应曲线显示为 No Data，不会借用范围外的数据。"
+                                        detail="范围内没有周末（或工作日）时对应曲线显示为无数据，不会借用范围外的数据。"
                                         label="Weekday vs Weekend 方法说明"
                                       />
                                       <Button size="small" type="link" onClick={() => setExpanded('weekday')}>
@@ -951,6 +967,7 @@ export default function Exploration() {
                                     <WeekdayChart
                                       weekday={primaryWeekday.weekday.profile}
                                       weekend={primaryWeekday.weekend.profile}
+                                      yName={source?.unit_label ? `流量（${unitDisplayLabel(source.unit_label)}）` : '流量值'}
                                     />
                                     <div className="tn-muted">
                                       工作日：{primaryWeekday.weekday.valid_dates} 个有效日期 / {primaryWeekday.weekday.samples} 个观测；
@@ -961,7 +978,7 @@ export default function Exploration() {
                                   <EmptyState text="暂无数据。" />
                                 )}
                               </Card>
-                              <InsightCard title="Weekday vs Weekend Insights" insights={weekdayInsight} loading={loading} />
+                              <InsightCard title="工作日与周末差异分析（Weekday vs Weekend Insights）" insights={weekdayInsight} loading={loading} />
                             </div>
                           ),
                         },
@@ -974,7 +991,7 @@ export default function Exploration() {
                                 size="small"
                                 title={
                                   <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
-                                    ACF 与趋势
+                                    自相关与趋势（ACF & Trend）
                                     <span className="tn-inline" style={{ gap: 6 }}>
                                       <HelpTip
                                         title="ACF（自相关）衡量序列与自身滞后 k 步的相关程度；Lag 是“向后错几步”，不是只用 k 个点。"
@@ -992,7 +1009,7 @@ export default function Exploration() {
                                   计算范围 {acfInfo?.start_at ?? range?.start_at ?? '—'} →{' '}
                                   {acfInfo?.end_at ?? range?.end_at ?? '—'} · 有效样本{' '}
                                   {acfInfo?.valid_points ?? 0} · 间隔{' '}
-                                  {acfInfo?.interval_minutes ?? range?.interval_minutes ?? '—'} 分钟 · Max Lag{' '}
+                                  {acfInfo?.interval_minutes ?? range?.interval_minutes ?? '—'} 分钟 · 最大滞后步数{' '}
                                   {acfInfo?.max_lag ?? '—'}
                                 </div>
                                 <div className="tn-acf-control">
@@ -1010,17 +1027,17 @@ export default function Exploration() {
                                       }}
                                     />
                                     <span style={{ fontSize: 12.5, fontWeight: 600 }}>
-                                      {autoLag ? 'Auto 自动（按数据长度选择）' : '手动指定 Max Lag'}
+                                      {autoLag ? '自动（按数据长度选择）' : '手动指定最大滞后步数'}
                                     </span>
                                   </div>
                                   {autoLag ? (
                                     <div className="tn-muted">
-                                      实际生效 Max Lag：{acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
-                                      （自动值由时间点数与采样间隔决定；0 表示 Auto）
+                                      实际生效最大滞后步数：{acfInfo ? `${acfInfo.max_lag} 步（约 ${acfInfo.max_lag_label}）` : '计算后显示'}
+                                      （自动值由时间点数与采样间隔决定）
                                     </div>
                                   ) : (
                                     <ParamField
-                                      spec={{ ...maxLagSpec, label_zh: '手动 Max Lag（≥2）' }}
+                                      spec={{ ...maxLagSpec, label_zh: '手动最大滞后步数（≥2）' }}
                                       value={config.acf_max_lag}
                                       issues={fieldIssues('acf_max_lag')}
                                       path="m1.acf_max_lag"
@@ -1048,7 +1065,7 @@ export default function Exploration() {
                                     : '有效样本不足，无法估计趋势。'}
                                 </div>
                               </Card>
-                              <InsightCard title="ACF & Trend Insights" insights={acfInsight} loading={loading} />
+                              <InsightCard title="自相关与趋势分析（ACF & Trend Insights）" insights={acfInsight} loading={loading} />
                             </div>
                           ),
                         },
@@ -1079,11 +1096,11 @@ export default function Exploration() {
               },
               {
                 key: 'spatial',
-                label: '空间分析（Spatial Analysis）',
+                label: <BiLabel zh="空间分析" en="Spatial Analysis" />,
                 children: (
                   <div className={stale ? 'tn-stale' : undefined}>
                     <div className="tn-muted" style={{ marginBottom: 8 }}>
-                      当前截面 {spatial?.time_at ?? '—'} · 有效区域 {spatial?.value_region_count ?? 0} · No Data{' '}
+                      当前截面 {spatial?.time_at ?? '—'} · 有效区域 {spatial?.value_region_count ?? 0} · 无数据{' '}
                       {spatial?.no_data_region_count ?? 0}
                       {spatial?.gis_no_data_count ? `（另有 ${spatial.gis_no_data_count} 个 GIS 区域无时序）` : ''}
                       {focusRegion ? ` · 地图已定位 ${focusRegion}` : ''}
@@ -1094,11 +1111,11 @@ export default function Exploration() {
                           size="small"
                           title={
                             <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
-                              Top 12 Regions（最高流量区域）
+                              高流量区域排名（Top 12 Regions）
                               <span className="tn-inline" style={{ gap: 6 }}>
                                 <HelpTip
                                   title="使用当前数据源全部有时序区域在 GIS 当前时间截面的真实观测值，按数值从高到低取前 12 个；并列时按区域 ID 排序。"
-                                  detail="No Data 不参与排名；点击条形可在中央地图定位（不改变左侧多选与中央统计）。"
+                                  detail="无数据区域不参与排名；点击条形可在中央地图定位（不改变左侧多选与中央统计）。"
                                   label="Top 12 说明"
                                 />
                                 <Button size="small" type="link" onClick={() => setExpandedSpatial('top')}>
@@ -1115,12 +1132,12 @@ export default function Exploration() {
                             items={spatial?.top ?? []}
                             height={340}
                             timeAt={spatial?.time_at}
-                            unit={spatial?.source?.unit_label}
+                            unit={unitDisplayLabel(spatial?.source?.unit_label)}
                             onSelect={setFocusRegion}
                           />
                         </Card>
                         <InsightCard
-                          title="High-Intensity Region Insights"
+                          title="高流量区域分析（High-Intensity Region Insights）"
                           insights={spatial?.insights?.high}
                           loading={loading || stale}
                         />
@@ -1131,11 +1148,11 @@ export default function Exploration() {
                           size="small"
                           title={
                             <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
-                              Bottom 6 Regions（最低流量区域）
+                              低流量区域排名（Bottom 6 Regions）
                               <span className="tn-inline" style={{ gap: 6 }}>
                                 <HelpTip
-                                  title="按当前截面的真实值从低到高取 6 个有效区域；真实 0 值正常参与排名，No Data 不参与。"
-                                  detail="Tooltip 中的 Range Mean 是所选日期范围内的平均值，与当前截面值是两个不同口径。"
+                                  title="按当前截面的真实值从低到高取 6 个有效区域；真实 0 值正常参与排名，无数据区域不参与。"
+                                  detail="提示框中的范围均值是所选日期范围内的平均值，与当前截面值是两个不同口径。"
                                   label="Bottom 6 说明"
                                 />
                                 <Button size="small" type="link" onClick={() => setExpandedSpatial('bottom')}>
@@ -1153,13 +1170,13 @@ export default function Exploration() {
                             height={260}
                             color="#D98F00"
                             timeAt={spatial?.time_at}
-                            unit={spatial?.source?.unit_label}
+                            unit={unitDisplayLabel(spatial?.source?.unit_label)}
                             showRangeMean
                             onSelect={setFocusRegion}
                           />
                         </Card>
                         <InsightCard
-                          title="Low-Intensity Region Insights"
+                          title="低流量区域分析（Low-Intensity Region Insights）"
                           insights={spatial?.insights?.low}
                           loading={loading || stale}
                         />
@@ -1170,11 +1187,11 @@ export default function Exploration() {
                           size="small"
                           title={
                             <span className="tn-inline" style={{ justifyContent: 'space-between', width: '100%' }}>
-                              Regional Value Distribution（区域数值分布）
+                              区域数值分布（Regional Value Distribution）
                               <span className="tn-inline" style={{ gap: 6 }}>
                                 <HelpTip
                                   title="把当前截面全部有效区域按流量值等宽分箱，柱高表示落入该区间的区域数量。"
-                                  detail="分箱左闭右开、最后一个区间含右端点；各区间计数之和等于有效区域总数，No Data 不参与。"
+                                  detail="分箱左闭右开、最后一个区间含右端点；各区间计数之和等于有效区域总数，无数据区域不参与。"
                                   label="区域分布说明"
                                 />
                                 <Button size="small" type="link" onClick={() => setExpandedSpatial('dist')}>
@@ -1192,11 +1209,11 @@ export default function Exploration() {
                           <HistogramChart
                             bins={spatial?.distribution?.bins ?? []}
                             height={260}
-                            unit={spatial?.source?.unit_label}
+                            unit={unitDisplayLabel(spatial?.source?.unit_label)}
                           />
                         </Card>
                         <InsightCard
-                          title="Spatial Distribution Insights"
+                          title="空间分布规律分析（Spatial Distribution Insights）"
                           insights={spatial?.insights?.distribution}
                           loading={loading || stale}
                         />
@@ -1207,7 +1224,7 @@ export default function Exploration() {
               },
               {
                 key: 'multi',
-                label: '多城市对比（Multi-City Comparison）',
+                label: <BiLabel zh="多城市对比" en="Multi-City Comparison" />,
                 children: (
                   <div className="tn-stack">
                     <MultiCityPanel frequency="60min" aggregation="mean" />
@@ -1225,10 +1242,10 @@ export default function Exploration() {
         open={expanded !== null}
         title={
           expanded === 'hourly'
-            ? 'Hourly Profile · 放大查看'
+            ? '日内小时画像（Hourly Profile）· 放大查看'
             : expanded === 'weekday'
-              ? 'Weekday vs Weekend · 放大查看'
-              : 'ACF & Trend · 放大查看'
+              ? '工作日与周末对比（Weekday vs Weekend）· 放大查看'
+              : '自相关与趋势（ACF & Trend）· 放大查看'
         }
         footer={null}
         width={1080}
@@ -1242,13 +1259,14 @@ export default function Exploration() {
               <ChartMeta range={range} validPoints={primaryStats?.valid_points} />
               <HourlyChart
                 height={480}
+                yName={source?.unit_label ? `流量（${unitDisplayLabel(source.unit_label)}）` : '流量值'}
                 regions={(result?.hourly ?? []).map((h: any) => ({
                   region_id: h.region_id,
                   hours: h.hours,
                 }))}
               />
               <InsightCard
-                title="Hourly Pattern Insights"
+                title="日内流量规律分析（Hourly Pattern Insights）"
                 insights={hourlyInsight}
                 loading={loading}
                 subtitle={`上方曲线显示全部已选区域；以下结论针对分析对象 ${primaryId ?? '—'}`}
@@ -1266,18 +1284,19 @@ export default function Exploration() {
                   height={480}
                   weekday={primaryWeekday.weekday.profile}
                   weekend={primaryWeekday.weekend.profile}
+                  yName={source?.unit_label ? `流量（${unitDisplayLabel(source.unit_label)}）` : '流量值'}
                 />
               ) : (
                 <EmptyState text="暂无数据。" />
               )}
-              <InsightCard title="Weekday vs Weekend Insights" insights={weekdayInsight} loading={loading} />
+              <InsightCard title="工作日与周末差异分析（Weekday vs Weekend Insights）" insights={weekdayInsight} loading={loading} />
             </>
           ) : null}
           {expanded === 'acf' ? (
             <>
               <div className="tn-muted">
                 计算范围 {acfInfo?.start_at ?? range?.start_at ?? '—'} →{' '}
-                {acfInfo?.end_at ?? range?.end_at ?? '—'} · 有效样本 {acfInfo?.valid_points ?? 0} · Max Lag{' '}
+                {acfInfo?.end_at ?? range?.end_at ?? '—'} · 有效样本 {acfInfo?.valid_points ?? 0} · 最大滞后步数{' '}
                 {acfInfo?.max_lag ?? '—'} 步（约 {acfInfo?.max_lag_label ?? '—'}）
               </div>
               <AcfChart
@@ -1287,7 +1306,7 @@ export default function Exploration() {
                 ci={result?.acf?.ci ?? []}
                 intervalMinutes={result?.acf?.interval_minutes ?? 10}
               />
-              <InsightCard title="ACF & Trend Insights" insights={acfInsight} loading={loading} />
+              <InsightCard title="自相关与趋势分析（ACF & Trend Insights）" insights={acfInsight} loading={loading} />
             </>
           ) : null}
         </div>
@@ -1297,10 +1316,10 @@ export default function Exploration() {
         open={expandedSpatial !== null}
         title={
           expandedSpatial === 'top'
-            ? 'Top 12 Regions · 放大查看'
+            ? '高流量区域排名（Top 12 Regions）· 放大查看'
             : expandedSpatial === 'bottom'
-              ? 'Bottom 6 Regions · 放大查看'
-              : 'Regional Value Distribution · 放大查看'
+              ? '低流量区域排名（Bottom 6 Regions）· 放大查看'
+              : '区域数值分布（Regional Value Distribution）· 放大查看'
         }
         footer={null}
         width={1080}
@@ -1310,7 +1329,7 @@ export default function Exploration() {
       >
         <div className="tn-stack">
           <div className="tn-muted">
-            当前截面 {spatial?.time_at ?? '—'} · 有效区域 {spatial?.value_region_count ?? 0} · No Data{' '}
+            当前截面 {spatial?.time_at ?? '—'} · 有效区域 {spatial?.value_region_count ?? 0} · 无数据{' '}
             {spatial?.no_data_region_count ?? 0}
             {spatial?.gis_no_data_count ? `（另有 ${spatial.gis_no_data_count} 个 GIS 区域无时序）` : ''}
           </div>
@@ -1320,9 +1339,9 @@ export default function Exploration() {
                 items={spatial?.top ?? []}
                 height={560}
                 timeAt={spatial?.time_at}
-                unit={spatial?.source?.unit_label}
+                unit={unitDisplayLabel(spatial?.source?.unit_label)}
               />
-              <InsightCard title="High-Intensity Region Insights" insights={spatial?.insights?.high} />
+              <InsightCard title="高流量区域分析（High-Intensity Region Insights）" insights={spatial?.insights?.high} />
             </>
           ) : null}
           {expandedSpatial === 'bottom' ? (
@@ -1332,10 +1351,10 @@ export default function Exploration() {
                 height={460}
                 color="#D98F00"
                 timeAt={spatial?.time_at}
-                unit={spatial?.source?.unit_label}
+                unit={unitDisplayLabel(spatial?.source?.unit_label)}
                 showRangeMean
               />
-              <InsightCard title="Low-Intensity Region Insights" insights={spatial?.insights?.low} />
+              <InsightCard title="低流量区域分析（Low-Intensity Region Insights）" insights={spatial?.insights?.low} />
             </>
           ) : null}
           {expandedSpatial === 'dist' ? (
@@ -1343,9 +1362,9 @@ export default function Exploration() {
               <HistogramChart
                 bins={spatial?.distribution?.bins ?? []}
                 height={480}
-                unit={spatial?.source?.unit_label}
+                unit={unitDisplayLabel(spatial?.source?.unit_label)}
               />
-              <InsightCard title="Spatial Distribution Insights" insights={spatial?.insights?.distribution} />
+              <InsightCard title="空间分布规律分析（Spatial Distribution Insights）" insights={spatial?.insights?.distribution} />
             </>
           ) : null}
         </div>
@@ -1383,7 +1402,11 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
   }, [frequency, aggregation])
 
   const sources = data?.sources ?? []
-  const insights = data?.insights
+  const chartSources = sources.map((item: any) => ({
+    ...item,
+    display_name: sourceDisplayName(item.source_key, item.display_name),
+  }))
+  const insights = localizeSourceNames(data?.insights)
   const sourceColumns = [
     {
       title: '数据源 / 单位',
@@ -1391,8 +1414,8 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
       width: '27%',
       render: (_: unknown, item: any) => (
         <div>
-          <strong>{item.display_name}</strong>
-          <div className="tn-muted" style={{ fontSize: 10.5, lineHeight: 1.45 }}>{item.unit_label}</div>
+          <strong>{sourceDisplayName(item.source_key, item.display_name)}</strong>
+          <div className="tn-muted" style={{ fontSize: 10.5, lineHeight: 1.45 }}>{unitDisplayLabel(item.unit_label)}</div>
         </div>
       ),
     },
@@ -1450,7 +1473,7 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
         showIcon
         style={{ marginBottom: 8 }}
         message="仅比较标准化后的日内形状"
-        description={data?.warning ?? '三个来源的观测时期与物理单位不同，原始值不可直接比较；ZTE 为 4G 下行流量，不是道路车辆流量。'}
+        description={localizeSourceNames(data?.warning) ?? '三个来源的观测时期与物理单位不同，原始值不可直接比较；ZTE 为 4G 下行流量，不是道路车辆流量。'}
       />
       {error ? (
         <Alert
@@ -1469,7 +1492,7 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
             <HelpTip
               label="多来源标准化日内模式"
               title="三个来源各自计算自身的 24 点典型曲线，再做 Z-score。"
-              detail="各区域原始观测先按完整整点小时聚合；同一小时对所有有值区域等权平均，再按 0–23 钟点跨日期平均。缺失小时保留为 No Data，不填 0；零方差时不生成归一化曲线。原始流量值从不跨来源比较。"
+              detail="各区域原始观测先按完整整点小时聚合；同一小时对所有有值区域等权平均，再按 0–23 钟点跨日期平均。缺失小时保留为无数据，不填 0；零方差时不生成归一化曲线。原始流量值从不跨来源比较。"
             />
           </span>
         )}
@@ -1482,7 +1505,7 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
         {loading && !data ? (
           <div className="tn-empty">正在读取三个来源的真实观测并计算 24 点典型曲线…</div>
         ) : (
-          <MultiCityZChart sources={sources} height={310} />
+          <MultiCityZChart sources={chartSources} height={310} />
         )}
         <div className="tn-muted" style={{ fontSize: 10.5, marginTop: 4 }}>
           曲线：Milano、Trentino、ZTE 4G Downlink。Z=0 表示该来源自身的典型小时平均水平，
@@ -1490,7 +1513,7 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
         </div>
       </Card>
       <InsightCard
-        title="Multi-City Comparison Insights（多来源日内模式对比分析）"
+                title="多来源模式对比分析（Multi-City Comparison Insights）"
         insights={insights}
         loading={loading}
       />
@@ -1498,7 +1521,7 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
         size="small"
         title={(
           <span className="tn-inline">
-            Dataset Comparison Summary（数据源对比摘要）
+            数据源对比摘要（Dataset Comparison Summary）
             <HelpTip
               label="数据源对比摘要"
               title="原始时间点、小时桶和典型曲线点是三个不同口径。"
@@ -1537,7 +1560,7 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
                   ))}
                   {sources.map((item: any) => (
                     <div key={`${item.source_key}-counts`}>
-                      <span className="tn-insight-detail-label">{item.display_name}</span>
+                      <span className="tn-insight-detail-label">{sourceDisplayName(item.source_key, item.display_name)}</span>
                       <span>
                         原始时间点 {item.raw_time_point_count}；有效原始观测 {item.raw_valid_observation_count} /{' '}
                         {item.raw_observation_count}（区域 × 时间）；小时桶 {item.hourly_bucket_count}；
@@ -1562,9 +1585,9 @@ function MultiCityPanel({ frequency, aggregation }: { frequency: string; aggrega
         <div className="tn-muted" style={{ marginBottom: 6 }}>
           横轴为 0–23 小时；Z=0 表示该来源自身的典型小时平均水平。三个来源仅作形状比较。
         </div>
-        <MultiCityZChart sources={sources} height={480} />
+        <MultiCityZChart sources={chartSources} height={480} />
         <InsightCard
-          title="Multi-City Comparison Insights（多来源日内模式对比分析）"
+          title="多来源模式对比分析（Multi-City Comparison Insights）"
           insights={insights}
         />
       </Modal>

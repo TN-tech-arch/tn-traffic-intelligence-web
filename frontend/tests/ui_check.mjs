@@ -80,8 +80,9 @@ try {
   )
   const navLabels = navItems.map((t) => t.replace(/\n/g, ' ').trim())
   record(
-    'T31 导航项名称正确（Home/Exploration/Clustering/Dataset/Training/Evaluation）',
-    ['Home', 'Exploration', 'Clustering', 'Dataset', 'Training', 'Evaluation'].every((label) => navLabels.join('|').includes(label)),
+    'T31 导航项统一为中文主名称 + 英文副名称',
+    ['首页', '探索性分析', '功能区聚类', '数据集构建', '模型训练', '预测评估'].every((label) => navLabels.join('|').includes(label)) &&
+      ['Home', 'Exploration', 'Clustering', 'Dataset', 'Training', 'Evaluation'].every((label) => navLabels.join('|').includes(label)),
     navLabels.join('|'),
   )
   const heroTitle = await page.locator('.tn-hero-title').innerText()
@@ -146,7 +147,9 @@ try {
   const m2Tabs = (await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
   record(
     'T31 M2 四个右侧 Tab 齐全',
-    ['Cluster Overview', 'Typical Patterns', 'Quality Evaluation', 'Region List'].every((t) => m2Tabs.includes(t)),
+    ['Cluster Overview', 'Typical Patterns', 'Quality Evaluation', 'Region List'].every((t) =>
+      m2Tabs.some((text) => text.includes(t)),
+    ),
     m2Tabs.join('|'),
   )
   // eps invalid then corrected
@@ -172,13 +175,15 @@ try {
   const m3Tabs = (await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
   record(
     'T31/T39 M3 三个核心 Tab + Dataset Management',
-    ['Dataset Overview', 'Window Preview', 'Data Quality', 'Dataset Management'].every((t) => m3Tabs.includes(t)),
+    ['Dataset Overview', 'Window Preview', 'Data Quality', 'Dataset Management'].every((t) =>
+      m3Tabs.some((text) => text.includes(t)),
+    ),
     m3Tabs.join('|'),
   )
   await setField(page, 'm3.train_ratio', 0.7)
   await setField(page, 'm3.val_ratio', 0.2)
   await setField(page, 'm3.test_ratio', 0.2)
-  await page.waitForTimeout(700)
+  await page.locator('[data-field="m3.test_ratio"] .tn-error-text').waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
   const ratioError = await fieldErrorText(page, 'm3.test_ratio')
   record('T09/T46 比例之和≠100% 时字段下方报错', Boolean(ratioError && ratioError.includes('100%')), ratioError ?? 'no error')
   await setField(page, 'm3.test_ratio', 0.1)
@@ -208,10 +213,12 @@ try {
   const m4Tabs = (await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
   record(
     'T31/T39 M4 三个右侧 Tab 齐全（含实验历史管理）',
-    ['Training Overview', 'Training Logs', 'Experiment History'].every((t) => m4Tabs.includes(t)),
+    ['Training Overview', 'Training Logs', 'Experiment History'].every((t) =>
+      m4Tabs.some((text) => text.includes(t)),
+    ),
     m4Tabs.join('|'),
   )
-  const allModelsEntry = await page.locator('text=All Models (12)').count()
+  const allModelsEntry = await page.locator('text=全部模型（All Models，12 种）').count()
   record('T12/T20 All Models 位于算法列表顶部且标注为批量编排', allModelsEntry > 0, `${allModelsEntry} matches`)
   // transformer validation
   await openAlgorithmGroup(page, '深度学习')
@@ -241,14 +248,23 @@ try {
     Boolean(epochsWarning) && !epochsError,
     `warning=${epochsWarning ?? 'none'} error=${epochsError ?? 'none'}`,
   )
-  const runButtonDisabled = await page.locator('button:has-text("Run Training")').first().isDisabled()
+  const runButtonDisabled = await page.locator('button:has-text("开始训练")').first().isDisabled()
   record('T46 仅存在 Warning 时不会误禁用提交（Dropout 错误仍在，需先修正）', runButtonDisabled === true, `run disabled: ${runButtonDisabled}`)
   await setField(page, 'model_configs.lstm.params.dropout', 0.2)
-  await page.waitForTimeout(600)
-  const runEnabled = await page.locator('button:has-text("Run Training")').first().isEnabled()
+  await page.waitForFunction(
+    () => {
+      const button = Array.from(document.querySelectorAll('button')).find((node) =>
+        node.textContent?.includes('开始训练'),
+      )
+      return button instanceof HTMLButtonElement && !button.disabled
+    },
+    undefined,
+    { timeout: 12000 },
+  ).catch(() => undefined)
+  const runEnabled = await page.locator('button:has-text("开始训练")').first().isEnabled()
   record('T45/T46 错误修正后 Run 恢复可用（Warning 不阻止）', runEnabled === true, `run enabled: ${runEnabled}`)
   // All Models per algorithm view
-  await page.locator('div[role="button"]', { hasText: 'All Models (12)' }).first().click()
+  await page.locator('div[role="button"]', { hasText: '全部模型（All Models，12 种）' }).first().click()
   await page.waitForTimeout(1200)
   const modelGroups = await page.locator('.tn-pane .ant-collapse-item').count()
   record('T50 All Models 显示 12 个独立参数组', modelGroups >= 12, `${modelGroups} groups`)
@@ -262,14 +278,18 @@ try {
   const m5Tabs = (await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
   record(
     'T31/T39 M5 三个右侧 Tab + 历史管理折叠区',
-    ['Metrics Overview', 'Model Ranking', 'Regional Performance'].every((t) => m5Tabs.includes(t)) &&
-      (await page.locator('text=Evaluation History / Management').count()) > 0,
+    ['Metrics Overview', 'Model Ranking', 'Regional Performance'].every((t) =>
+      m5Tabs.some((text) => text.includes(t)),
+    ) &&
+      (await page.locator('text=评价历史（Evaluation History）').count()) > 0,
     m5Tabs.join('|'),
   )
   const centerTabs = (await page.locator('.tn-three-pane section').nth(1).locator('.ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
   record(
     'T29 M5 中央四个视图齐全',
-    ['Prediction Comparison', 'Error Analysis', 'Forecast Horizon Analysis', 'Spatial Evaluation'].every((t) => centerTabs.includes(t)),
+    ['Prediction Comparison', 'Error Analysis', 'Forecast Horizon Analysis', 'Spatial Evaluation'].every((t) =>
+      centerTabs.some((text) => text.includes(t)),
+    ),
     centerTabs.join('|'),
   )
   await page.screenshot({ path: path.join(SHOTS, '06-module5-evaluation.png'), fullPage: true })

@@ -3,6 +3,7 @@ import { WarningOutlined } from '@ant-design/icons'
 import type { Issue } from '../api/client'
 import type { FieldSpec } from '../validation/engine'
 import HelpTip from './HelpTip'
+import { paramTerm } from '../i18n/terms'
 
 interface Props {
   spec: FieldSpec
@@ -24,10 +25,20 @@ function fieldDetail(spec: FieldSpec): string[] {
   const facts: string[] = []
   if (spec.unit_zh) facts.push(`单位：${spec.unit_zh}`)
   if (bounds.length) facts.push(`范围：${bounds.join(' 且 ')}`)
-  else if (spec.type === 'enum') facts.push(`可选：${(spec.enum ?? []).map(String).join(' / ')}`)
+  else if (spec.type === 'enum') {
+    const labels = spec.enum_labels?.length
+      ? spec.enum_labels
+      : (spec.enum ?? []).map(String)
+    facts.push(`可选：${labels.join(' / ')}`)
+  }
   const def = spec.default
   const hasDefault = def !== undefined && def !== null && def !== '' && !(Array.isArray(def) && def.length === 0)
-  if (hasDefault) facts.push(`默认：${Array.isArray(def) ? def.join(', ') : String(def)}`)
+  if (hasDefault) {
+    const enumIndex = spec.type === 'enum' ? (spec.enum ?? []).indexOf(def) : -1
+    const enumShown = enumIndex >= 0 ? spec.enum_labels?.[enumIndex] ?? String(def) : String(def)
+    const shown = typeof def === 'boolean' ? (def ? '开启' : '关闭') : Array.isArray(def) ? def.join(', ') : enumShown
+    facts.push(`默认：${shown}`)
+  }
   parts.push(facts.join(' · '))
   if (spec.suggestion_zh) parts.push(`建议：${spec.suggestion_zh}`)
   return parts
@@ -48,6 +59,10 @@ export default function ParamField({
   const warnings = issues.filter((i) => i.severity === 'warning')
   const disabled = Boolean(disabledReason)
   const inputId = `field-${path.replace(/[^\w-]/g, '_')}`
+  const term = paramTerm(path, spec)
+  const displayLabel = term?.zh ?? spec.label_zh ?? spec.label ?? spec.key
+  const englishLabel = term?.en ?? spec.label ?? displayLabel
+  const meaning = spec.help_zh || term?.impact || '该参数参与当前分析、数据处理或模型配置。'
   const describedBy = [
     errors.length ? `${inputId}-error` : null,
     warnings.length ? `${inputId}-warning` : null,
@@ -146,18 +161,19 @@ export default function ParamField({
       data-field={path}
     >
       <label className="tn-field-label" htmlFor={inputId}>
-        {spec.label_zh ?? spec.label ?? spec.key}
-        {spec.level === 'advanced' ? <span className="tn-muted">（Advanced）</span> : null}
+        {displayLabel}
+        {spec.level === 'advanced' ? <span className="tn-muted">（高级）</span> : null}
         <HelpTip
-          title={spec.help_zh || `${spec.label_zh ?? spec.key} 参数说明`}
+          title={`${displayLabel}（${englishLabel}）`}
           detail={
             <>
+              <div>实际含义与影响：{meaning}</div>
               {fieldDetail(spec).map((line) => (
                 <div key={line}>{line}</div>
               ))}
             </>
           }
-          label={spec.label_zh ?? spec.label ?? spec.key}
+          label={displayLabel}
         />
         {disabledReason ? <span className="tn-muted">· {disabledReason}</span> : null}
       </label>

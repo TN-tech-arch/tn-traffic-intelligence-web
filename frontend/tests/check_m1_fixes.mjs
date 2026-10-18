@@ -63,12 +63,12 @@ const lastRow = await page.locator('.tn-inline:has-text("Time Slice")').first().
 check('1d 滑到末端仍显示分析范围内时间', lastRow.includes('2013-11-15'), lastRow.replace(/\n/g, ' '))
 
 // 2. Auto / manual Max Lag
-const acfCard = page.locator('.ant-card:has-text("ACF 与趋势")').first()
+const acfCard = page.locator('.ant-card:has-text("自相关与趋势（ACF & Trend）")').first()
 const autoLine = await acfCard.innerText()
 check(
-  '2a Auto 模式显示实际生效 Max Lag（不是 0）',
-  /实际生效 Max Lag：\d+ 步/.test(autoLine) && !/实际生效 Max Lag：0 /.test(autoLine),
-  (autoLine.match(/实际生效 Max Lag：.*/) ?? [''])[0],
+  '2a 自动模式显示实际生效最大滞后步数（不是 0）',
+  /实际生效最大滞后步数：\d+ 步/.test(autoLine) && !/实际生效最大滞后步数：0 /.test(autoLine),
+  (autoLine.match(/实际生效最大滞后步数：.*/) ?? [''])[0],
 )
 const autoSwitch = acfCard.locator('.ant-switch').first()
 async function setAuto(on) {
@@ -94,7 +94,7 @@ check('2c 手动值生效并显示实际值', /实际生效：200 步/.test(manu
 await manualInput.click({ clickCount: 3 })
 await manualInput.fill('5000')
 await page.keyboard.press('Tab')
-await page.waitForTimeout(2500)
+await page.waitForTimeout(5000)
 const overLimitError = await page.locator('[data-field="m1.acf_max_lag"] .tn-error-text').count()
 check('2d 超过上限在字段下方报错', overLimitError > 0, `${overLimitError} error nodes`)
 const autoRestored = await setAuto(true)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, ENDPOINTS, api, type Issue } from '../api/client'
 import { checkGroup, crossFieldIssues, issuesByPath, type FieldSpec, type Values } from './engine'
+import { localizeUserText } from '../i18n/terms'
 
 export interface SchemaBundle {
   modules: Record<string, FieldSpec[]>
@@ -19,6 +20,14 @@ export interface SchemaBundle {
 }
 
 let schemaCache: SchemaBundle | null = null
+
+function localizeIssues(issues: Issue[]): Issue[] {
+  return issues.map((item) => ({
+    ...item,
+    message: localizeUserText(item.message),
+    suggestion: item.suggestion ? localizeUserText(item.suggestion) : item.suggestion,
+  }))
+}
 
 export function useSchema() {
   const [schema, setSchema] = useState<SchemaBundle | null>(schemaCache)
@@ -85,12 +94,12 @@ export function useGroupValidation({ specs, values, pathPrefix, algorithmKey, re
         const payload = JSON.parse(remoteKey)
         const result = await api.post<{ issues: Issue[] }>(ENDPOINTS.validationCheck, payload)
         if (current !== sequence.current) return // stale response must not overwrite newer input
-        setRemoteIssues(result.issues ?? [])
+        setRemoteIssues(localizeIssues(result.issues ?? []))
         setRemoteState('checked')
       } catch (err) {
         if (current !== sequence.current) return
         if (err instanceof ApiError) {
-          setRemoteIssues(err.issues)
+          setRemoteIssues(localizeIssues(err.issues))
         } else {
           setRemoteIssues([
             {
@@ -109,7 +118,7 @@ export function useGroupValidation({ specs, values, pathPrefix, algorithmKey, re
   }, [remoteKey, remoteDebounceMs, pathPrefix])
 
   const issues = useMemo(() => {
-    const merged: Issue[] = [...local]
+    const merged: Issue[] = localizeIssues(local)
     for (const item of remoteIssues) {
       const exists = merged.some((m) => m.path === item.path && m.code === item.code && m.severity === item.severity)
       if (!exists) merged.push(item)

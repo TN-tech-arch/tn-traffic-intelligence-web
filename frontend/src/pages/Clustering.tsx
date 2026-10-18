@@ -6,8 +6,12 @@ import ParamField from '../components/ParamField'
 import MapView, { CLUSTER_PALETTE } from '../components/MapView'
 import { LineChart, ScatterChart } from '../components/Charts'
 import StatusTag from '../components/StatusTag'
+import BiLabel from '../components/BiLabel'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
+import {
+  ACTION_LABELS, MODULE_META, bilingual, featureLabel, statusLabel,
+} from '../i18n/terms'
 
 const DEFAULT_FEATURES = [
   'mean',
@@ -54,24 +58,24 @@ export default function Clustering() {
 
   const schema: FieldSpec[] = useMemo(
     () => [
-      { key: 'source_key', label_zh: '地点', type: 'enum', enum: ['milano', 'trentino', 'zte'], enum_labels: ['Milano', 'Trentino', 'ZTE 4G Downlink'], default: 'milano', help_zh: '聚类使用的数据源。', suggestion_zh: 'ZTE 的 No Data 区域不会参与聚类。' },
+      { key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'], enum_labels: ['Milano', 'Trentino', 'ZTE 4G Downlink'], default: 'milano', help_zh: '聚类使用的数据源。', suggestion_zh: 'ZTE 的无数据区域不会参与聚类。' },
       { key: 'frequency', label_zh: '时间分辨率', type: 'enum', enum: ['native', '30min', '60min', '1day'], enum_labels: ['原生', '30 分钟', '1 小时', '1 天'], default: 'native', help_zh: '特征提取所用的频率。', suggestion_zh: '日内模式建议原生或 30 分钟。' },
-      { key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'], enum_labels: ['均值 mean', '求和 sum'], default: 'mean', help_zh: '聚合方式，会影响特征量级。', suggestion_zh: 'mean 更利于形状比较。' },
+      { key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'], enum_labels: ['均值', '求和'], default: 'mean', help_zh: '聚合方式，会影响特征量级。', suggestion_zh: '均值更利于形状比较。' },
       { key: 'start_index', label_zh: '起始时间点', type: 'integer', min: 0, default: 0, help_zh: '特征提取窗口起点（重采样后的点数）。', suggestion_zh: '默认 0。' },
       { key: 'window_points', label_zh: '窗口点数', type: 'integer', min: 24, max: 100000, default: 1008, help_zh: '参与特征提取的连续点数，至少覆盖一个完整日周期。', suggestion_zh: '10 分钟频率下 1008 点 ≈ 7 天。' },
-      { key: 'features', label_zh: '聚类特征', type: 'array', enum: catalog.features.map((f) => f.key), enum_labels: catalog.features.map((f) => f.label_zh), default: DEFAULT_FEATURES, help_zh: '从真实时间序列提取的特征集合。', suggestion_zh: '至少选择 2 个特征。' },
+      { key: 'features', label_zh: '聚类特征', type: 'array', enum: catalog.features.map((f) => f.key), enum_labels: catalog.features.map((f) => featureLabel(f.key, f.label_zh)), default: DEFAULT_FEATURES, help_zh: '从真实时间序列提取的特征集合。', suggestion_zh: '至少选择 2 个特征。' },
       { key: 'standardize', label_zh: '特征标准化', type: 'boolean', default: true, help_zh: '聚类前对特征做 z-score 标准化。', suggestion_zh: '建议开启。' },
-      { key: 'algorithm', label_zh: '聚类算法', type: 'enum', enum: ['kmeans', 'dbscan', 'hierarchical', 'gmm'], enum_labels: ['K-Means', 'DBSCAN', 'Hierarchical', 'GMM'], default: 'kmeans', help_zh: '四选一的真实聚类算法。', suggestion_zh: '先用 K-Means，再对比其它三种。' },
+      { key: 'algorithm', label_zh: '聚类算法', type: 'enum', enum: ['kmeans', 'dbscan', 'hierarchical', 'gmm'], enum_labels: ['K-Means', 'DBSCAN', '层次聚类（Hierarchical）', '高斯混合（GMM）'], default: 'kmeans', help_zh: '四选一的真实聚类算法。', suggestion_zh: '先用 K-Means，再对比其它三种。' },
       { key: 'n_clusters', label_zh: '簇数量 K', type: 'integer', min: 2, max: 30, default: 4, visible_when: { algorithm: 'kmeans' }, enabled_when: { algorithm: 'kmeans' }, help_zh: 'K-Means 的簇数量。', suggestion_zh: '3-8 之间便于解释。' },
-      { key: 'n_init', label_zh: '初始化次数 n_init', type: 'integer', min: 1, max: 100, default: 10, level: 'advanced', visible_when: { algorithm: 'kmeans' }, enabled_when: { algorithm: 'kmeans' }, help_zh: 'K-Means 重复初始化次数，取最优惯性。', suggestion_zh: '10 是稳健默认值。' },
+      { key: 'n_init', label_zh: '初始化次数', type: 'integer', min: 1, max: 100, default: 10, level: 'advanced', visible_when: { algorithm: 'kmeans' }, enabled_when: { algorithm: 'kmeans' }, help_zh: 'K-Means 重复初始化次数，取最优惯性。', suggestion_zh: '10 是稳健默认值。' },
       { key: 'hierarchical_n_clusters', label_zh: '簇数量 K', type: 'integer', min: 2, max: 30, default: 4, visible_when: { algorithm: 'hierarchical' }, enabled_when: { algorithm: 'hierarchical' }, help_zh: '层次聚类的簇数量。', suggestion_zh: '与 K-Means 比较时使用相同 K。' },
-      { key: 'linkage', label_zh: '连接方式 linkage', type: 'enum', enum: ['ward', 'complete', 'average', 'single'], default: 'ward', level: 'advanced', visible_when: { algorithm: 'hierarchical' }, enabled_when: { algorithm: 'hierarchical' }, help_zh: '层次聚类连接准则；ward 只能配合欧氏距离。', suggestion_zh: '默认 ward。' },
-      { key: 'metric', label_zh: '距离度量 metric', type: 'enum', enum: ['euclidean', 'manhattan', 'cosine'], default: 'euclidean', level: 'advanced', enabled_when: { algorithm: 'hierarchical' }, help_zh: '距离度量；ward 仅支持 euclidean。', suggestion_zh: '默认 euclidean。' },
-      { key: 'eps', label_zh: '邻域半径 eps', type: 'number', min: 0, exclusive_min: true, default: 1.2, visible_when: { algorithm: 'dbscan' }, enabled_when: { algorithm: 'dbscan' }, help_zh: 'DBSCAN 邻域半径（标准化特征空间），必须大于 0。', suggestion_zh: '标准化后 0.3-2.0 较常见。' },
-      { key: 'min_samples', label_zh: '最小样本数 min_samples', type: 'integer', min: 1, max: 200, default: 3, visible_when: { algorithm: 'dbscan' }, enabled_when: { algorithm: 'dbscan' }, help_zh: 'DBSCAN 核心点最小邻居数。', suggestion_zh: '3-10。' },
+      { key: 'linkage', label_zh: '连接方式', type: 'enum', enum: ['ward', 'complete', 'average', 'single'], enum_labels: ['沃德（ward）', '完全连接（complete）', '平均连接（average）', '单连接（single）'], default: 'ward', level: 'advanced', visible_when: { algorithm: 'hierarchical' }, enabled_when: { algorithm: 'hierarchical' }, help_zh: '层次聚类连接准则；沃德法只能配合欧氏距离。', suggestion_zh: '默认使用沃德法。' },
+      { key: 'metric', label_zh: '距离度量', type: 'enum', enum: ['euclidean', 'manhattan', 'cosine'], enum_labels: ['欧氏距离（euclidean）', '曼哈顿距离（manhattan）', '余弦距离（cosine）'], default: 'euclidean', level: 'advanced', visible_when: { algorithm: 'hierarchical' }, enabled_when: { algorithm: 'hierarchical' }, help_zh: '距离度量；沃德法仅支持欧氏距离。', suggestion_zh: '默认使用欧氏距离。' },
+      { key: 'eps', label_zh: '邻域半径', type: 'number', min: 0, exclusive_min: true, default: 1.2, visible_when: { algorithm: 'dbscan' }, enabled_when: { algorithm: 'dbscan' }, help_zh: 'DBSCAN 邻域半径（标准化特征空间），必须大于 0。', suggestion_zh: '标准化后 0.3-2.0 较常见。' },
+      { key: 'min_samples', label_zh: '最小样本数', type: 'integer', min: 1, max: 200, default: 3, visible_when: { algorithm: 'dbscan' }, enabled_when: { algorithm: 'dbscan' }, help_zh: 'DBSCAN 核心点最小邻居数。', suggestion_zh: '3-10。' },
       { key: 'gmm_n_components', label_zh: '高斯分量数', type: 'integer', min: 1, max: 30, default: 4, visible_when: { algorithm: 'gmm' }, enabled_when: { algorithm: 'gmm' }, help_zh: 'GMM 高斯分量个数。', suggestion_zh: '3-8。' },
-      { key: 'covariance_type', label_zh: '协方差类型', type: 'enum', enum: ['full', 'tied', 'diag', 'spherical'], default: 'full', level: 'advanced', visible_when: { algorithm: 'gmm' }, enabled_when: { algorithm: 'gmm' }, help_zh: 'GMM 协方差结构；样本少时 full 可能不可靠。', suggestion_zh: '样本充足时用 full。' },
-      { key: 'reg_covar', label_zh: '协方差正则 reg_covar', type: 'number', min: 0, exclusive_min: true, default: 0.000001, level: 'advanced', visible_when: { algorithm: 'gmm' }, enabled_when: { algorithm: 'gmm' }, help_zh: 'GMM 协方差对角线正则项，必须大于 0 以保证数值稳定。', suggestion_zh: '1e-6 起。' },
+      { key: 'covariance_type', label_zh: '协方差类型', type: 'enum', enum: ['full', 'tied', 'diag', 'spherical'], enum_labels: ['完全协方差（full）', '共享协方差（tied）', '对角协方差（diag）', '球形协方差（spherical）'], default: 'full', level: 'advanced', visible_when: { algorithm: 'gmm' }, enabled_when: { algorithm: 'gmm' }, help_zh: '高斯混合模型的协方差结构；样本少时完全协方差可能不可靠。', suggestion_zh: '样本充足时使用完全协方差。' },
+      { key: 'reg_covar', label_zh: '协方差正则项', type: 'number', min: 0, exclusive_min: true, default: 0.000001, level: 'advanced', visible_when: { algorithm: 'gmm' }, enabled_when: { algorithm: 'gmm' }, help_zh: 'GMM 协方差对角线正则项，必须大于 0 以保证数值稳定。', suggestion_zh: '1e-6 起。' },
       { key: 'random_state', label_zh: '随机种子', type: 'integer', min: 0, max: 2147483647, default: 42, level: 'advanced', help_zh: '固定随机性以便复现。', suggestion_zh: '默认 42。' },
     ],
     [catalog.features],
@@ -121,7 +125,7 @@ export default function Clustering() {
             setResult({ ...state.result, cluster_run_id: state.cluster_run_id, params: state.params, metrics: state.metrics })
             messageApi.success('聚类完成（真实计算）')
           } else {
-            messageApi.error(`聚类失败：${state.error ?? state.status}`)
+            messageApi.error(`聚类失败：${state.error ?? statusLabel(state.status)}`)
           }
           loadRuns()
           break
@@ -143,7 +147,7 @@ export default function Clustering() {
     try {
       const state = await api.get<any>(ENDPOINTS.clusterGet(runId))
       if (state.status !== 'Completed') {
-        messageApi.warning(`该运行状态为 ${state.status}，没有可用结果。`)
+        messageApi.warning(`该运行没有可用结果，当前状态：${statusLabel(state.status)}。`)
         return
       }
       setResult({ ...state.result, cluster_run_id: runId, params: state.params, metrics: state.metrics })
@@ -184,8 +188,9 @@ export default function Clustering() {
     <div>
       {contextHolder}
       <ModuleHeader
-        module="Module 2"
-        title="Functional Zone Clustering"
+        module={MODULE_META.m2.index}
+        titleZh={MODULE_META.m2.titleZh}
+        titleEn={MODULE_META.m2.titleEn}
         description="K-Means / DBSCAN / Hierarchical / GMM 真实聚类、GIS 簇着色与质量评估"
         datasetInfo={result ? `最近运行 ${result.cluster_run_id} · ${result.algorithm_label} · ${result.clusters.length} 个簇` : '尚未运行聚类'}
       />
@@ -199,10 +204,10 @@ export default function Clustering() {
         config={
           <>
             <PaneHead
-              title="Configuration"
+              title={bilingual('配置', 'Configuration')}
               extra={
                 <Button size="small" onClick={() => setConfig((prev) => ({ ...prev, algorithm: 'kmeans', n_clusters: 4, features: DEFAULT_FEATURES, standardize: true, eps: 1.2, min_samples: 3, gmm_n_components: 4, linkage: 'ward', metric: 'euclidean' }))}>
-                  Reset 参数
+                  {ACTION_LABELS.reset}
                 </Button>
               }
             />
@@ -219,14 +224,14 @@ export default function Clustering() {
               />
             ))}
             <Button type="primary" block onClick={runClustering} loading={busy} disabled={!valid} style={{ marginTop: 8 }}>
-              Run Clustering
+              {ACTION_LABELS.startClustering}
             </Button>
             {warnings.map((w) => (
               <div className="tn-warning-text" key={w.path + w.code}>
                 ⚠ {w.message}
               </div>
             ))}
-            <div className="tn-section-title">聚类历史（Management）</div>
+            <div className="tn-section-title">{bilingual('聚类历史', 'Clustering History')}</div>
             {runs.length === 0 ? (
               <EmptyState text="暂无聚类记录（真实空态）" />
             ) : (
@@ -239,7 +244,7 @@ export default function Clustering() {
                   </div>
                   <div className="tn-inline">
                     <StatusTag status={run.status} error={run.error} />
-                    <Button size="small" onClick={() => openRun(run.cluster_run_id)}>Open</Button>
+                    <Button size="small" onClick={() => openRun(run.cluster_run_id)}>{ACTION_LABELS.open}</Button>
                     <Popconfirm
                       title="删除该聚类记录？"
                       description="只删除本次聚类结果，不影响原始数据。"
@@ -253,7 +258,7 @@ export default function Clustering() {
                         }
                       }}
                     >
-                      <Button size="small" danger>Delete</Button>
+                      <Button size="small" danger>{ACTION_LABELS.deleteRecord}</Button>
                     </Popconfirm>
                   </div>
                 </div>
@@ -263,7 +268,7 @@ export default function Clustering() {
         }
         visual={
           <>
-            <PaneHead title="GIS 簇分布" extra={<span className="tn-muted">{selectedRegion ? `已选 ${selectedRegion}（簇 ${clusterOf(selectedRegion)}）` : '点击地图查看区域'}</span>} />
+            <PaneHead title={bilingual('GIS 簇分布', 'GIS Cluster Map')} extra={<span className="tn-muted">{selectedRegion ? `已选 ${selectedRegion}（簇 ${clusterOf(selectedRegion)}）` : '点击地图查看区域'}</span>} />
             <MapView
               geojson={geojson}
               entries={regionEntries}
@@ -277,7 +282,7 @@ export default function Clustering() {
                 return CLUSTER_PALETTE[Math.abs(entry.group) % CLUSTER_PALETTE.length]
               }}
               formatTooltip={(entry, regionId) =>
-                `${regionId}: ${entry?.group === undefined ? 'No Data / 未参与聚类' : entry.group === -1 ? '噪声 (DBSCAN)' : `簇 ${entry.group}`}`
+                `${regionId}: ${entry?.group === undefined ? '无数据 / 未参与聚类' : entry.group === -1 ? '噪声（DBSCAN）' : `簇 ${entry.group}`}`
               }
               legend={
                 <>
@@ -290,14 +295,18 @@ export default function Clustering() {
                     <span className="tn-legend-swatch" style={{ background: '#8b8b8b' }} />噪声 -1
                   </span>
                   <span>
-                    <span className="tn-legend-swatch" style={{ background: '#c9d3e2' }} />No Data
+                    <span className="tn-legend-swatch" style={{ background: '#c9d3e2' }} />无数据
                   </span>
                 </>
               }
             />
-            <Card size="small" title="特征空间（真实特征矩阵）" style={{ marginTop: 10 }}>
+            <Card size="small" title={bilingual('特征空间', 'Feature Space')} style={{ marginTop: 10 }}>
               {scatter.length ? (
-                <ScatterChart points={scatter} xName={result?.feature_names?.[0]} yName={result?.feature_names?.[1]} />
+                <ScatterChart
+                  points={scatter}
+                  xName={result?.feature_names?.[0] ? featureLabel(result.feature_names[0]) : undefined}
+                  yName={result?.feature_names?.[1] ? featureLabel(result.feature_names[1]) : undefined}
+                />
               ) : (
                 <EmptyState text="运行聚类后显示特征散点。" />
               )}
@@ -313,12 +322,12 @@ export default function Clustering() {
             items={[
               {
                 key: 'overview',
-                label: 'Cluster Overview',
+                label: <BiLabel zh="聚类概览" en="Cluster Overview" />,
                 children: result ? (
                   <div className="tn-stack">
                     <div className="tn-muted">
                       实际簇数 {result.clusters.filter((c: any) => c.cluster_id >= 0).length} · 参与区域 {result.regions.length} · 丢弃区域{' '}
-                      {result.dropped_regions?.length ?? 0} · No Data {result.no_data_regions?.length ?? 0}
+                      {result.dropped_regions?.length ?? 0} · 无数据 {result.no_data_regions?.length ?? 0}
                     </div>
                     {result.clusters.map((cluster: any) => (
                       <Card size="small" key={cluster.cluster_id} title={`${cluster.label_zh} · ${cluster.region_count} 区域`}>
@@ -328,7 +337,7 @@ export default function Clustering() {
                           ) : null}
                           {Object.entries(cluster.feature_means as Record<string, number>).map(([key, value]) => (
                             <div key={key}>
-                              {key}: {Number(value).toFixed(4)}
+                              {featureLabel(key)}: {Number(value).toFixed(4)}
                             </div>
                           ))}
                         </div>
@@ -345,13 +354,15 @@ export default function Clustering() {
               },
               {
                 key: 'patterns',
-                label: 'Typical Patterns',
+                label: <BiLabel zh="典型模式" en="Typical Patterns" />,
                 children: result ? (
                   <div className="tn-stack">
-                    <Card size="small" title="各簇平均日内模式（真实均值）">
+                    <Card size="small" title={bilingual('各簇平均日内模式', 'Cluster Hourly Profiles')}>
                       <LineChart
                         height={230}
                         x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
+                        xName="小时"
+                        yName="流量值"
                         series={result.clusters.map((cluster: any, index: number) => ({
                           name: cluster.label_zh,
                           data: cluster.intraday_profile,
@@ -359,10 +370,12 @@ export default function Clustering() {
                         }))}
                       />
                     </Card>
-                    <Card size="small" title="周内差异">
+                    <Card size="small" title={bilingual('周内差异', 'Weekly Pattern')}>
                       <LineChart
                         height={200}
                         x={['周一', '周二', '周三', '周四', '周五', '周六', '周日']}
+                        xName="星期"
+                        yName="流量值"
                         series={result.clusters.map((cluster: any, index: number) => ({
                           name: cluster.label_zh,
                           data: cluster.weekly_profile,
@@ -380,14 +393,14 @@ export default function Clustering() {
               },
               {
                 key: 'quality',
-                label: 'Quality Evaluation',
+                label: <BiLabel zh="质量评估" en="Quality Evaluation" />,
                 children: result ? (
                   <div className="tn-stack">
-                    <Card size="small" title="质量指标（合法条件下计算，否则 N/A）">
+                    <Card size="small" title={bilingual('质量指标', 'Clustering Metrics')}>
                       <div className="tn-muted">
-                        <div>Silhouette：{result.metrics?.silhouette === null || result.metrics?.silhouette === undefined ? 'N/A' : Number(result.metrics.silhouette).toFixed(4)}</div>
-                        <div>Davies-Bouldin：{result.metrics?.davies_bouldin === null || result.metrics?.davies_bouldin === undefined ? 'N/A' : Number(result.metrics.davies_bouldin).toFixed(4)}</div>
-                        <div>Calinski-Harabasz：{result.metrics?.calinski_harabasz === null || result.metrics?.calinski_harabasz === undefined ? 'N/A' : Number(result.metrics.calinski_harabasz).toFixed(2)}</div>
+                        <div>轮廓系数（Silhouette）：{result.metrics?.silhouette === null || result.metrics?.silhouette === undefined ? '不适用' : Number(result.metrics.silhouette).toFixed(4)}</div>
+                        <div>戴维斯-布尔丁指数（Davies-Bouldin）：{result.metrics?.davies_bouldin === null || result.metrics?.davies_bouldin === undefined ? '不适用' : Number(result.metrics.davies_bouldin).toFixed(4)}</div>
+                        <div>方差比准则（Calinski-Harabasz）：{result.metrics?.calinski_harabasz === null || result.metrics?.calinski_harabasz === undefined ? '不适用' : Number(result.metrics.calinski_harabasz).toFixed(2)}</div>
                         <div>噪声点：{result.metrics?.noise_points ?? 0}</div>
                       </div>
                       {(result.metrics?.notes ?? []).map((note: string) => (
@@ -396,7 +409,7 @@ export default function Clustering() {
                         </div>
                       ))}
                     </Card>
-                    <Card size="small" title="算法细节（真实运行参数）">
+                    <Card size="small" title={bilingual('算法细节', 'Algorithm Details')}>
                       <pre className="tn-code">{JSON.stringify(result.algorithm_detail, null, 2)}</pre>
                     </Card>
                   </div>
@@ -406,7 +419,7 @@ export default function Clustering() {
               },
               {
                 key: 'regions',
-                label: 'Region List',
+                label: <BiLabel zh="区域列表" en="Region List" />,
                 children: result ? (
                   <Table
                     size="small"
@@ -415,20 +428,20 @@ export default function Clustering() {
                     dataSource={result.regions}
                     onRow={(record: any) => ({ onClick: () => setSelectedRegion(record.region_id) })}
                     columns={[
-                      { title: 'Region', dataIndex: 'region_id', sorter: (a: any, b: any) => String(a.region_id).localeCompare(String(b.region_id)) },
+                      { title: '区域', dataIndex: 'region_id', sorter: (a: any, b: any) => String(a.region_id).localeCompare(String(b.region_id)) },
                       {
-                        title: 'Cluster',
+                        title: '簇',
                         dataIndex: 'cluster_id',
                         sorter: (a: any, b: any) => a.cluster_id - b.cluster_id,
                         render: (value: number) => (value === -1 ? <Tag>噪声</Tag> : <Tag color="blue">{value}</Tag>),
                       },
                       {
-                        title: result.feature_names[0],
+                        title: featureLabel(result.feature_names[0]),
                         render: (_: unknown, record: any) => Number(record.features[result.feature_names[0]]).toFixed(3),
                         sorter: (a: any, b: any) => a.features[result.feature_names[0]] - b.features[result.feature_names[0]],
                       },
                       {
-                        title: result.feature_names[1] ?? '—',
+                        title: result.feature_names[1] ? featureLabel(result.feature_names[1]) : '—',
                         render: (_: unknown, record: any) =>
                           result.feature_names[1] ? Number(record.features[result.feature_names[1]]).toFixed(3) : '—',
                       },
@@ -436,7 +449,7 @@ export default function Clustering() {
                         title: '定位',
                         render: (_: unknown, record: any) => (
                           <Tooltip title="在地图上高亮">
-                            <Button size="small" onClick={() => setSelectedRegion(record.region_id)}>Locate</Button>
+                            <Button size="small" onClick={() => setSelectedRegion(record.region_id)}>定位</Button>
                           </Tooltip>
                         ),
                       },

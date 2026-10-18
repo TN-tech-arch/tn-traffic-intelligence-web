@@ -7,10 +7,16 @@ import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
+import BiLabel from '../components/BiLabel'
 import { LineChart } from '../components/Charts'
 import { useGroupValidation, useSchema } from '../validation/useValidation'
 import type { Issue as IssueType } from '../api/client'
 import { fieldDisabledReason, isVisible, visibleFields, type FieldSpec, type Values } from '../validation/engine'
+import {
+  ACTION_LABELS, MODULE_META, aggregationLabel, algorithmCategoryLabel, bilingual,
+  frequencyLabel, missingModeLabel, modeLabel, scalingLabel, scopeLabel,
+  sourceDisplayName, unitDisplayLabel,
+} from '../i18n/terms'
 
 const ALL_MODELS = 'all_models'
 
@@ -174,7 +180,7 @@ export default function Training() {
 
   const runPreflight = async () => {
     if (!datasetId) {
-      messageApi.warning('请先选择一个已构建的 Dataset。')
+      messageApi.warning('请先选择一个已构建的数据集。')
       return
     }
     setBusy(true)
@@ -220,7 +226,7 @@ export default function Training() {
         mode: activeModel?.default_mode,
         params,
       })
-      messageApi.success(`Experiment ${created.experiment_id} 已提交（${created.region_count} 个区域）`)
+      messageApi.success(`实验 ${created.experiment_id} 已提交（${created.region_count} 个区域）`)
       const data = await api.get<any>(ENDPOINTS.experimentGet(created.experiment_id))
       setExperiment(data)
       setMonitorTab('monitor')
@@ -242,11 +248,11 @@ export default function Training() {
     }
     const confirmed = window.confirm(
       `将按顺序运行 12 个算法：\n` +
-        `地点/数据集：${dataset?.source_display_name} ${dataset?.dataset_id}\n` +
-        `Scope：${dataset?.scope === 'all' ? `All Regions（${dataset?.region_count} 个区域）` : 'Single Region'}\n` +
+        `数据源/数据集：${sourceDisplayName(dataset?.source_key, dataset?.source_display_name)} ${dataset?.dataset_id}\n` +
+        `预测范围：${dataset?.scope === 'all' ? `全部区域（${dataset?.region_count} 个区域）` : '单区域'}\n` +
         `计划任务数：${12 * (dataset?.scope === 'all' ? dataset?.region_count ?? 1 : 1)}\n` +
         `不可运行模型：${(preflight?.models ?? []).filter((m: any) => !m.runnable).map((m: any) => m.label).join(', ') || '无'}\n\n` +
-        `默认顺序执行；可在实验历史中随时 Stop。估计耗时：无法可靠估计（取决于模型与硬件）。`,
+        `默认顺序执行；可在实验历史中随时停止。估计耗时：无法可靠估计（取决于模型与硬件）。`,
     )
     if (!confirmed) return
     setBusy(true)
@@ -256,7 +262,7 @@ export default function Training() {
         model_configs: buildModelConfigs(),
         execution_policy: { sequential: true, continue_on_error: true, skip_unavailable_after_confirmation: true },
       })
-      messageApi.success(`Batch ${created.batch_id} 已创建（${created.experiments.length} 个实验计划）`)
+      messageApi.success(`批量任务 ${created.batch_id} 已创建（${created.experiments.length} 个实验计划）`)
       const data = await api.get<any>(ENDPOINTS.batchGet(created.batch_id))
       setBatch(data)
       setMonitorTab('batch')
@@ -275,7 +281,7 @@ export default function Training() {
     try {
       if (batch && ['Running', 'Created', 'Stopping'].includes(batch.status)) {
         await api.post(ENDPOINTS.batchStop(batch.batch_id))
-        messageApi.success('已请求停止批次（后端确认后将把未开始任务置为 Cancelled/Skipped）')
+        messageApi.success('已请求停止批次（后端确认后将把未开始任务置为已取消或已跳过）')
       } else if (experiment && ['Queued', 'Running', 'Stopping'].includes(experiment.status)) {
         await api.post(ENDPOINTS.experimentStop(experiment.experiment_id))
         messageApi.success('已请求停止实验')
@@ -305,55 +311,56 @@ export default function Training() {
     <div>
       {contextHolder}
       <ModuleHeader
-        module="Module 4"
-        title="Model Training"
-        description="12 种真实算法（含 TimesFM / Chronos Zero-shot）与 All Models 批量执行"
-        datasetInfo={dataset ? `${dataset.dataset_id} · ${dataset.source_display_name} · L/H/S = ${dataset.L}/${dataset.H}/${dataset.S} · ${dataset.scope === 'all' ? `All Regions(${dataset.region_count})` : 'Single Region'}` : '请先构建数据集'}
+        module={MODULE_META.m4.index}
+        titleZh={MODULE_META.m4.titleZh}
+        titleEn={MODULE_META.m4.titleEn}
+        description="12 种真实算法（含 TimesFM / Chronos 零样本预测）与全部模型批量执行"
+        datasetInfo={dataset ? `${dataset.dataset_id} · ${sourceDisplayName(dataset.source_key, dataset.source_display_name)} · L/H/S = ${dataset.L}/${dataset.H}/${dataset.S} · ${dataset.scope === 'all' ? `全部区域（${dataset.region_count}）` : '单区域'}` : '请先构建数据集'}
       />
       {activeErrors.length > 0 ? (
         <Alert type="error" showIcon style={{ marginBottom: 10 }} message={`${activeErrors.length} 个阻断性错误（错误位于对应输入框下方）`} description={activeErrors.slice(0, 3).map((i) => `${i.path}: ${i.message}`).join('；')} />
       ) : null}
       {serverIssues.length > 0 ? (
-        <Alert type="error" showIcon style={{ marginBottom: 10 }} message="后端拒绝了请求（未创建任何 Job / Experiment / Batch）" description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')} />
+        <Alert type="error" showIcon style={{ marginBottom: 10 }} message="后端拒绝了请求（未创建任何任务、实验或批量任务）" description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')} />
       ) : null}
       <ThreePane
         config={
           <>
             <PaneHead
-              title="Configuration"
+              title={bilingual('配置', 'Configuration')}
               extra={
                 <Tooltip title="只重置当前可编辑参数，不影响已保存的实验">
                   <Button size="small" onClick={() => { isAllModels ? resetAllModels() : setParams(defaultsFor(algorithm)); setDrafts({}) }}>
-                    Reset Parameters
+                    重置参数
                   </Button>
                 </Tooltip>
               }
             />
             <div className="tn-field">
-              <label className="tn-field-label">1 · Dataset Selection（只读快照）</label>
+              <label className="tn-field-label">1 · 数据集选择（Dataset Selection，只读快照）</label>
               <Select
                 style={{ width: '100%' }}
                 size="small"
                 value={datasetId || undefined}
-                placeholder="选择一个已构建的 Dataset"
-                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.dataset_id} · ${d.source_display_name} · ${d.scope}` }))}
+                placeholder="选择一个已构建的数据集"
+                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · ${scopeLabel(d.scope)}` }))}
                 onChange={(value) => setDatasetId(value)}
               />
               {dataset ? (
                 <Descriptions size="small" column={1} style={{ marginTop: 8, fontSize: 11 }}>
-                  <Descriptions.Item label="来源">{dataset.source_display_name} · {dataset.unit_label}</Descriptions.Item>
-                  <Descriptions.Item label="Scope">{dataset.scope === 'all' ? `All Regions（${dataset.region_count} 个区域，独立建模）` : `Single Region（${dataset.region_ids?.[0]}）`}</Descriptions.Item>
-                  <Descriptions.Item label="分辨率/聚合">{dataset.frequency} · {dataset.aggregation}</Descriptions.Item>
-                  <Descriptions.Item label="L / H / S">{dataset.L} / {dataset.H} / {dataset.S}（H 继承自 Dataset，不可修改）</Descriptions.Item>
-                  <Descriptions.Item label="Train/Val/Test">{dataset.ratios?.train} / {dataset.ratios?.validation} / {dataset.ratios?.test}</Descriptions.Item>
-                  <Descriptions.Item label="窗口数">train {dataset.window_counts?.train} · val {dataset.window_counts?.validation} · test {dataset.window_counts?.test}</Descriptions.Item>
-                  <Descriptions.Item label="预处理">{dataset.preprocess?.missing_mode} · {dataset.preprocess?.scaling}</Descriptions.Item>
+                  <Descriptions.Item label="来源">{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</Descriptions.Item>
+                  <Descriptions.Item label="预测范围">{dataset.scope === 'all' ? `全部区域（${dataset.region_count} 个区域，独立建模）` : `单区域（${dataset.region_ids?.[0]}）`}</Descriptions.Item>
+                  <Descriptions.Item label="时间分辨率 / 聚合方式">{frequencyLabel(String(dataset.frequency))} · {aggregationLabel(String(dataset.aggregation))}</Descriptions.Item>
+                  <Descriptions.Item label="L / H / S">{dataset.L} / {dataset.H} / {dataset.S}（H 继承自数据集，不可修改）</Descriptions.Item>
+                  <Descriptions.Item label="训练 / 验证 / 测试">{dataset.ratios?.train} / {dataset.ratios?.validation} / {dataset.ratios?.test}</Descriptions.Item>
+                  <Descriptions.Item label="窗口数">训练 {dataset.window_counts?.train} · 验证 {dataset.window_counts?.validation} · 测试 {dataset.window_counts?.test}</Descriptions.Item>
+                  <Descriptions.Item label="预处理">{missingModeLabel(dataset.preprocess?.missing_mode)} · {scalingLabel(dataset.preprocess?.scaling)}</Descriptions.Item>
                 </Descriptions>
               ) : null}
             </div>
 
             <div className="tn-field">
-              <label className="tn-field-label">2 · Prediction Algorithm</label>
+              <label className="tn-field-label">2 · 预测算法（Prediction Algorithm）</label>
               <div
                 className={`tn-history-row${isAllModels ? ' active' : ''}`}
                 style={{ background: isAllModels ? '#e7f0fe' : undefined, borderRadius: 6, padding: '8px 6px' }}
@@ -363,7 +370,7 @@ export default function Training() {
                 onKeyDown={(e) => e.key === 'Enter' && setAlgorithm(ALL_MODELS)}
               >
                 <div>
-                  <strong>All Models (12)</strong>
+                  <strong>全部模型（All Models，12 种）</strong>
                   <div className="tn-muted">批量编排：按顺序运行下方 12 个算法（不是第 13 种算法）</div>
                 </div>
                 {isAllModels ? <Tag color="blue">已选择</Tag> : null}
@@ -377,7 +384,7 @@ export default function Training() {
                   items={[
                     {
                       key: category,
-                      label: models.find((m) => m.category === category)?.category_label_zh ?? category,
+                      label: models.find((m) => m.category === category)?.category_label_zh ?? algorithmCategoryLabel(category),
                       children: models
                         .filter((m) => m.category === category)
                         .map((model) => (
@@ -398,7 +405,7 @@ export default function Training() {
                                 {model.label}
                                 {customized[model.key] ? <Tag color="gold" style={{ marginLeft: 6 }}>已自定义</Tag> : null}
                               </div>
-                              <div className="tn-muted">{model.default_mode}{model.capabilities?.installed === false ? ' · 依赖未安装' : ''}</div>
+                              <div className="tn-muted">{modeLabel(model.default_mode)}{model.capabilities?.installed === false ? ' · 依赖未安装' : ''}</div>
                             </div>
                             <Tag color={model.category === 'foundation' ? 'purple' : 'blue'}>{model.category_label_zh}</Tag>
                           </div>
@@ -411,9 +418,9 @@ export default function Training() {
 
             <div className="tn-field">
               <label className="tn-field-label">
-                3 · Model Parameters
+                3 · 模型参数（Model Parameters）
                 <Switch size="small" checked={advanced} onChange={setAdvanced} />
-                <span className="tn-muted">{advanced ? '显示 Basic + Advanced' : '仅显示 Basic'}</span>
+                <span className="tn-muted">{advanced ? '显示基础与高级参数' : '仅显示基础参数'}</span>
               </label>
               {isAllModels ? (
                 <>
@@ -421,7 +428,7 @@ export default function Training() {
                     type="info"
                     showIcon
                     style={{ marginBottom: 8, fontSize: 11 }}
-                    message={`每个算法都有独立参数组；当前已自定义 ${Object.values(customized).filter(Boolean).length} 个算法。默认使用 registry preset。`}
+                    message={`每个算法都有独立参数组；当前已自定义 ${Object.values(customized).filter(Boolean).length} 个算法。默认使用注册表预设。`}
                   />
                   <Collapse
                     size="small"
@@ -433,10 +440,10 @@ export default function Training() {
                         label: (
                           <span className="tn-inline">
                             <span>{model.label}</span>
-                            <Tag color={model.category === 'foundation' ? 'purple' : 'default'}>{model.default_mode}</Tag>
+                            <Tag color={model.category === 'foundation' ? 'purple' : 'default'}>{modeLabel(model.default_mode)}</Tag>
                             {customized[model.key] ? <Tag color="gold">自定义</Tag> : <Tag>默认</Tag>}
-                            {issues.length ? <Tag color="red">{issues.length} Error</Tag> : <Tag color="green">可运行</Tag>}
-                            {warnings.length ? <Tag color="orange">{warnings.length} Warning</Tag> : null}
+                            {issues.length ? <Tag color="red">{issues.length} 个错误</Tag> : <Tag color="green">可运行</Tag>}
+                            {warnings.length ? <Tag color="orange">{warnings.length} 条警告</Tag> : null}
                           </span>
                         ),
                         children: (
@@ -482,18 +489,18 @@ export default function Training() {
                     danger
                     style={{ marginTop: 6 }}
                     onClick={() =>
-                      window.confirm('Reset All Model Parameters？这会丢弃 12 个算法的全部自定义参数（不影响已保存实验）。') && resetAllModels()
+                      window.confirm('重置全部模型参数？这会丢弃 12 个算法的全部自定义参数（不影响已保存实验）。') && resetAllModels()
                     }
                   >
-                    Reset All Model Parameters
+                    重置全部模型参数
                   </Button>
                 </>
               ) : activeModel ? (
                 <>
                   <div className="tn-muted" style={{ marginBottom: 6 }}>
-                    使用模式：<Tag>{activeModel.default_mode}</Tag>
-                    {activeModel.capabilities?.supports_finetune ? <Tag color="green">支持 Fine-tuning</Tag> : <Tag>仅 Zero-shot</Tag>}
-                    {activeModel.capabilities?.requires_checkpoint ? <Tag color="purple">需要 checkpoint</Tag> : null}
+                    使用模式：<Tag>{modeLabel(activeModel.default_mode)}</Tag>
+                    {activeModel.capabilities?.supports_finetune ? <Tag color="green">支持微调</Tag> : <Tag>仅零样本预测</Tag>}
+                    {activeModel.capabilities?.requires_checkpoint ? <Tag color="purple">需要模型权重</Tag> : null}
                   </div>
                   {visibleFields(activeModel.params, params)
                     .filter((spec) => (advanced ? true : spec.level !== 'advanced'))
@@ -521,9 +528,9 @@ export default function Training() {
             </div>
 
             <div className="tn-field">
-              <label className="tn-field-label">5 · Preflight Summary</label>
+              <label className="tn-field-label">4 · 运行前检查（Preflight Summary）</label>
               <Button size="small" onClick={runPreflight} loading={busy} disabled={!datasetId}>
-                Check Compatibility
+                检查兼容性
               </Button>
               {preflight ? (
                 <div className="tn-muted" style={{ marginTop: 6 }}>
@@ -552,10 +559,10 @@ export default function Training() {
             </div>
 
             <div className="tn-field">
-              <label className="tn-field-label">6 · Actions</label>
+              <label className="tn-field-label">5 · 操作（Actions）</label>
               <div className="tn-inline">
                 {isAllModels ? (
-                  <Button type="primary" onClick={runAllModels} loading={busy} disabled={!runnable || !datasetId}>Run All Models</Button>
+                  <Button type="primary" onClick={runAllModels} loading={busy} disabled={!runnable || !datasetId}>运行全部模型</Button>
                 ) : (
                   <Button
                     type="primary"
@@ -563,28 +570,28 @@ export default function Training() {
                     loading={busy}
                     disabled={!runnable || !datasetId}
                   >
-                    Run Training
+                    开始训练
                   </Button>
                 )}
-                <Button onClick={stop} danger>Stop Training / Stop Batch</Button>
+                <Button onClick={stop} danger>{isAllModels || batch ? ACTION_LABELS.stopBatch : ACTION_LABELS.stopTraining}</Button>
               </div>
               <div className="tn-inline" style={{ marginTop: 6 }}>
-                <Tooltip title="只有已完成的实验才能保存/评估；Experiment ID 在 Run 时即已创建">
+                    <Tooltip title="只有已完成或部分完成的实验才能保存与评估；实验 ID 在开始训练时创建">
                   <Button
                     size="small"
                     disabled={!experiment || !['Completed', 'Partial'].includes(experiment?.status)}
                     onClick={() => messageApi.success(`实验 ${experiment.experiment_id} 的工件已落盘（data/artifacts/experiments/${experiment.experiment_id}）`)}
                   >
-                    Save Model
+                    保存模型
                   </Button>
                 </Tooltip>
-                <Tooltip title="跳转到 Module 5 并对该实验使用 held-out Test 评估">
+                <Tooltip title="跳转到模块五，并使用留出测试集评估该实验">
                   <Button
                     size="small"
                     disabled={!experiment || !['Completed', 'Partial'].includes(experiment?.status)}
                     onClick={() => navigate(`/evaluation?dataset=${datasetId}&experiment=${experiment?.experiment_id}`)}
                   >
-                    Evaluate Model
+                    开始评估
                   </Button>
                 </Tooltip>
               </div>
@@ -599,43 +606,45 @@ export default function Training() {
             items={[
               {
                 key: 'monitor',
-                label: 'Training Monitor',
+                label: <BiLabel zh="训练监控" en="Training Monitor" />,
                 children: (
                   <div className="tn-stack">
                     {experiment && !isAllModels ? (
                       <>
-                        <Card size="small" title={`${experiment.algorithm_label} · ${experiment.mode}`}>
+                        <Card size="small" title={`${experiment.algorithm_label} · ${modeLabel(experiment.mode)}`}>
                           <div className="tn-inline">
                             <StatusTag status={experiment.status} error={experiment.error} />
                             <Tag>{experiment.experiment_id}</Tag>
-                            <span className="tn-muted">{experiment.scope === 'all' ? 'All Regions' : 'Single Region'} · {experiment.region_completed}/{experiment.region_total} 区域完成</span>
+                            <span className="tn-muted">{scopeLabel(experiment.scope)} · {experiment.region_completed}/{experiment.region_total} 区域完成</span>
                           </div>
                           <Progress percent={Math.round(experiment.progress?.percent ?? 0)} status={experiment.status === 'Failed' ? 'exception' : undefined} style={{ marginTop: 8 }} />
                           <div className="tn-muted">
-                            {experiment.progress?.stage ?? '等待 Worker'} · {experiment.progress?.message ?? ''}
+                            {experiment.progress?.stage ?? '等待任务进程'} · {experiment.progress?.message ?? ''}
                           </div>
                           {epochHistory ? (
                             <LineChart
                               height={220}
-                              x={epochHistory.epoch.map((e: number) => `epoch ${e}`)}
+                              x={epochHistory.epoch.map((e: number) => `第 ${e} 轮`)}
+                              xName="训练轮次"
+                              yName="损失值"
                               series={[
-                                { name: 'Train Loss (MSE)', data: epochHistory.train_loss, color: '#2467E8' },
-                                { name: 'Validation Loss', data: epochHistory.validation_loss, color: '#D98F00' },
+                                { name: '训练损失（MSE）', data: epochHistory.train_loss, color: '#2467E8' },
+                                { name: '验证损失', data: epochHistory.validation_loss, color: '#D98F00' },
                               ]}
                             />
                           ) : (
                             <div className="tn-muted" style={{ marginTop: 8 }}>
                               {experiment.history_type === 'zero_shot' || ['ARIMA', 'Prophet', 'Random Forest'].includes(experiment.algorithm_label)
-                                ? '该算法没有 epoch 概念：不显示训练曲线，仅显示真实状态、耗时与日志。'
-                                : '尚无 epoch 记录（Boosting 模型显示真实迭代指标）。'}
+                                ? '该算法没有训练轮次概念：不显示训练曲线，仅显示真实状态、耗时与日志。'
+                                : '尚无训练轮次记录（Boosting 模型显示真实迭代指标）。'}
                             </div>
                           )}
                           {experiment.metrics?.macro_validation?.rmse ? (
                             <div className="tn-muted" style={{ marginTop: 6 }}>
-                              验证集（真实预测）：MAE {Number(experiment.metrics.macro_validation.mae).toFixed(2)} · RMSE{' '}
+                              验证集（真实预测）：平均绝对误差 MAE {Number(experiment.metrics.macro_validation.mae).toFixed(2)} · 均方根误差 RMSE{' '}
                               {Number(experiment.metrics.macro_validation.rmse).toFixed(2)} · sMAPE{' '}
                               {Number(experiment.metrics.macro_validation.smape).toFixed(2)}% · R²{' '}
-                              {experiment.metrics.macro_validation.r2 === null ? 'N/A' : Number(experiment.metrics.macro_validation.r2).toFixed(4)}
+                              {experiment.metrics.macro_validation.r2 === null ? '不适用' : Number(experiment.metrics.macro_validation.r2).toFixed(4)}
                             </div>
                           ) : null}
                           {experiment.scope === 'all' ? (
@@ -646,10 +655,10 @@ export default function Training() {
                               pagination={{ pageSize: 6, size: 'small' }}
                               dataSource={experiment.region_models ?? []}
                               columns={[
-                                { title: 'Region', dataIndex: 'region_id' },
+                                { title: '区域', dataIndex: 'region_id' },
                                 { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                                 { title: '验证 RMSE', render: (_: unknown, row: any) => row.metrics?.rmse ? Number(row.metrics.rmse).toFixed(1) : '—' },
-                                { title: 'Epochs', render: (_: unknown, row: any) => row.history?.epochs_completed ?? '—' },
+                                { title: '训练轮数', render: (_: unknown, row: any) => row.history?.epochs_completed ?? '—' },
                               ]}
                             />
                           ) : null}
@@ -657,14 +666,14 @@ export default function Training() {
                       </>
                     ) : null}
                     {batch ? (
-                      <Card size="small" title={`All Models 批次 ${batch.batch_id}`}>
+                          <Card size="small" title={`全部模型批次 ${batch.batch_id}`}>
                         <div className="tn-inline">
                           <StatusTag status={batch.status} error={batch.error} />
                           <Tag>总任务 {batch.experiments?.length}</Tag>
-                          <Tag color="green">Completed {batch.task_summary?.completed ?? 0}</Tag>
-                          <Tag color="red">Failed {batch.task_summary?.failed ?? 0}</Tag>
-                          <Tag>Skipped {batch.task_summary?.skipped ?? 0}</Tag>
-                          <Tag color="orange">Partial {batch.task_summary?.partial ?? 0}</Tag>
+                          <Tag color="green">已完成 {batch.task_summary?.completed ?? 0}</Tag>
+                          <Tag color="red">已失败 {batch.task_summary?.failed ?? 0}</Tag>
+                          <Tag>已跳过 {batch.task_summary?.skipped ?? 0}</Tag>
+                          <Tag color="orange">部分完成 {batch.task_summary?.partial ?? 0}</Tag>
                         </div>
                         <Progress percent={currentProgress} style={{ marginTop: 8 }} />
                         <Table
@@ -674,18 +683,18 @@ export default function Training() {
                           pagination={false}
                           dataSource={batch.experiments ?? []}
                           columns={[
-                            { title: 'Model', dataIndex: 'algorithm_label', sorter: (a: any, b: any) => a.algorithm_label.localeCompare(b.algorithm_label) },
-                            { title: 'Mode', dataIndex: 'mode', width: 90 },
+                            { title: '模型', dataIndex: 'algorithm_label', sorter: (a: any, b: any) => a.algorithm_label.localeCompare(b.algorithm_label) },
+                            { title: '执行模式', dataIndex: 'mode', width: 100, render: (value: string) => modeLabel(value) },
                             {
-                              title: 'Progress',
+                              title: '进度',
                               width: 130,
                               render: (_: unknown, row: any) => (
                                 <Progress percent={Math.round(row.progress?.percent ?? 0)} size="small" />
                               ),
                             },
-                            { title: 'Regions', width: 90, render: (_: unknown, row: any) => `${row.region_completed}/${row.region_total}` },
-                            { title: 'Failed', dataIndex: 'region_failed', width: 70 },
-                            { title: 'Status', width: 110, render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
+                            { title: '区域', width: 90, render: (_: unknown, row: any) => `${row.region_completed}/${row.region_total}` },
+                            { title: '失败区域', dataIndex: 'region_failed', width: 80 },
+                            { title: '状态', width: 110, render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                             { title: '验证 RMSE', width: 110, render: (_: unknown, row: any) => row.metrics?.macro_validation?.rmse ? Number(row.metrics.macro_validation.rmse).toFixed(1) : '—' },
                             {
                               title: '',
@@ -713,8 +722,8 @@ export default function Training() {
                             pagination={{ pageSize: 6, size: 'small' }}
                             dataSource={batch.region_summary}
                             columns={[
-                              { title: 'Experiment', dataIndex: 'experiment_id', width: 190 },
-                              { title: 'Region', dataIndex: 'region_id' },
+                              { title: '实验 ID', dataIndex: 'experiment_id', width: 190 },
+                              { title: '区域', dataIndex: 'region_id' },
                               { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                               { title: '验证 RMSE', render: (_: unknown, row: any) => row.metrics?.rmse ? Number(row.metrics.rmse).toFixed(1) : '—' },
                             ]}
@@ -722,7 +731,7 @@ export default function Training() {
                         ) : null}
                       </Card>
                     ) : null}
-                    {!experiment && !batch ? <EmptyState text="选择算法并点击 Run 后，这里显示真实的训练状态、进度与日志。" /> : null}
+                    {!experiment && !batch ? <EmptyState text="选择算法并开始训练后，这里显示真实的训练状态、进度与日志。" /> : null}
                   </div>
                 ),
               },
@@ -737,17 +746,17 @@ export default function Training() {
             items={[
               {
                 key: 'overview',
-                label: 'Training Overview',
+                label: <BiLabel zh="训练概览" en="Training Overview" />,
                 children: (
                   <div className="tn-stack">
                     {experiment ? (
-                      <Card size="small" title="当前 Experiment">
+                      <Card size="small" title="当前实验（Experiment）">
                         <div className="tn-code">{experiment.experiment_id}</div>
                         <div className="tn-muted" style={{ marginTop: 6 }}>
-                          <div>Batch：{experiment.batch_id ?? '（单模型运行）'}</div>
-                          <div>Dataset：{experiment.dataset_id}</div>
-                          <div>算法 / 模式：{experiment.algorithm_label} · {experiment.mode}</div>
-                          <div>Scope：{experiment.scope === 'all' ? 'All Regions' : 'Single Region'} · 区域 {experiment.region_completed}/{experiment.region_total}</div>
+                          <div>批量任务：{experiment.batch_id ?? '（单模型运行）'}</div>
+                          <div>数据集：{experiment.dataset_id}</div>
+                          <div>算法 / 模式：{experiment.algorithm_label} · {modeLabel(experiment.mode)}</div>
+                          <div>预测范围：{scopeLabel(experiment.scope)} · 区域 {experiment.region_completed}/{experiment.region_total}</div>
                           <div>开始：{experiment.started_at ?? '—'} · 结束：{experiment.ended_at ?? '—'}</div>
                           <div>耗时：{experiment.metrics?.duration_seconds ?? '—'} 秒</div>
                         </div>
@@ -758,13 +767,13 @@ export default function Training() {
                       <EmptyState text="尚未运行实验。" />
                     )}
                     {batch ? (
-                      <Card size="small" title="当前 Batch">
+                      <Card size="small" title="当前批量任务（Batch）">
                         <div className="tn-code">{batch.batch_id}</div>
                         <div className="tn-muted" style={{ marginTop: 6 }}>
-                          <div>Dataset：{batch.dataset_id}</div>
-                          <div>Scope：{batch.scope === 'all' ? 'All Regions' : 'Single Region'} · 区域 {batch.region_count}</div>
+                          <div>数据集：{batch.dataset_id}</div>
+                          <div>预测范围：{scopeLabel(batch.scope)} · 区域 {batch.region_count}</div>
                           <div>计划任务：{batch.planned_tasks}（12 算法 × {batch.region_count} 区域）</div>
-                          <div>策略：顺序执行={String(batch.policy?.sequential)} · continue_on_error={String(batch.policy?.continue_on_error)} · 跳过不可用={String(batch.policy?.skip_unavailable_after_confirmation)}</div>
+                          <div>策略：顺序执行={batch.policy?.sequential ? '是' : '否'} · 出错后继续={batch.policy?.continue_on_error ? '是' : '否'} · 跳过不可用={batch.policy?.skip_unavailable_after_confirmation ? '是' : '否'}</div>
                         </div>
                       </Card>
                     ) : null}
@@ -773,7 +782,7 @@ export default function Training() {
               },
               {
                 key: 'logs',
-                label: 'Training Logs',
+                label: <BiLabel zh="训练日志" en="Training Logs" />,
                 children: (
                   <div className="tn-stack">
                     <div className="tn-inline">
@@ -799,18 +808,18 @@ export default function Training() {
               },
               {
                 key: 'history',
-                label: 'Experiment History',
+                label: <BiLabel zh="实验历史" en="Experiment History" />,
                 children: (
                   <div className="tn-stack">
                     <Table
                       size="small"
                       rowKey="batch_id"
-                      title={() => 'Batches'}
+                      title={() => '批量任务（Batches）'}
                       dataSource={batches}
                       pagination={{ pageSize: 4, size: 'small' }}
                       columns={[
-                        { title: 'Batch ID', dataIndex: 'batch_id', width: 180, render: (value: string) => <span className="tn-code">{value}</span> },
-                        { title: 'Dataset', dataIndex: 'dataset_id', width: 170, ellipsis: true },
+                        { title: '批量任务 ID', dataIndex: 'batch_id', width: 180, render: (value: string) => <span className="tn-code">{value}</span> },
+                        { title: '数据集', dataIndex: 'dataset_id', width: 170, ellipsis: true },
                         { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                         { title: '完成/失败/跳过', render: (_: unknown, row: any) => `${row.task_summary?.completed ?? 0}/${row.task_summary?.failed ?? 0}/${row.task_summary?.skipped ?? 0}` },
                         { title: '创建时间', dataIndex: 'created_at', width: 150 },
@@ -818,10 +827,10 @@ export default function Training() {
                           title: '操作',
                           render: (_: unknown, row: any) => (
                             <div className="tn-inline">
-                              <Button size="small" onClick={async () => { setBatch(await api.get<any>(ENDPOINTS.batchGet(row.batch_id))); setMonitorTab('batch') }}>Open</Button>
+                              <Button size="small" onClick={async () => { setBatch(await api.get<any>(ENDPOINTS.batchGet(row.batch_id))); setMonitorTab('batch') }}>{ACTION_LABELS.open}</Button>
                               <Button size="small" danger disabled={!['Running', 'Created', 'Stopping'].includes(row.status)} onClick={async () => {
                                 try { await api.post(ENDPOINTS.batchStop(row.batch_id)); messageApi.success('已请求停止批次'); loadHistory() } catch (err) { messageApi.error(String(err)) }
-                              }}>Stop</Button>
+                              }}>停止</Button>
                             </div>
                           ),
                         },
@@ -830,22 +839,22 @@ export default function Training() {
                     <Table
                       size="small"
                       rowKey="experiment_id"
-                      title={() => 'Experiments'}
+                      title={() => '实验（Experiments）'}
                       dataSource={experiments}
                       pagination={{ pageSize: 8, size: 'small' }}
                       columns={[
-                        { title: 'Experiment ID', dataIndex: 'experiment_id', width: 200, render: (value: string) => <span className="tn-code">{value}</span> },
-                        { title: 'Model', dataIndex: 'algorithm_label' },
-                        { title: 'Mode', dataIndex: 'mode', width: 90 },
-                        { title: 'Dataset', dataIndex: 'dataset_id', width: 165, ellipsis: true },
+                        { title: '实验 ID', dataIndex: 'experiment_id', width: 200, render: (value: string) => <span className="tn-code">{value}</span> },
+                        { title: '模型', dataIndex: 'algorithm_label' },
+                        { title: '执行模式', dataIndex: 'mode', width: 100, render: (value: string) => modeLabel(value) },
+                        { title: '数据集', dataIndex: 'dataset_id', width: 165, ellipsis: true },
                         { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                         { title: '创建时间', dataIndex: 'created_at', width: 150 },
                         {
                           title: '操作',
                           render: (_: unknown, row: any) => (
                             <div className="tn-inline">
-                              <Button size="small" onClick={async () => { setExperiment(await api.get<any>(ENDPOINTS.experimentGet(row.experiment_id))); setMonitorTab('monitor') }}>Open</Button>
-                              <Tooltip title="复制为草稿，不创建新的 Experiment ID">
+                              <Button size="small" onClick={async () => { setExperiment(await api.get<any>(ENDPOINTS.experimentGet(row.experiment_id))); setMonitorTab('monitor') }}>{ACTION_LABELS.open}</Button>
+                              <Tooltip title="复制为草稿，不创建新的实验 ID">
                                 <Button size="small" onClick={async () => {
                                   try {
                                     const draft = await api.post<any>(ENDPOINTS.experimentDuplicate(row.experiment_id))
@@ -857,21 +866,21 @@ export default function Training() {
                                       setAllParams((prev) => ({ ...prev, [draft.algorithm_key]: draft.params }))
                                     }
                                     setDatasetId(draft.dataset_id)
-                                    messageApi.success('已复制为草稿（尚未创建新的 Experiment ID，Run 时才创建）')
+                                    messageApi.success('已复制为草稿（尚未创建新的实验 ID，开始训练时才创建）')
                                   } catch (err) { messageApi.error(err instanceof ApiError ? err.message : String(err)) }
-                                }}>Duplicate</Button>
+                                }}>{ACTION_LABELS.duplicate}</Button>
                               </Tooltip>
                               <Button size="small" onClick={async () => {
                                 try { await api.post(ENDPOINTS.experimentArchive(row.experiment_id, row.status !== 'Archived')); loadHistory(); messageApi.success('已更新归档状态') } catch (err) { messageApi.error(err instanceof ApiError ? err.message : String(err)) }
-                              }}>{row.status === 'Archived' ? 'Unarchive' : 'Archive'}</Button>
+                              }}>{row.status === 'Archived' ? ACTION_LABELS.unarchive : ACTION_LABELS.archive}</Button>
                               <Popconfirm
                                 title="删除该实验？"
-                                description="被 Evaluation 引用的实验只能归档。"
+                                description="被评价引用的实验只能归档。"
                                 onConfirm={async () => {
                                   try { await api.del(ENDPOINTS.experimentDelete(row.experiment_id)); loadHistory(); messageApi.success('已删除') } catch (err) { messageApi.error(err instanceof ApiError ? err.message : String(err)) }
                                 }}
                               >
-                                <Button size="small" danger>Delete</Button>
+                                <Button size="small" danger>{ACTION_LABELS.deleteRecord}</Button>
                               </Popconfirm>
                             </div>
                           ),

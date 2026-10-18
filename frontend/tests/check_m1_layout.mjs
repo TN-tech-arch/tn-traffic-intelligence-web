@@ -47,7 +47,7 @@ check('2 左侧不再有 Advanced Settings 入口', !leftText.includes('Advanced
 check(
   '3 左侧顺序正确且已删除“最多对比区域数”',
   !leftText.includes('最多对比区域数') &&
-    ['数据源', '区域（可多选对比）', '时间分辨率', '聚合方式', '分析时间范围（Analysis Time Range）'].every(
+    ['数据源', '对比区域', '时间分辨率', '聚合方式', '分析时间范围（Analysis Time Range）'].every(
       (label, index, all) =>
         leftText.indexOf(label) >= 0 && (index === 0 || leftText.indexOf(label) > leftText.indexOf(all[index - 1])),
     ),
@@ -73,16 +73,16 @@ check(
 check('7 中央时序不再有橙色拟合线/图例', !centerText.includes('趋势拟合'), 'fitted line removed')
 check('8 中央统计包含范围与样本说明', /参与区域 \d+/.test(centerText) && centerText.includes('有效样本'), 'range note present')
 check('9 GIS 蓝色说明框已删除，改为 ⓘ', (await page.locator('.tn-hint').count()) === 0 && (await page.locator('[aria-label="时间截面 帮助信息"]').count()) === 1, 'no hint boxes, one help icon')
-check('10 地图图例、滑块、区域名称开关仍在', centerText.includes('No Data') && centerText.includes('Time Slice') && centerText.includes('在地图上显示区域名称'), 'map controls intact')
+check('10 地图图例、滑块、区域名称开关仍在', centerText.includes('无数据') && centerText.includes('Time Slice') && centerText.includes('在地图上显示区域名称'), 'map controls intact')
 
 // --------------------------------------------------------- right pane ----
 const infoPane = page.locator('.tn-three-pane > section').nth(2)
 const infoText = await infoPane.innerText()
 check(
-  '11 Analysis Target 位于日内小时画像上方',
+  '11 分析对象位于日内小时画像上方',
   infoText.indexOf('Temporal Analysis') >= 0 &&
-    infoText.indexOf('分析对象（Analysis Target）') > infoText.indexOf('Temporal Analysis') &&
-    infoText.indexOf('分析对象（Analysis Target）') < infoText.indexOf('日内小时画像'),
+    infoText.indexOf('分析对象') > infoText.indexOf('Temporal Analysis') &&
+    infoText.indexOf('分析对象') < infoText.indexOf('日内小时画像'),
   infoText.slice(0, 80).replace(/\n/g, ' '),
 )
 check('12 右侧不再有统计摘要/时序图', !infoText.includes('统计摘要') && !infoText.includes('流量时间序列'), 'no duplicated stats/series')
@@ -103,7 +103,7 @@ check(
 )
 await infoPane.locator('.ant-tabs-tab', { hasText: 'Spatial Analysis' }).click()
 await page.waitForTimeout(600)
-check('14b Spatial Analysis 不显示 Analysis Target', !(await infoPane.innerText()).includes('Analysis Target'), 'target only inside Temporal')
+check('14b Spatial Analysis 不显示分析对象', !(await infoPane.innerText()).includes('分析对象'), 'target only inside Temporal')
 await infoPane.locator('.ant-tabs-tab', { hasText: 'Temporal Analysis' }).click()
 await page.waitForTimeout(800)
 
@@ -127,17 +127,17 @@ await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filte
 await page.waitForTimeout(5000)
 const statsAfter = (await centerPane.locator('table').first().innerText()).replace(/\s+/g, ' ')
 check(
-  '17 切换 Analysis Target 不改变中央统计',
+  '17 切换分析对象不改变中央统计',
   statsBefore === statsAfter && /BRERA/.test(statsAfter),
   statsAfter.slice(0, 80),
 )
 const targetValue = await page.locator('.tn-analysis-target .ant-select-selection-item').first().innerText()
-check('18 Analysis Target 已切到 BRERA', targetValue.includes('BRERA'), targetValue)
+check('18 分析对象已切到 BRERA', targetValue.includes('BRERA'), targetValue)
 
 const hourlyAfter = await page.locator('section[aria-label="Hourly Profile"] .tn-insight-card').first().innerText()
 const peakLine = (text) => text.split('\n').find((line) => line.includes('主要高峰')) ?? ''
 check(
-  '19 右侧 Insights 随 Analysis Target 重新计算',
+  '19 右侧 Insights 随分析对象重新计算',
   peakLine(hourlyBefore) !== peakLine(hourlyAfter) && peakLine(hourlyAfter).length > 0,
   `${peakLine(hourlyBefore).slice(0, 60)} → ${peakLine(hourlyAfter).slice(0, 60)}`,
 )

@@ -3,15 +3,7 @@ import { Badge, Button, Popover, Tooltip } from 'antd'
 import { QuestionCircleOutlined, SettingOutlined, ApiOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { ENDPOINTS, api } from '../api/client'
-
-const NAV = [
-  { key: '/', label: 'Home', sub: '概览', icon: '⌂' },
-  { key: '/exploration', label: 'Exploration', sub: 'M1 探索分析', icon: '◔' },
-  { key: '/clustering', label: 'Clustering', sub: 'M2 功能区聚类', icon: '◍' },
-  { key: '/dataset', label: 'Dataset', sub: 'M3 数据集构建', icon: '▤' },
-  { key: '/training', label: 'Training', sub: 'M4 模型训练', icon: '◈' },
-  { key: '/evaluation', label: 'Evaluation', sub: 'M5 预测评价', icon: '◎' },
-]
+import { NAV_ITEMS } from '../i18n/terms'
 
 interface Health {
   status: string
@@ -67,7 +59,7 @@ export default function BrandHeader() {
             }
           >
             <Button size="small" ghost icon={<ApiOutlined />}>
-              Worker
+              任务进程
             </Button>
           </Tooltip>
           <Popover
@@ -77,7 +69,7 @@ export default function BrandHeader() {
               <div style={{ maxWidth: 320, fontSize: 12, lineHeight: 1.6 }}>
                 <p style={{ margin: 0 }}>
                   本平台使用三组真实区域流量数据（Milano 88 区 / Trentino 223 区 / ZTE 148 个有时序区域），
-                  提供 12 种真实预测算法与 All Models 批量执行。
+                  提供 12 种真实预测算法与“全部模型（All Models）”批量执行。
                 </p>
                 <p style={{ margin: '6px 0 0' }}>
                   所有统计、训练与预测结果均由真实数据计算得出；单位未证实的来源不做量纲推断。
@@ -98,7 +90,7 @@ export default function BrandHeader() {
         </div>
       </div>
       <nav className="tn-nav" aria-label="模块导航">
-        {NAV.map((item) => {
+        {NAV_ITEMS.map((item) => {
           const active = item.key === '/' ? location.pathname === '/' : location.pathname.startsWith(item.key)
           return (
             <button

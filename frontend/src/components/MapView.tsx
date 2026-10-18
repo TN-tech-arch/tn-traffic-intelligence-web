@@ -109,7 +109,7 @@ export default function MapView({
           const entry = valuesRef.current[regionId]
           const text = tooltipRef.current
             ? tooltipRef.current(entry, regionId)
-            : `${regionId}: ${entry?.value ?? 'No Data'}`
+            : `${regionId}: ${entry?.value ?? '无数据'}`
           featureLayer.bindTooltip(text, { sticky: true }).openTooltip()
         })
         if (showLabels) {

@@ -84,7 +84,7 @@ check(
 )
 check(
   '6 三条曲线和 Z=0 说明可见',
-  text.includes('Milano') && text.includes('Trentino') && text.includes('ZTE 4G Downlink') && text.includes('Z=0'),
+  text.includes('Milano') && text.includes('Trentino') && text.includes('ZTE 4G 下行流量') && text.includes('Z=0'),
   'legend and zero reference',
 )
 const chartBox = await chart.first().boundingBox()
@@ -105,7 +105,7 @@ check(
   '6b Tooltip 显示小时和三个来源的真实 Z-score',
   chartTooltip.includes('Milano') &&
     chartTooltip.includes('Trentino') &&
-    chartTooltip.includes('ZTE 4G Downlink') &&
+    chartTooltip.includes('ZTE 4G 下行流量') &&
     /-?\d+\.\d{3}/.test(chartTooltip),
   chartTooltip.replace(/\s+/g, ' ').slice(0, 90),
 )
@@ -123,6 +123,7 @@ check(
   insightText.includes('Milano–Trentino') &&
     insightText.includes('r=0.987') &&
     insightText.includes('不代表同步观测') &&
+    insightText.includes('ZTE 4G 下行流量') &&
     !text.includes('三个来源分别占据大卡片'),
   'dynamic r and limits',
 )

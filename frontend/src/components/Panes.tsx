@@ -14,13 +14,13 @@ export function ThreePane({
 }) {
   return (
     <div className={`tn-three-pane${variant === 'm1' ? ' tn-three-pane-m1' : ''}`}>
-      <section className="tn-pane" aria-label="Configuration">
+      <section className="tn-pane" aria-label="配置">
         {config}
       </section>
-      <section className="tn-pane" aria-label="Visualization">
+      <section className="tn-pane" aria-label="可视化">
         {visual}
       </section>
-      <section className="tn-pane tn-pane-info" aria-label="Information">
+      <section className="tn-pane tn-pane-info" aria-label="分析信息">
         {info}
       </section>
     </div>
@@ -38,12 +38,14 @@ export function PaneHead({ title, extra }: { title: string; extra?: ReactNode })
 
 export function ModuleHeader({
   module,
-  title,
+  titleZh,
+  titleEn,
   description,
   datasetInfo,
 }: {
   module: string
-  title: string
+  titleZh: string
+  titleEn: string
   description: string
   datasetInfo?: ReactNode
 }) {
@@ -51,8 +53,9 @@ export function ModuleHeader({
     <div className="tn-module-head">
       <div>
         <div className="tn-module-title">
-          {module} / {title}
+          {module}｜{titleZh}
         </div>
+        <div className="tn-module-title-en">{titleEn}</div>
         <div className="tn-module-desc">{description}</div>
       </div>
       <div className="tn-muted">{datasetInfo}</div>

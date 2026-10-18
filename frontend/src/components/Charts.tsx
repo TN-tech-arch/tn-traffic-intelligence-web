@@ -5,6 +5,7 @@ export function LineChart({
   series,
   x,
   height = 260,
+  xName = '时间',
   yName,
   loading,
   empty,
@@ -12,6 +13,7 @@ export function LineChart({
   series: Array<{ name: string; data: Array<number | null>; color?: string; type?: 'line' | 'bar' }>
   x: string[]
   height?: number
+  xName?: string
   yName?: string
   loading?: boolean
   empty?: boolean
@@ -22,8 +24,14 @@ export function LineChart({
     tooltip: { trigger: 'axis' },
     legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 11 } },
     grid: { left: 56, right: 16, top: 18, bottom: 46 },
-    xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, hideOverlap: true } },
-    yAxis: { type: 'value', name: yName, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    xAxis: {
+      type: 'category',
+      data: x,
+      name: xName,
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: { fontSize: 10, hideOverlap: true },
+    },
+    yAxis: { type: 'value', name: yName ?? '数值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
     dataZoom: [
       { type: 'inside', throttle: 60 },
       { type: 'slider', height: 16, bottom: 24 },
@@ -47,22 +55,26 @@ export function BarChart({
   height = 240,
   color = '#2467E8',
   horizontal = false,
+  xName,
+  yName,
 }: {
   categories: string[]
   values: Array<number | null>
   height?: number
   color?: string
   horizontal?: boolean
+  xName?: string
+  yName?: string
 }) {
   const option = {
     tooltip: { trigger: 'axis' },
     grid: { left: horizontal ? 120 : 56, right: 16, top: 16, bottom: 30 },
     xAxis: horizontal
-      ? { type: 'value', axisLabel: { fontSize: 10 } }
-      : { type: 'category', data: categories, axisLabel: { fontSize: 10, rotate: 30 } },
+      ? { type: 'value', name: xName, axisLabel: { fontSize: 10 } }
+      : { type: 'category', data: categories, name: xName, axisLabel: { fontSize: 10, rotate: 30 } },
     yAxis: horizontal
-      ? { type: 'category', data: categories, axisLabel: { fontSize: 10 } }
-      : { type: 'value', axisLabel: { fontSize: 10 } },
+      ? { type: 'category', data: categories, name: yName, axisLabel: { fontSize: 10 } }
+      : { type: 'value', name: yName, axisLabel: { fontSize: 10 } },
     series: [{ type: 'bar', data: values, itemStyle: { color }, barMaxWidth: 22 }],
   }
   return <ReactECharts option={option} style={{ height }} notMerge />
@@ -85,10 +97,10 @@ export function ScatterChart({
     tooltip: { trigger: 'item' },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
     grid: { left: 56, right: 16, top: 18, bottom: 46 },
-    xAxis: { type: 'value', name: xName, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'value', name: yName, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    xAxis: { type: 'value', name: xName ?? '特征值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: yName ?? '特征值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
     series: groups.map((group) => ({
-      name: group < 0 ? '噪声 (-1)' : `簇 ${group}`,
+      name: group < 0 ? '噪声（-1）' : `簇 ${group}`,
       type: 'scatter',
       symbolSize: 9,
       data: points.filter((p) => p.group === group).map((p) => [p.x, p.y]),
@@ -161,6 +173,8 @@ export function HorizontalRankChart({
     },
     xAxis: {
       type: 'value',
+      name: '流量值',
+      nameTextStyle: { fontSize: 10 },
       axisLabel: { fontSize: 10, formatter: (value: number) => compactNumber(value) },
       splitLine: { lineStyle: { color: '#eef3fa' } },
     },
@@ -168,6 +182,8 @@ export function HorizontalRankChart({
       type: 'category',
       inverse: true,
       data: items.map((item) => item.display_name || item.region_id),
+      name: '区域',
+      nameTextStyle: { fontSize: 10 },
       axisLabel: { fontSize: 10, width: 118, overflow: 'truncate' },
       axisTick: { show: false },
     },
@@ -231,11 +247,13 @@ export function HistogramChart({
     xAxis: {
       type: 'category',
       data: labels,
+      name: '流量值区间',
+      nameTextStyle: { fontSize: 10 },
       axisLabel: { fontSize: 9, rotate: 32, hideOverlap: true, interval: 0 },
     },
     yAxis: {
       type: 'value',
-      name: '区域数',
+      name: '区域数量',
       nameTextStyle: { fontSize: 10 },
       minInterval: 1,
       axisLabel: { fontSize: 10 },
@@ -278,7 +296,7 @@ export function MultiCityZChart({
           const value = source.hourly_shape_z?.[index]
           const marker = params[sourceIndex]?.marker ?? ''
           return `<div>${marker}${source.display_name}: ${
-            value === null || value === undefined ? '<b>No Data</b>' : `<b>${value.toFixed(3)}</b>`
+            value === null || value === undefined ? '<b>无数据</b>' : `<b>${value.toFixed(3)}</b>`
           }</div>`
         })
         return (
@@ -355,9 +373,11 @@ export function MultiCityZChart({
 export function HourlyChart({
   regions,
   height = 240,
+  yName = '流量值',
 }: {
   regions: Array<{ region_id: string; hours: Array<{ hour: number; mean: number | null; samples: number }> }>
   height?: number
+  yName?: string
 }) {
   if (!regions.length) return <Empty description="暂无真实数据" />
   const x = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`)
@@ -372,7 +392,7 @@ export function HourlyChart({
           const mean = point?.mean
           const samples = point?.samples ?? 0
           return `<div>${entry.marker}${entry.seriesName}: ${
-            mean === null || mean === undefined ? '<b>No Data</b>' : `<b>${mean.toFixed(2)}</b>`
+            mean === null || mean === undefined ? '<b>无数据</b>' : `<b>${mean.toFixed(2)}</b>`
           } <span style="color:#8a99b5">（有效样本 ${samples}）</span></div>`
         })
         return `<div style="font-size:12px"><b>${x[params[0]?.dataIndex ?? 0]} 时段</b>${rows.join('')}</div>`
@@ -380,8 +400,8 @@ export function HourlyChart({
     },
     legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 11 } },
     grid: { left: 56, right: 16, top: 18, bottom: 42 },
-    xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: yName, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    xAxis: { type: 'category', data: x, name: '小时', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
     series: regions.map((region, index) => ({
       name: region.region_id,
       type: 'line',
@@ -403,12 +423,14 @@ export function WeekdayChart({
   weekdayLabel = '工作日',
   weekendLabel = '周末',
   height = 240,
+  yName = '流量值',
 }: {
   weekday: Array<{ hour: number; mean: number | null; samples: number }>
   weekend: Array<{ hour: number; mean: number | null; samples: number }>
   weekdayLabel?: string
   weekendLabel?: string
   height?: number
+  yName?: string
 }) {
   const x = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`)
   const option = {
@@ -420,15 +442,15 @@ export function WeekdayChart({
             const point = entry.seriesIndex === 0 ? weekday[entry.dataIndex] : weekend[entry.dataIndex]
             const mean = point?.mean
             return `<div>${entry.marker}${entry.seriesName}: ${
-              mean === null || mean === undefined ? '<b>No Data</b>' : `<b>${mean.toFixed(2)}</b>`
+              mean === null || mean === undefined ? '<b>无数据</b>' : `<b>${mean.toFixed(2)}</b>`
             } <span style="color:#8a99b5">（有效样本 ${point?.samples ?? 0}）</span></div>`
           })
           .join('')}</div>`,
     },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
     grid: { left: 56, right: 16, top: 18, bottom: 42 },
-    xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+    xAxis: { type: 'category', data: x, name: '小时', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: yName, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
     series: [
       {
         name: weekdayLabel,
@@ -482,7 +504,7 @@ export function AcfChart({
         const duration =
           minutes < 90 ? `${minutes} 分钟` : minutes < 2160 ? `${(minutes / 60).toFixed(1)} 小时` : `${(minutes / 1440).toFixed(1)} 天`
         return `<div style="font-size:12px"><b>Lag ${lags[index]}</b>（约 ${duration}）<br/>ACF = ${
-          value === null || value === undefined ? 'N/A' : value.toFixed(4)
+          value === null || value === undefined ? '无数据' : value.toFixed(4)
         }<br/><span style="color:#8a99b5">±95% 白噪声带：${ci[index]?.toFixed(3) ?? '—'}</span></div>`
       },
     },
@@ -492,10 +514,10 @@ export function AcfChart({
       type: 'category',
       data: lags.map(String),
       axisLabel: { fontSize: 10, hideOverlap: true },
-      name: 'Lag（步）',
+      name: '滞后步数（Lag）',
       nameTextStyle: { fontSize: 10 },
     },
-    yAxis: { type: 'value', min: -1, max: 1, axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: '自相关系数（ACF）', nameTextStyle: { fontSize: 10 }, min: -1, max: 1, axisLabel: { fontSize: 10 } },
     series: [
       {
         name: 'ACF',
