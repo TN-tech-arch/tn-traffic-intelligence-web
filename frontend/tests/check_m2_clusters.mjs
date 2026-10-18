@@ -25,6 +25,11 @@ page.on('console', (message) => message.type() === 'error' && consoleErrors.push
 
 await page.goto(`${BASE}/clustering`, { waitUntil: 'networkidle' })
 await page.waitForTimeout(3500)
+await page
+  .locator('.tn-range-summary')
+  .filter({ hasText: '数据可用范围' })
+  .waitFor({ state: 'visible', timeout: 30000 })
+  .catch(() => undefined)
 
 const grid = page.locator('.tn-three-pane').first()
 const columns = await grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns)
@@ -100,6 +105,69 @@ check(
     (await configPane.innerText()).includes('Ward 层次聚类 + 欧氏距离'),
   parameterLabels.join('|'),
 )
+
+const selectAlgorithm = async (label) => {
+  await page.locator('[data-field="m2.algorithm"] .ant-select-selector').click()
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .filter({ hasText: label })
+    .first()
+    .click()
+  await page.waitForTimeout(250)
+}
+const inputValue = (selector) =>
+  page.locator(selector).evaluate((element) => element.value)
+
+await page.locator('#field-m2_hierarchical_n_clusters').fill('5')
+const hierarchicalK = await inputValue('#field-m2_hierarchical_n_clusters')
+await page.locator('[data-field="m2.linkage"] .ant-select-selector').click()
+await page
+  .locator('.ant-select-dropdown:visible .ant-select-item-option')
+  .filter({ hasText: 'complete' })
+  .first()
+  .click()
+const hierarchicalLinkage = await configPane.innerText()
+check(
+  '2a Hierarchical 的 K 与连接方式可编辑',
+  hierarchicalK === '5' && hierarchicalLinkage.includes('完全连接（complete）'),
+  `K=${hierarchicalK}`,
+)
+await page.locator('#field-m2_hierarchical_n_clusters').fill('4')
+await page.locator('[data-field="m2.linkage"] .ant-select-selector').click()
+await page
+  .locator('.ant-select-dropdown:visible .ant-select-item-option')
+  .filter({ hasText: 'ward' })
+  .first()
+  .click()
+
+await selectAlgorithm('DBSCAN')
+await page.locator('#field-m2_eps').fill('1.5')
+await page.locator('#field-m2_min_samples').fill('4')
+check(
+  '2b DBSCAN 的 eps 与最小样本数可编辑',
+  (await inputValue('#field-m2_eps')) === '1.5' &&
+    (await inputValue('#field-m2_min_samples')) === '4',
+  'eps/min_samples',
+)
+
+await selectAlgorithm('K-Means')
+await page.locator('#field-m2_n_clusters').fill('5')
+check(
+  '2c K-Means 的簇数量可编辑',
+  (await inputValue('#field-m2_n_clusters')) === '5',
+  `K=${await inputValue('#field-m2_n_clusters')}`,
+)
+
+await selectAlgorithm('高斯混合（GMM）')
+await page.locator('#field-m2_gmm_n_components').fill('5')
+check(
+  '2d GMM 的高斯分量数可编辑',
+  (await inputValue('#field-m2_gmm_n_components')) === '5',
+  `components=${await inputValue('#field-m2_gmm_n_components')}`,
+)
+
+await selectAlgorithm('层次聚类（Hierarchical）')
+await page.locator('#field-m2_hierarchical_n_clusters').fill('4')
 
 const tabs = (await infoPane.locator('.ant-tabs-nav').first().locator('.ant-tabs-tab').allInnerTexts()).map((text) => text.trim())
 check(

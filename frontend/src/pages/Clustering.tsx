@@ -81,6 +81,7 @@ export default function Clustering() {
   const [clusterFilter, setClusterFilter] = useState('all')
   const [tab, setTab] = useState('overview')
   const [busy, setBusy] = useState(false)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
   const skipSourceDateReset = useRef(false)
   const pendingHistoryResultKey = useRef(false)
@@ -275,6 +276,7 @@ export default function Clustering() {
       skipSourceDateReset.current = String(state.params?.source_key ?? '') !== String(config.source_key ?? '')
       setResult({ ...state.result, cluster_run_id: runId, params: state.params, metrics: state.metrics })
       pendingHistoryResultKey.current = true
+      setDrafts({})
       setConfig((prev) => ({ ...prev, ...nextConfig }))
       messageApi.success(`已载入历史聚类 ${runId}`)
     } catch (err) {
@@ -466,7 +468,12 @@ export default function Clustering() {
       value={config[spec.key]}
       issues={fieldIssues(spec.key)}
       path={`m2.${spec.key}`}
-      onChange={(key, value) => setConfig((prev) => ({ ...prev, [key]: value }))}
+      draft={drafts[spec.key]}
+      onDraftChange={(key, text) => setDrafts((prev) => ({ ...prev, [key]: text }))}
+      onChange={(key, value) => {
+        setConfig((prev) => ({ ...prev, [key]: value }))
+        if (key === 'algorithm') setDrafts({})
+      }}
       disabledReason={fieldDisabledReason(spec, config)}
       compact
     />
@@ -519,6 +526,7 @@ export default function Clustering() {
               extra={
                 <Button size="small" onClick={() => {
                   setConfig((prev) => ({ ...prev, algorithm: 'kmeans', n_clusters: 4, features: DEFAULT_FEATURES, standardize: true, eps: 1.2, min_samples: 3, gmm_n_components: 4, linkage: 'ward', metric: 'euclidean' }))
+                  setDrafts({})
                   setResult(null)
                   setResultKey(null)
                 }}>
