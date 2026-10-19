@@ -99,16 +99,21 @@ if (-not $dataset_id -or $built.status -ne "Built") {
     throw "installed dataset build failed"
 }
 
-Write-Host "[test] deep verification: Module 4 ARIMA experiment"
+Write-Host "[test] deep verification: Module 4 Random Forest experiment"
 $experimentBody = @{
     dataset_id = $dataset_id
-    algorithm_key = "arima"
-    params = @{}
+    algorithm_key = "random_forest"
+    params = @{
+        n_estimators = 30
+        max_depth = 6
+        n_jobs = 2
+        random_state = 42
+    }
 } | ConvertTo-Json -Depth 6
 $run = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/experiments/run" `
     -ContentType "application/json" -Body $experimentBody -TimeoutSec 60
 $experiment = $null
-for ($i = 0; $i -lt 120; $i++) {
+for ($i = 0; $i -lt 90; $i++) {
     Start-Sleep -Seconds 2
     $experiment = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/experiments/$($run.experiment_id)" -TimeoutSec 20
     if ($experiment.status -in @("Completed", "Partial", "Failed")) { break }
