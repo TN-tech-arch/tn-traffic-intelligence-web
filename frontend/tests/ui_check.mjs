@@ -279,12 +279,14 @@ try {
     .first()
     .boundingBox()
   const slidingBox = await page.locator('[data-testid="sliding-window-preview"]').boundingBox()
+  const qualityBox = await page.locator('[data-testid="data-quality-summary"]').boundingBox()
   record(
-    'T08e 中央三部分视觉顺序为 Dataset Overview → Chronological → Sliding',
-    Boolean(overviewBox && chronologicalBox && slidingBox) &&
+    'T08e 中央四部分视觉顺序为 Overview → Chronological → Sliding → Data Quality',
+    Boolean(overviewBox && chronologicalBox && slidingBox && qualityBox) &&
       overviewBox.y < chronologicalBox.y &&
-      chronologicalBox.y < slidingBox.y,
-    `${overviewBox?.y ?? 0} < ${chronologicalBox?.y ?? 0} < ${slidingBox?.y ?? 0}`,
+      chronologicalBox.y < slidingBox.y &&
+      slidingBox.y < qualityBox.y,
+    `${overviewBox?.y ?? 0} < ${chronologicalBox?.y ?? 0} < ${slidingBox?.y ?? 0} < ${qualityBox?.y ?? 0}`,
   )
   const windowPreview = page.locator('[data-testid="sliding-window-preview"]')
   await page

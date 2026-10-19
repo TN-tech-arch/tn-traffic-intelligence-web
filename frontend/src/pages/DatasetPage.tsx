@@ -423,32 +423,6 @@ export default function DatasetPage() {
                     </div>
                   </div>
                 ) : null}
-                <div className="tn-section-title">数据质量摘要（Data Quality）</div>
-                {preview ? (
-                  <div className="tn-muted">
-                    <div>时间点数：{preview.time_points}（{preview.time_start} → {preview.time_end}）</div>
-                    <div>区域数：{preview.region_count} · 原始缺失点：{preview.missing?.missing_points_before}</div>
-                    <div>因果插值点：{preview.missing?.imputed_points}（{missingModeLabel(preview.missing?.mode)}）</div>
-                    <div>真实零值保留：{preview.missing?.zero_points_preserved}</div>
-                    <div>泄漏防护：目标完全落在单一 split；插值不引用预测起点之后的值。</div>
-                    {preview.empty_splits?.length ? (
-                      <div style={{ color: '#d4380d' }}>空集合：{preview.empty_splits.join(', ')}</div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <EmptyState text="实时预览后显示当前草稿的完整质量摘要。" />
-                )}
-                {selectedDataset?.quality ? (
-                  <Collapse
-                    size="small"
-                    ghost
-                    items={[{
-                      key: 'quality',
-                      label: '查看已保存数据集的完整质量报告',
-                      children: <pre className="tn-code">{JSON.stringify(selectedDataset.quality, null, 2)}</pre>,
-                    }]}
-                  />
-                ) : null}
               </div>
             </Card>
 
@@ -578,6 +552,36 @@ export default function DatasetPage() {
               ) : (
                 <EmptyState text="预览后显示训练集、验证集和测试集的真实日期边界与窗口数。" />
               )}
+            </Card>
+
+            <Card size="small" style={{ order: 4 }} title="4 · 数据质量摘要（Data Quality Summary）">
+              <div className="tn-stack" data-testid="data-quality-summary">
+                {preview ? (
+                  <div className="tn-muted">
+                    <div>时间点数：{preview.time_points}（{preview.time_start} → {preview.time_end}）</div>
+                    <div>区域数：{preview.region_count} · 原始缺失点：{preview.missing?.missing_points_before}</div>
+                    <div>因果插值点：{preview.missing?.imputed_points}（{missingModeLabel(preview.missing?.mode)}）</div>
+                    <div>真实零值保留：{preview.missing?.zero_points_preserved}</div>
+                    <div>泄漏防护：目标完全落在单一 split；插值不引用预测起点之后的值。</div>
+                    {preview.empty_splits?.length ? (
+                      <div style={{ color: '#d4380d' }}>空集合：{preview.empty_splits.join(', ')}</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <EmptyState text="实时预览后显示当前草稿的完整质量摘要。" />
+                )}
+                {selectedDataset?.quality ? (
+                  <Collapse
+                    size="small"
+                    ghost
+                    items={[{
+                      key: 'quality',
+                      label: '查看已保存数据集的完整质量报告',
+                      children: <pre className="tn-code">{JSON.stringify(selectedDataset.quality, null, 2)}</pre>,
+                    }]}
+                  />
+                ) : null}
+              </div>
             </Card>
 
           </div>
