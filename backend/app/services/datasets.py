@@ -197,6 +197,68 @@ def _compute(payload: dict[str, Any]) -> dict[str, Any]:
         "scalers": scaler_specs,
         "empty_splits": empty_splits,
         "frequency_minutes": frequency_minutes,
+        "L": int(L),
+        "H": int(H),
+        "S": int(S),
+    }
+
+
+def _preview_sample_region(computed: dict[str, Any], requested: str | None) -> str:
+    first_region = computed["region_ids"][0]
+    sample_region = requested or first_region
+    if sample_region not in computed["region_ids"]:
+        sample_region = first_region
+    return str(sample_region)
+
+
+def _preview_split_stats(computed: dict[str, Any], region_index: int) -> dict[str, dict[str, int]]:
+    L, H = computed["L"], computed["H"]
+    stats: dict[str, dict[str, int]] = {}
+    for name in win.SPLIT_NAMES:
+        entry = computed["ranges"][name][region_index]
+        candidates = (
+            0
+            if entry["high"] < entry["low"]
+            else (entry["high"] - entry["low"]) // entry["step"] + 1
+        )
+        valid = int(_valid_starts_from(entry, L, H).size)
+        stats[name] = {
+            "candidate_windows": int(candidates),
+            "valid_windows": valid,
+            "excluded_windows": int(candidates - valid),
+        }
+    return stats
+
+
+def _window_payload(
+    data: Any,
+    pre: Any,
+    region_index: int,
+    start: int,
+    L: int,
+    H: int,
+) -> dict[str, Any]:
+    x_start, x_end = int(start), int(start + L - 1)
+    y_start, y_end = int(start + L), int(start + L + H - 1)
+    column = pre.filled[:, region_index]
+    observed = pre.observed[:, region_index]
+    return {
+        "origin_index": int(start),
+        "input_start_at": _ts(data.timestamps, x_start),
+        "input_end_at": _ts(data.timestamps, x_end),
+        "target_start_at": _ts(data.timestamps, y_start),
+        "target_end_at": _ts(data.timestamps, y_end),
+        "X": [float(column[i]) for i in range(x_start, x_end + 1)],
+        "Y": [float(column[i]) for i in range(y_start, y_end + 1)],
+        "X_observed": [bool(observed[i]) for i in range(x_start, x_end + 1)],
+        "Y_observed": [bool(observed[i]) for i in range(y_start, y_end + 1)],
+        "X_timestamps": [_ts(data.timestamps, i) for i in range(x_start, x_end + 1)],
+        "Y_timestamps": [_ts(data.timestamps, i) for i in range(y_start, y_end + 1)],
+        "imputed_input_positions": [
+            i - x_start
+            for i in range(x_start, x_end + 1)
+            if pre.imputed_end[i, region_index] >= 0
+        ],
     }
 
 
@@ -206,44 +268,24 @@ def preview_dataset(payload: dict[str, Any]) -> dict[str, Any]:
     data = computed["data"]
     pre = computed["pre"]
     boundaries = computed["boundaries"]
-    L, H = payload["input_length"], payload["output_length"]
-    first_region = computed["region_ids"][0]
-    ridx = data.region_ids.index(first_region)
-
-    sample_region = payload.get("preview_region_id") or first_region
-    if sample_region not in computed["region_ids"]:
-        sample_region = first_region
+    L, H, S = payload["input_length"], payload["output_length"], payload["step"]
+    sample_region = _preview_sample_region(computed, payload.get("preview_region_id"))
     sridx = data.region_ids.index(sample_region)
     starts_all = {
         name: _valid_starts_from(computed["ranges"][name][sridx], L, H)
         for name in win.SPLIT_NAMES
     }
-    column = pre.filled[:, sridx]
-    observed = pre.observed[:, sridx]
-
-    def window_sample(starts: np.ndarray, limit: int = 1) -> list[dict[str, Any]]:
-        out = []
-        for start in starts[:limit]:
-            x_start, x_end = int(start), int(start + L - 1)
-            y_start, y_end = int(start + L), int(start + L + H - 1)
-            out.append(
-                {
-                    "origin_index": int(start),
-                    "input_start_at": _ts(data.timestamps, x_start),
-                    "input_end_at": _ts(data.timestamps, x_end),
-                    "target_start_at": _ts(data.timestamps, y_start),
-                    "target_end_at": _ts(data.timestamps, y_end),
-                    "X": [None if not observed[i] else float(column[i]) for i in range(x_start, x_end + 1)],
-                    "Y": [None if not observed[i] else float(column[i]) for i in range(y_start, y_end + 1)],
-                    "imputed_input_positions": [
-                        i for i in range(x_start, x_end + 1) if pre.imputed_end[i, sridx] >= 0
-                    ],
-                }
-            )
-        return out
-
-    sample = window_sample(starts_all["test"], 2) or window_sample(starts_all["validation"], 2) or \
-        window_sample(starts_all["train"], 2)
+    split_stats = _preview_split_stats(computed, sridx)
+    default_split = next(
+        (name for name in ("test", "validation", "train") if starts_all[name].size),
+        "train",
+    )
+    selected_starts = starts_all[default_split]
+    selected = (
+        [_window_payload(data, pre, sridx, int(selected_starts[0]), L, H)]
+        if selected_starts.size
+        else []
+    )
 
     return {
         "source": {
@@ -263,7 +305,7 @@ def preview_dataset(payload: dict[str, Any]) -> dict[str, Any]:
         "time_end": _ts(data.timestamps, int(data.timestamps.size) - 1),
         "L": L,
         "H": H,
-        "S": payload["step"],
+        "S": S,
         "split_boundaries": [
             {
                 "split": name,
@@ -288,7 +330,12 @@ def preview_dataset(payload: dict[str, Any]) -> dict[str, Any]:
         "scaling": payload["scaling"],
         "scaler_sample": computed["scalers"].get(sample_region),
         "preview_region_id": sample_region,
-        "preview_windows": sample,
+        "preview_split": default_split,
+        "preview_window_index": 0,
+        "preview_window_total": int(selected_starts.size),
+        "preview_window_stats": split_stats,
+        "preview_overlap_points": max(0, int(L - S)),
+        "preview_windows": selected,
         "series_preview": {
             "region_id": sample_region,
             "timestamps": [_ts(data.timestamps, i) for i in range(0, int(data.timestamps.size), max(1, data.timestamps.size // 240))],
@@ -296,6 +343,48 @@ def preview_dataset(payload: dict[str, Any]) -> dict[str, Any]:
                        for v in pre.filled[:: max(1, data.timestamps.size // 240), sridx]],
         },
         "window_counts_by_split": {k: int(v) for k, v in computed["counts"].items()},
+    }
+
+
+def preview_window(
+    payload: dict[str, Any],
+    *,
+    split: str,
+    window_index: int,
+) -> dict[str, Any]:
+    """Return one real valid window without persisting a dataset."""
+    if split not in win.SPLIT_NAMES:
+        raise Conflict(f"未知数据集划分：{split}", code="SPLIT_INVALID")
+    computed = _compute(payload)
+    data = computed["data"]
+    pre = computed["pre"]
+    L, H, S = payload["input_length"], payload["output_length"], payload["step"]
+    sample_region = _preview_sample_region(computed, payload.get("preview_region_id"))
+    sridx = data.region_ids.index(sample_region)
+    starts = _valid_starts_from(computed["ranges"][split][sridx], L, H)
+    if starts.size == 0:
+        raise Conflict(
+            f"{split} 划分在区域 {sample_region} 没有有效窗口。",
+            code="NO_VALID_WINDOW",
+        )
+    if window_index < 0 or window_index >= starts.size:
+        raise Conflict(
+            f"窗口序号必须在 1 到 {starts.size} 之间，收到 {window_index + 1}。",
+            code="WINDOW_INDEX_OUT_OF_RANGE",
+        )
+    stats = _preview_split_stats(computed, sridx)
+    return {
+        "region_id": sample_region,
+        "split": split,
+        "window_index": int(window_index),
+        "total_windows": int(starts.size),
+        "candidate_windows": int(stats[split]["candidate_windows"]),
+        "excluded_windows": int(stats[split]["excluded_windows"]),
+        "overlap_points": max(0, int(L - S)),
+        "L": int(L),
+        "H": int(H),
+        "S": int(S),
+        "window": _window_payload(data, pre, sridx, int(starts[window_index]), L, H),
     }
 
 

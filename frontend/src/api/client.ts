@@ -103,6 +103,7 @@ export const ENDPOINTS = {
   validationCheck: '/api/validation/check',
   datasetValidate: '/api/datasets/validate',
   datasetPreview: '/api/datasets/preview',
+  datasetPreviewWindow: '/api/datasets/preview-window',
   datasetBuild: '/api/datasets/build',
   datasetList: '/api/datasets?include_archived=true',
   datasetGet: (id: string) => `/api/datasets/${id}`,

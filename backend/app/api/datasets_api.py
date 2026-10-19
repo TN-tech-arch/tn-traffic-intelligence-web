@@ -15,6 +15,7 @@ from app.services.datasets import (
     get_dataset,
     list_datasets,
     preview_dataset,
+    preview_window,
 )
 from app.services.ingest import source_row
 from app.services.series import valid_region_ids
@@ -86,6 +87,19 @@ def preview(payload: dict[str, Any] = Body(...)) -> dict:
     values = info["values"]
     values["source_key"] = info["source"]["key"]
     return preview_dataset(values)
+
+
+@router.post("/preview-window")
+def preview_single_window(payload: dict[str, Any] = Body(...)) -> dict:
+    values_payload = payload.get("values") or payload
+    split = str(payload.get("split") or "test")
+    window_index = int(payload.get("window_index") or 0)
+    issues, info = _validate({"values": values_payload}, deep=True)
+    raise_if_invalid(issues)
+    values = dict(info["values"])
+    values["source_key"] = info["source"]["key"]
+    values["preview_region_id"] = payload.get("preview_region_id")
+    return preview_window(values, split=split, window_index=window_index)
 
 
 @router.post("/build")

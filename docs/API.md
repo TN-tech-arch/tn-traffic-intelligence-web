@@ -44,7 +44,8 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/datasets/validate` | 字段级校验 + 预计算（空 split、窗口数等） |
-| POST | `/api/datasets/preview` | 完整预览（不落库）：窗口、切分、覆盖、样例 X/Y |
+| POST | `/api/datasets/preview` | 完整预览（不落库）：划分统计、候选/有效/排除窗口数及首个真实窗口 |
+| POST | `/api/datasets/preview-window` | 按划分和窗口序号读取一个真实有效窗口（不落库） |
 | POST | `/api/datasets/build` | 原子构建，成功才返回 `dataset_id`（`status=Built`） |
 | GET | `/api/datasets` / `/{id}` | 历史与不可变快照 |
 | GET | `/api/datasets/{id}/windows?split=&region_id=&offset=&limit=` | 真实窗口索引与 X/Y |

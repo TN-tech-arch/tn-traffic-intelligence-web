@@ -160,9 +160,10 @@ check(
 
 const parameterHelp = page.locator('.tn-field-label .tn-help-trigger').first()
 await parameterHelp.waitFor({ state: 'visible', timeout: 20000 })
-await parameterHelp.hover()
-await page.waitForTimeout(450)
-const helpText = await page.locator('.tn-help-tooltip:visible .ant-tooltip-inner').first().innerText()
+await parameterHelp.focus()
+const visibleHelp = page.locator('.tn-help-tooltip:visible .ant-tooltip-inner').first()
+await visibleHelp.waitFor({ state: 'visible', timeout: 10000 })
+const helpText = await visibleHelp.innerText()
 check(
   '14 参数帮助同时给出中文名、英文名与含义/范围',
   /实际含义与影响/.test(helpText) && /[（(][A-Za-z]/.test(helpText) && /默认/.test(helpText),

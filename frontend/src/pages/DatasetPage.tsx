@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Popconfirm, Table, Tabs, Tag, Tooltip, message } from 'antd'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Button, Card, InputNumber, Popconfirm, Select, Table, Tabs, Tag, Tooltip, message } from 'antd'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
@@ -42,9 +42,13 @@ export default function DatasetPage() {
   const [windowRows, setWindowRows] = useState<any[]>([])
   const [windowSplit, setWindowSplit] = useState('train')
   const [windowRegion, setWindowRegion] = useState<string>('')
+  const [previewWindowInfo, setPreviewWindowInfo] = useState<any>(null)
+  const [previewWindowBusy, setPreviewWindowBusy] = useState(false)
+  const [windowJumpValue, setWindowJumpValue] = useState<number>(1)
   const [tab, setTab] = useState('overview')
   const [busy, setBusy] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
+  const previewRequested = useRef(false)
 
   const schema: FieldSpec[] = useMemo(
     () => [
@@ -112,6 +116,20 @@ export default function DatasetPage() {
       const data = await api.post<any>(ENDPOINTS.datasetPreview, { values: config })
       setPreview(data)
       setWindowRegion(data.preview_region_id)
+      const split = data.preview_split ?? 'test'
+      const firstWindow = data.preview_windows?.[0] ?? null
+      setPreviewWindowInfo({
+        split,
+        index: data.preview_window_index ?? 0,
+        total: data.preview_window_total ?? 0,
+        candidate: data.preview_window_stats?.[split]?.candidate_windows ?? 0,
+        excluded: data.preview_window_stats?.[split]?.excluded_windows ?? 0,
+        overlap: data.preview_overlap_points ?? 0,
+        stats: data.preview_window_stats ?? {},
+        window: firstWindow,
+      })
+      setWindowJumpValue(1)
+      previewRequested.current = true
     } catch (err) {
       if (err instanceof ApiError) {
         setServerIssues(err.issues)
@@ -121,6 +139,56 @@ export default function DatasetPage() {
       setBusy(false)
     }
   }
+
+  const loadPreviewWindow = async (split: string, index: number) => {
+    if (!preview?.preview_region_id) return
+    setPreviewWindowBusy(true)
+    try {
+      const data = await api.post<any>(ENDPOINTS.datasetPreviewWindow, {
+        values: config,
+        split,
+        window_index: index,
+        preview_region_id: preview.preview_region_id,
+      })
+      setPreviewWindowInfo((prev: any) => ({
+        ...prev,
+        split: data.split,
+        index: data.window_index,
+        total: data.total_windows,
+        candidate: data.candidate_windows,
+        excluded: data.excluded_windows,
+        overlap: data.overlap_points,
+        window: data.window,
+      }))
+      setWindowJumpValue(data.window_index + 1)
+    } catch (err) {
+      messageApi.error(err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setPreviewWindowBusy(false)
+    }
+  }
+
+  const commitWindowJump = () => {
+    if (!previewWindowInfo || previewWindowBusy || previewWindowTotal === 0) return
+    const target = Math.min(Math.max(1, windowJumpValue), previewWindowTotal) - 1
+    if (target !== previewWindowIndex) {
+      loadPreviewWindow(previewWindowInfo.split, target)
+    }
+  }
+
+  const previewWindow = previewWindowInfo?.window
+  const previewWindowTotal = previewWindowInfo?.total ?? 0
+  const previewWindowIndex = previewWindowInfo?.index ?? 0
+  const runPreviewRef = useRef(runPreview)
+  runPreviewRef.current = runPreview
+
+  useEffect(() => {
+    if (!previewRequested.current || !valid) return
+    const timer = window.setTimeout(() => {
+      runPreviewRef.current()
+    }, 700)
+    return () => window.clearTimeout(timer)
+  }, [config, valid])
 
   const build = async () => {
     if (!valid) {
@@ -149,6 +217,9 @@ export default function DatasetPage() {
     try {
       const data = await api.get<any>(ENDPOINTS.datasetGet(datasetId))
       setSelectedDataset(data)
+      previewRequested.current = false
+      setPreview(null)
+      setPreviewWindowInfo(null)
       setConfig((prev) => ({
         ...prev,
         source_key: data.source_key,
@@ -190,6 +261,30 @@ export default function DatasetPage() {
 
   const windows = preview?.window_counts ?? {}
   const train: any[] = preview?.split_boundaries ?? []
+  const previewWindowStats = previewWindowInfo?.stats?.[previewWindowInfo?.split] ?? {
+    candidate_windows: previewWindowInfo?.candidate ?? 0,
+    valid_windows: previewWindowTotal,
+    excluded_windows: previewWindowInfo?.excluded ?? 0,
+  }
+  const previewXLength = previewWindow?.X?.length ?? 0
+  const previewYLength = previewWindow?.Y?.length ?? 0
+  const previewChartX = previewWindow
+    ? [...(previewWindow.X_timestamps ?? []), ...(previewWindow.Y_timestamps ?? [])]
+    : []
+  const previewChartSeries = previewWindow
+    ? [
+        {
+          name: `X 历史输入（L=${preview?.L ?? config.input_length}）`,
+          data: [...previewWindow.X, ...Array(previewYLength).fill(null)],
+          color: '#2467E8',
+        },
+        {
+          name: `Y 预测目标（H=${preview?.H ?? config.output_length}）`,
+          data: [...Array(previewXLength).fill(null), ...previewWindow.Y],
+          color: '#D98F00',
+        },
+      ]
+    : []
 
   return (
     <div>
@@ -216,7 +311,14 @@ export default function DatasetPage() {
             <PaneHead
               title={bilingual('配置', 'Configuration')}
               extra={
-                <Button size="small" onClick={() => { setConfig({ ...DEFAULT_CONFIG }); setDrafts({}); setPreview(null) }}>
+                <Button size="small" onClick={() => {
+                  previewRequested.current = false
+                  setConfig({ ...DEFAULT_CONFIG })
+                  setDrafts({})
+                  setPreview(null)
+                  setPreviewWindowInfo(null)
+                  setSelectedDataset(null)
+                }}>
                   {ACTION_LABELS.reset}
                 </Button>
               }
@@ -243,38 +345,97 @@ export default function DatasetPage() {
         }
         visual={
           <div className="tn-stack">
+            <div data-testid="sliding-window-preview">
             <Card size="small" title="1 · 滑动窗口预览（Sliding Window Preview）">
-              {preview?.preview_windows?.length ? (
+              {previewWindow ? (
                 <>
-                  {preview.preview_windows.map((window: any, index: number) => (
-                    <div key={index} className="tn-muted">
-                      窗口 #{index + 1}（区域 {preview.preview_region_id}）：X 起于 {window.input_start_at}，止于{' '}
-                      {window.input_end_at} → Y 目标 {window.target_start_at} ~ {window.target_end_at}
-                      {window.imputed_input_positions?.length ? `（X 含 ${window.imputed_input_positions.length} 个因果插值点）` : ''}
-                    </div>
-                  ))}
+                  <div className="tn-inline" style={{ marginBottom: 8 }}>
+                    <span className="tn-muted">数据集划分：</span>
+                    {['train', 'validation', 'test'].map((split) => {
+                      const count = previewWindowInfo?.stats?.[split]?.valid_windows ?? 0
+                      return (
+                        <Button
+                          key={split}
+                          size="small"
+                          type={previewWindowInfo?.split === split ? 'primary' : 'default'}
+                          disabled={count === 0 || previewWindowBusy}
+                          onClick={() => loadPreviewWindow(split, 0)}
+                        >
+                          {splitLabel(split)}（{count}）
+                        </Button>
+                      )
+                    })}
+                  </div>
+                  <div className="tn-inline" style={{ marginBottom: 8 }}>
+                    <Button
+                      size="small"
+                      disabled={previewWindowBusy || previewWindowIndex <= 0}
+                      onClick={() => loadPreviewWindow(previewWindowInfo.split, previewWindowIndex - 1)}
+                    >
+                      上一窗口
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={previewWindowBusy || previewWindowIndex >= previewWindowTotal - 1}
+                      onClick={() => loadPreviewWindow(previewWindowInfo.split, previewWindowIndex + 1)}
+                    >
+                      下一窗口
+                    </Button>
+                    <span className="tn-muted">
+                      当前窗口 {previewWindowIndex + 1} / {previewWindowTotal}
+                    </span>
+                    <InputNumber
+                      size="small"
+                      min={1}
+                      max={Math.max(1, previewWindowTotal)}
+                      value={windowJumpValue}
+                      disabled={previewWindowBusy || previewWindowTotal === 0}
+                      onChange={(value) => setWindowJumpValue(typeof value === 'number' ? value : 1)}
+                      onPressEnter={commitWindowJump}
+                      style={{ width: 96 }}
+                      aria-label="窗口序号"
+                    />
+                    <Button size="small" disabled={previewWindowBusy || previewWindowTotal === 0} onClick={commitWindowJump}>
+                      跳转
+                    </Button>
+                  </div>
+                  <div className="tn-muted" style={{ marginBottom: 6 }}>
+                    区域 {preview.preview_region_id} · X：{previewWindow.input_start_at} → {previewWindow.input_end_at}
+                    {' '}· Y：{previewWindow.target_start_at} → {previewWindow.target_end_at}
+                    {' '}· L/H/S = {preview.L}/{preview.H}/{preview.S}
+                    {previewWindow.imputed_input_positions?.length
+                      ? ` · X 含 ${previewWindow.imputed_input_positions.length} 个因果插值点`
+                      : ''}
+                  </div>
                   <LineChart
                     height={210}
-                    x={[
-                      ...preview.preview_windows[0].X.map((_: number, i: number) => `X${i + 1}`),
-                      ...preview.preview_windows[0].Y.map((_: number, i: number) => `Y${i + 1}`),
-                    ]}
-                    series={[
-                      { name: `X（L=${config.input_length}）`, data: preview.preview_windows[0].X, color: '#2467E8' },
-                      { name: `Y（H=${config.output_length}）`, data: preview.preview_windows[0].Y, color: '#D98F00' },
-                    ]}
-                    xName="时间点"
+                    x={previewChartX}
+                    series={previewChartSeries}
+                    xName="真实时间"
                     yName="数值"
                     empty={!preview}
                   />
-                  <div className="tn-muted">
-                    Y 的每个目标点都必须是真实观测（缺失处理不会填补目标），X 允许使用预测起点之前的因果插值。
+                  <div className="tn-muted" style={{ marginTop: 4 }}>
+                    <div>
+                      当前划分 {splitLabel(previewWindowInfo.split)}：候选窗口 {previewWindowStats.candidate_windows}，
+                      有效窗口 {previewWindowStats.valid_windows}，排除窗口 {previewWindowStats.excluded_windows}。
+                    </div>
+                    <div>
+                      窗口起点每前进 S={preview.S} 个时间点；相邻窗口共享最多{' '}
+                      {Math.max(0, Number(preview.L) - Number(preview.S))} 个输入点
+                      （L−S，最小为 0）。X 使用历史输入，Y 为后续目标；Y 目标均为真实观测，缺失目标不会补造。
+                    </div>
+                    <div>
+                      X 可利用预测起点之前的因果插值；切换数据源、区域、日期范围、时间分辨率、L/H/S 或缺失值处理后，
+                      自动重新计算窗口。
+                    </div>
                   </div>
                 </>
               ) : (
-                <EmptyState text="点击“实时预览”后显示真实滑窗边界。" />
+                <EmptyState text="点击“实时预览”后显示真实有效窗口。" />
               )}
             </Card>
+            </div>
 
             <Card size="small" title="2 · 时间顺序划分预览（Chronological Split Preview）">
               {train.length ? (

@@ -246,6 +246,109 @@ try {
       previewText.includes('窗口'),
     previewText.slice(0, 60).replace(/\n/g, ' '),
   )
+  const windowPreview = page.locator('[data-testid="sliding-window-preview"]')
+  await page
+    .waitForFunction(
+      () => {
+        const text =
+          document.querySelector('[data-testid="sliding-window-preview"]')?.textContent ?? ''
+        return text.includes('当前窗口 1 /') && text.includes('L/H/S = 24/6/1')
+      },
+      null,
+      { timeout: 20000 },
+    )
+    .catch(() => undefined)
+  const initialWindowText = await windowPreview.innerText()
+  record(
+    'T08a 滑动窗口显示总数、候选/有效/排除和 L/H/S',
+    /当前窗口 1 \/ \d+/.test(initialWindowText) &&
+      initialWindowText.includes('候选窗口') &&
+      initialWindowText.includes('有效窗口') &&
+      initialWindowText.includes('排除窗口') &&
+      initialWindowText.includes('L/H/S = 24/6/1'),
+    initialWindowText.replace(/\n/g, ' | ').slice(0, 160),
+  )
+  await windowPreview.locator('button').filter({ hasText: '下一窗口' }).click()
+  await page
+    .waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="sliding-window-preview"]')
+          ?.textContent?.includes('当前窗口 2 /'),
+      null,
+      { timeout: 15000 },
+    )
+    .catch(() => undefined)
+  const nextWindowText = await windowPreview.innerText()
+  record(
+    'T08b 下一窗口切换图表、时间范围和流量值',
+    nextWindowText.includes('当前窗口 2 /') &&
+      nextWindowText.includes('X：') &&
+      nextWindowText.includes('Y：') &&
+      nextWindowText !== initialWindowText,
+    nextWindowText.replace(/\n/g, ' | ').slice(0, 160),
+  )
+  await windowPreview.locator('button').filter({ hasText: '上一窗口' }).click()
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="sliding-window-preview"]')
+        ?.textContent?.includes('当前窗口 1 /'),
+    null,
+    { timeout: 15000 },
+  ).catch(() => undefined)
+  await setField(page, 'm3.input_length', 25)
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="sliding-window-preview"]')
+        ?.textContent?.includes('L/H/S = 25/6/1'),
+    null,
+    { timeout: 20000 },
+  ).catch(() => undefined)
+  const updatedWindowText = await windowPreview.innerText()
+  record(
+    'T08c 修改 L 后真实窗口与总数自动刷新',
+    updatedWindowText.includes('L/H/S = 25/6/1') &&
+      /当前窗口 1 \/ \d+/.test(updatedWindowText),
+    updatedWindowText.replace(/\n/g, ' | ').slice(0, 120),
+  )
+  await setField(page, 'm3.input_length', 24)
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="sliding-window-preview"]')
+        ?.textContent?.includes('L/H/S = 24/6/1'),
+    null,
+    { timeout: 20000 },
+  ).catch(() => undefined)
+  const jumpInput = windowPreview.locator('input[aria-label="窗口序号"]')
+  await jumpInput.fill('3')
+  await windowPreview.locator('button').filter({ hasText: /跳\s*转/ }).click()
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="sliding-window-preview"]')
+        ?.textContent?.includes('当前窗口 3 /'),
+    null,
+    { timeout: 15000 },
+  ).catch(() => undefined)
+  const jumpedText = await windowPreview.innerText()
+  record(
+    'T08d 窗口序号选择可定位真实有效窗口',
+    jumpedText.includes('当前窗口 3 /'),
+    jumpedText.replace(/\n/g, ' | ').slice(0, 100),
+  )
+  await jumpInput.fill('1')
+  await windowPreview.locator('button').filter({ hasText: /跳\s*转/ }).click()
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="sliding-window-preview"]')
+        ?.textContent?.includes('当前窗口 1 /'),
+    null,
+    { timeout: 15000 },
+  ).catch(() => undefined)
   await page.screenshot({ path: path.join(SHOTS, '04-module3-dataset.png'), fullPage: true })
 
   // ------------------------------------------------------------ Module 4
