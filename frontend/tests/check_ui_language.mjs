@@ -84,7 +84,7 @@ const moduleChecks = [
     title: '模块三｜预测数据集构建',
     subtitle: 'Forecasting Dataset Construction',
     shot: '38-language-m3.png',
-    must: ['数据集概览（Dataset Overview）', '窗口预览（Window Preview）', '数据质量（Data Quality）', '数据集管理（Dataset Management）'],
+    must: ['数据集概览（Dataset Overview）', '时间顺序划分预览（Chronological Split Preview）', '滑动窗口预览（Sliding Window Preview）', '数据集管理（Dataset Management）'],
   },
   {
     nav: '模型训练',

@@ -333,6 +333,14 @@ def preview_dataset(payload: dict[str, Any]) -> dict[str, Any]:
         "preview_split": default_split,
         "preview_window_index": 0,
         "preview_window_total": int(selected_starts.size),
+        "preview_first_input_start_at": (
+            _ts(data.timestamps, int(selected_starts[0])) if selected_starts.size else None
+        ),
+        "preview_last_target_end_at": (
+            _ts(data.timestamps, int(selected_starts[-1]) + L + H - 1)
+            if selected_starts.size
+            else None
+        ),
         "preview_window_stats": split_stats,
         "preview_overlap_points": max(0, int(L - S)),
         "preview_windows": selected,

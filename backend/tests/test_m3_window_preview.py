@@ -36,6 +36,9 @@ def test_preview_exposes_all_real_windows_and_navigation_payload():
     stats = preview["preview_window_stats"][split]
 
     assert preview["preview_window_total"] > 2
+    assert preview["preview_first_input_start_at"]
+    assert preview["preview_last_target_end_at"]
+    assert preview["preview_last_target_end_at"] > preview["preview_first_input_start_at"]
     assert stats["valid_windows"] == preview["preview_window_total"]
     assert stats["candidate_windows"] >= stats["valid_windows"]
     assert stats["excluded_windows"] == stats["candidate_windows"] - stats["valid_windows"]

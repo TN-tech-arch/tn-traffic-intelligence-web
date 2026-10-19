@@ -219,13 +219,17 @@ try {
   // ------------------------------------------------------------ Module 3
   await page.click('.tn-nav-item >> text=Dataset')
   await page.waitForTimeout(2000)
-  const m3Tabs = (await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
+  const m3Panes = await page.locator('.tn-three-pane > section').count()
+  const m3LeftText = await page.locator('.tn-three-pane > section').nth(0).innerText()
   record(
-    'T31/T39 M3 三个核心 Tab + Dataset Management',
-    ['Dataset Overview', 'Window Preview', 'Data Quality', 'Dataset Management'].every((t) =>
-      m3Tabs.some((text) => text.includes(t)),
-    ),
-    m3Tabs.join('|'),
+    'T31/T39 M3 改为左右两栏且 Data Management 位于左侧',
+    m3Panes === 2 &&
+      (await page.locator('.tn-pane-info').count()) === 0 &&
+      (await page.locator('.tn-pane-info .ant-tabs-tab').count()) === 0 &&
+      m3LeftText.includes('数据集管理（Dataset Management）') &&
+      (await page.locator('.tn-m3-dataset-row').count()) > 0 &&
+      (await page.locator('.tn-m3-dataset-row').first().locator('button').count()) >= 3,
+    `${m3Panes} panes`,
   )
   const m3RegionLabel = await page
     .locator('[data-field="m3.region_id"] .ant-select-selection-item')
@@ -257,12 +261,30 @@ try {
   await page.waitForTimeout(3500)
   const previewText = await page.locator('.tn-three-pane section').nth(1).innerText()
   record(
-    'T08 中央三个堆叠预览区显示真实窗口/切分/覆盖信息',
+    'T08 中央按概览、时间划分、滑动窗口展示',
     previewText.includes('Sliding Window Preview') &&
       previewText.includes('Chronological Split Preview') &&
-      previewText.includes('Forecast Time Preview') &&
+      previewText.includes('Dataset Overview') &&
+      previewText.includes('Data Quality') &&
+      !previewText.includes('Forecast Time Preview') &&
       previewText.includes('窗口'),
     previewText.slice(0, 60).replace(/\n/g, ' '),
+  )
+  const overviewBox = await page.locator('[data-testid="dataset-overview"]').boundingBox()
+  const chronologicalBox = await page
+    .locator('.tn-three-pane > section')
+    .nth(1)
+    .locator('.ant-card')
+    .filter({ hasText: 'Chronological Split Preview' })
+    .first()
+    .boundingBox()
+  const slidingBox = await page.locator('[data-testid="sliding-window-preview"]').boundingBox()
+  record(
+    'T08e 中央三部分视觉顺序为 Dataset Overview → Chronological → Sliding',
+    Boolean(overviewBox && chronologicalBox && slidingBox) &&
+      overviewBox.y < chronologicalBox.y &&
+      chronologicalBox.y < slidingBox.y,
+    `${overviewBox?.y ?? 0} < ${chronologicalBox?.y ?? 0} < ${slidingBox?.y ?? 0}`,
   )
   const windowPreview = page.locator('[data-testid="sliding-window-preview"]')
   await page

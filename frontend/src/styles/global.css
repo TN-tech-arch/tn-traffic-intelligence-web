@@ -182,6 +182,10 @@ body {
   grid-template-columns: minmax(280px, 25fr) minmax(380px, 40fr) minmax(360px, 35fr);
 }
 
+.tn-three-pane.tn-two-pane {
+  grid-template-columns: minmax(300px, 32fr) minmax(0, 68fr);
+}
+
 @media (max-width: 1500px) {
   .tn-three-pane.tn-three-pane-m1 {
     grid-template-columns: minmax(260px, 26fr) minmax(340px, 39fr) minmax(330px, 35fr);
@@ -199,6 +203,9 @@ body {
 
 @media (max-width: 900px) {
   .tn-three-pane.tn-three-pane-m1 {
+    grid-template-columns: 1fr;
+  }
+  .tn-three-pane.tn-two-pane {
     grid-template-columns: 1fr;
   }
 }
@@ -611,6 +618,20 @@ body {
   gap: 8px;
   padding: 7px 0;
   border-bottom: 1px dashed var(--tn-line);
+}
+
+.tn-m3-dataset-row {
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--tn-line);
+  min-width: 0;
+}
+
+.tn-m3-dataset-row .tn-code {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tn-empty {

@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, InputNumber, Popconfirm, Select, Table, Tabs, Tag, Tooltip, message } from 'antd'
+import { Alert, Button, Card, Collapse, InputNumber, Popconfirm, Tooltip, message } from 'antd'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
-import BiLabel from '../components/BiLabel'
 import { LineChart } from '../components/Charts'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
   ACTION_LABELS, MODULE_META, aggregationLabel, bilingual, frequencyLabel,
   missingModeLabel, regionDisplayLabel, scalingLabel, scopeLabel, sourceDisplayName, splitLabel, statusLabel,
-  unitDisplayLabel,
 } from '../i18n/terms'
 
 const DEFAULT_CONFIG: Record<string, unknown> = {
@@ -39,13 +37,10 @@ export default function DatasetPage() {
   const [preview, setPreview] = useState<any>(null)
   const [datasets, setDatasets] = useState<any[]>([])
   const [selectedDataset, setSelectedDataset] = useState<any>(null)
-  const [windowRows, setWindowRows] = useState<any[]>([])
-  const [windowSplit, setWindowSplit] = useState('train')
-  const [windowRegion, setWindowRegion] = useState<string>('')
   const [previewWindowInfo, setPreviewWindowInfo] = useState<any>(null)
   const [previewWindowBusy, setPreviewWindowBusy] = useState(false)
   const [windowJumpValue, setWindowJumpValue] = useState<number>(1)
-  const [tab, setTab] = useState('overview')
+  const [datasetPage, setDatasetPage] = useState(0)
   const [busy, setBusy] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
   const previewRequested = useRef(false)
@@ -115,7 +110,6 @@ export default function DatasetPage() {
     try {
       const data = await api.post<any>(ENDPOINTS.datasetPreview, { values: config })
       setPreview(data)
-      setWindowRegion(data.preview_region_id)
       const split = data.preview_split ?? 'test'
       const firstWindow = data.preview_windows?.[0] ?? null
       setPreviewWindowInfo({
@@ -236,30 +230,12 @@ export default function DatasetPage() {
         missing_mode: data.preprocess?.missing_mode ?? 'automatic',
         scaling: data.preprocess?.scaling ?? 'standard',
       }))
-      loadWindows(datasetId, windowSplit, data.region_ids?.[0] ?? '')
-      setTab('overview')
       messageApi.success(`已打开 ${datasetId}（历史参数被冻结，修改需另存新的数据集 ID）`)
     } catch (err) {
       messageApi.error(String(err))
     }
   }
 
-  const loadWindows = async (datasetId: string, split: string, regionId: string, offset = 0) => {
-    if (!datasetId || !regionId) return
-    try {
-      const data = await api.get<any>(ENDPOINTS.datasetWindows(datasetId, split, regionId, offset, 10))
-      setWindowRows(data.windows)
-    } catch (err) {
-      setWindowRows([])
-    }
-  }
-
-  useEffect(() => {
-    if (selectedDataset && windowRegion) loadWindows(selectedDataset.dataset_id, windowSplit, windowRegion)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDataset?.dataset_id, windowSplit, windowRegion])
-
-  const windows = preview?.window_counts ?? {}
   const train: any[] = preview?.split_boundaries ?? []
   const previewWindowStats = previewWindowInfo?.stats?.[previewWindowInfo?.split] ?? {
     candidate_windows: previewWindowInfo?.candidate ?? 0,
@@ -285,6 +261,13 @@ export default function DatasetPage() {
         },
       ]
     : []
+  const datasetPageSize = 6
+  const datasetPageCount = Math.max(1, Math.ceil(datasets.length / datasetPageSize))
+  const currentDatasetPage = Math.min(datasetPage, datasetPageCount - 1)
+  const visibleDatasets = datasets.slice(
+    currentDatasetPage * datasetPageSize,
+    (currentDatasetPage + 1) * datasetPageSize,
+  )
 
   return (
     <div>
@@ -306,6 +289,7 @@ export default function DatasetPage() {
         <Alert type="error" showIcon style={{ marginBottom: 10 }} message="后端拒绝了请求（未产生任何数据）" description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')} />
       ) : null}
       <ThreePane
+        variant="two"
         config={
           <>
             <PaneHead
@@ -341,12 +325,135 @@ export default function DatasetPage() {
               <Button onClick={runPreview} loading={busy}>{ACTION_LABELS.preview}</Button>
               <Button type="primary" onClick={build} loading={busy} disabled={!valid}>{ACTION_LABELS.buildDataset}</Button>
             </div>
+            <div className="tn-section-title">数据集管理（Dataset Management）</div>
+            {visibleDatasets.length ? (
+              <>
+                {visibleDatasets.map((row: any) => (
+                  <div className="tn-m3-dataset-row" key={row.dataset_id}>
+                    <div className="tn-inline" style={{ justifyContent: 'space-between' }}>
+                      <span className="tn-code">{row.dataset_id}</span>
+                      <StatusTag status={row.status} />
+                    </div>
+                    <div className="tn-muted">
+                      {scopeLabel(row.scope)} · {row.region_count} 个区域 · L/H/S = {row.L}/{row.H}/{row.S}
+                    </div>
+                    <div className="tn-muted">{row.created_at}</div>
+                    <div className="tn-inline" style={{ marginTop: 5 }}>
+                      <Button size="small" onClick={() => openDataset(row.dataset_id)}>{ACTION_LABELS.open}</Button>
+                      <Button
+                        size="small"
+                        onClick={async () => {
+                          try {
+                            await api.post(ENDPOINTS.datasetArchive(row.dataset_id, row.status !== 'Archived'))
+                            messageApi.success(row.status === 'Archived' ? '已恢复' : '已归档')
+                            loadDatasets()
+                          } catch (err) {
+                            messageApi.error(err instanceof ApiError ? err.message : String(err))
+                          }
+                        }}
+                      >
+                        {row.status === 'Archived' ? ACTION_LABELS.unarchive : ACTION_LABELS.archive}
+                      </Button>
+                      <Popconfirm
+                        title="删除该数据集？"
+                        description="仅当未被引用时可删除；被引用时会返回依赖保护错误。"
+                        onConfirm={async () => {
+                          try {
+                            await api.del(ENDPOINTS.datasetDelete(row.dataset_id))
+                            messageApi.success('已删除')
+                            loadDatasets()
+                          } catch (err) {
+                            messageApi.error(err instanceof ApiError ? err.message : String(err))
+                          }
+                        }}
+                      >
+                        <Tooltip title={row.is_referenced ? '已被实验或评价引用，只能归档' : '删除会同时移除工件目录'}>
+                          <Button size="small" danger disabled={row.is_referenced}>{ACTION_LABELS.deleteRecord}</Button>
+                        </Tooltip>
+                      </Popconfirm>
+                    </div>
+                  </div>
+                ))}
+                <div className="tn-inline" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+                  <Button size="small" disabled={currentDatasetPage <= 0} onClick={() => setDatasetPage(currentDatasetPage - 1)}>上一页</Button>
+                  <span className="tn-muted">{currentDatasetPage + 1} / {datasetPageCount}</span>
+                  <Button size="small" disabled={currentDatasetPage >= datasetPageCount - 1} onClick={() => setDatasetPage(currentDatasetPage + 1)}>下一页</Button>
+                </div>
+              </>
+            ) : (
+              <EmptyState text="暂无已保存数据集。" />
+            )}
           </>
         }
         visual={
           <div className="tn-stack">
-            <div data-testid="sliding-window-preview">
-            <Card size="small" title="1 · 滑动窗口预览（Sliding Window Preview）">
+            <Card size="small" style={{ order: 1 }} title="1 · 数据集概览（Dataset Overview）">
+              <div className="tn-stack" data-testid="dataset-overview">
+                <div className="tn-muted">
+                  <div>
+                    当前配置：{sourceDisplayName(String(config.source_key), String(config.source_key))}
+                    {' · '}{config.scope === 'all' ? `全部区域（${regions.filter((r) => r.has_timeseries).length}）` : `单区域（${regionDisplayLabel(String(config.region_id), regions.find((r) => r.region_id === config.region_id)?.display_name)}）`}
+                    {' · '}L/H/S = {String(config.input_length)}/{String(config.output_length)}/{String(config.step)}
+                  </div>
+                  <div>
+                    频率/聚合：{frequencyLabel(String(config.frequency))} · {aggregationLabel(String(config.aggregation))}
+                    {' · '}比例：{String(config.train_ratio)}/{String(config.val_ratio)}/{String(config.test_ratio)}
+                  </div>
+                  <div>
+                    预处理：{missingModeLabel(String(config.missing_mode))} · {scalingLabel(String(config.scaling))}
+                  </div>
+                  <div>
+                    状态：{selectedDataset
+                      ? `已保存 ${selectedDataset.dataset_id} · ${statusLabel(selectedDataset.status)}`
+                      : preview
+                        ? '当前草稿已预览，尚未保存'
+                        : '当前草稿尚未预览'}
+                  </div>
+                </div>
+                {(preview || selectedDataset) ? (
+                  <div className="tn-muted">
+                    <div>
+                      窗口数：训练 {preview?.window_counts?.train ?? selectedDataset?.window_counts?.train ?? 0}
+                      {' · '}验证 {preview?.window_counts?.validation ?? selectedDataset?.window_counts?.validation ?? 0}
+                      {' · '}测试 {preview?.window_counts?.test ?? selectedDataset?.window_counts?.test ?? 0}
+                    </div>
+                    <div>
+                      首个有效 X/Y 起点：{preview?.preview_first_input_start_at ?? '—'}
+                      {' · '}最后有效 Y 目标：{preview?.preview_last_target_end_at ?? '—'}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="tn-section-title">数据质量摘要（Data Quality）</div>
+                {preview ? (
+                  <div className="tn-muted">
+                    <div>时间点数：{preview.time_points}（{preview.time_start} → {preview.time_end}）</div>
+                    <div>区域数：{preview.region_count} · 原始缺失点：{preview.missing?.missing_points_before}</div>
+                    <div>因果插值点：{preview.missing?.imputed_points}（{missingModeLabel(preview.missing?.mode)}）</div>
+                    <div>真实零值保留：{preview.missing?.zero_points_preserved}</div>
+                    <div>泄漏防护：目标完全落在单一 split；插值不引用预测起点之后的值。</div>
+                    {preview.empty_splits?.length ? (
+                      <div style={{ color: '#d4380d' }}>空集合：{preview.empty_splits.join(', ')}</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <EmptyState text="实时预览后显示当前草稿的完整质量摘要。" />
+                )}
+                {selectedDataset?.quality ? (
+                  <Collapse
+                    size="small"
+                    ghost
+                    items={[{
+                      key: 'quality',
+                      label: '查看已保存数据集的完整质量报告',
+                      children: <pre className="tn-code">{JSON.stringify(selectedDataset.quality, null, 2)}</pre>,
+                    }]}
+                  />
+                ) : null}
+              </div>
+            </Card>
+
+            <div data-testid="sliding-window-preview" style={{ order: 3 }}>
+            <Card size="small" title="3 · 滑动窗口预览（Sliding Window Preview）">
               {previewWindow ? (
                 <>
                   <div className="tn-inline" style={{ marginBottom: 8 }}>
@@ -437,7 +544,7 @@ export default function DatasetPage() {
             </Card>
             </div>
 
-            <Card size="small" title="2 · 时间顺序划分预览（Chronological Split Preview）">
+            <Card size="small" style={{ order: 2 }} title="2 · 时间顺序划分预览（Chronological Split Preview）">
               {train.length ? (
                 <>
                   <table style={{ width: '100%', fontSize: 12 }}>
@@ -473,185 +580,7 @@ export default function DatasetPage() {
               )}
             </Card>
 
-            <Card size="small" title="3 · 预测时间范围预览（Forecast Time Preview）">
-              {preview ? (
-                <div className="tn-muted">
-                  <div>测试集有效窗口：{windows.test ?? 0}（候选 {preview.split_boundaries?.find((s: any) => s.split === 'test')?.candidate_windows ?? 0}）</div>
-                  <div>首个可用 X/Y 起点：{preview.preview_windows?.[0]?.input_start_at ?? '—'}</div>
-                  <div>最后可用 Y 目标：{preview.preview_windows?.[preview.preview_windows.length - 1]?.target_end_at ?? '—'}</div>
-                  <div>预测范围：{preview.scope === 'all' ? `全部区域（${preview.region_count} 个区域，独立建模）` : `单区域（${preview.region_ids?.[0]}）`}</div>
-                  <div>时间轴：{preview.time_start} → {preview.time_end}，共 {preview.time_points} 点 @ {preview.frequency_minutes} 分钟</div>
-                  {preview.scope === 'all' ? (
-                    <div style={{ marginTop: 6 }}>
-                      区域窗口摘要（前 5）：{Object.entries(preview.window_counts_per_region ?? {}).slice(0, 5).map(([region, counts]: any) => `${region}:${counts.test}`).join('，')}
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <EmptyState text="预览后显示测试集可预测覆盖时间。" />
-              )}
-            </Card>
           </div>
-        }
-        info={
-          <Tabs
-            className="tn-tabs-tight"
-            activeKey={tab}
-            onChange={setTab}
-            items={[
-              {
-                key: 'overview',
-                label: <BiLabel zh="数据集概览" en="Dataset Overview" />,
-                children: (
-                  <div className="tn-stack">
-                    {selectedDataset ? (
-                      <Card size="small" title="已保存数据集（不可变快照）">
-                        <div className="tn-code">{selectedDataset.dataset_id}</div>
-                        <div className="tn-muted" style={{ marginTop: 6 }}>
-                          <div>来源：{sourceDisplayName(selectedDataset.source_key, selectedDataset.source_display_name)}（{unitDisplayLabel(selectedDataset.unit_label)}）</div>
-                          <div>预测范围：{selectedDataset.scope === 'all' ? `全部区域（${selectedDataset.region_count}）` : `单区域（${selectedDataset.region_ids?.[0]}）`}</div>
-                          <div>L/H/S = {selectedDataset.L}/{selectedDataset.H}/{selectedDataset.S} · {frequencyLabel(selectedDataset.frequency)} · {aggregationLabel(selectedDataset.aggregation)}</div>
-                          <div>比例：{selectedDataset.ratios?.train}/{selectedDataset.ratios?.validation}/{selectedDataset.ratios?.test}</div>
-                          <div>窗口数：训练 {selectedDataset.window_counts?.train} · 验证 {selectedDataset.window_counts?.validation} · 测试 {selectedDataset.window_counts?.test}</div>
-                          <div>预处理：{missingModeLabel(selectedDataset.preprocess?.missing_mode)} · {scalingLabel(selectedDataset.preprocess?.scaling)}</div>
-                          <div>创建时间：{selectedDataset.created_at}</div>
-                          <div>引用状态：{selectedDataset.is_referenced ? '已被实验或评价引用（只能归档）' : '未被引用（可删除）'}</div>
-                        </div>
-                      </Card>
-                    ) : (
-                      <EmptyState text="打开历史数据集或构建新数据集后显示快照。" />
-                    )}
-                    {preview ? (
-                      <Card size="small" title="当前草稿预览统计">
-                        <div className="tn-muted">
-                          <div>窗口总数：训练 {windows.train} / 验证 {windows.validation} / 测试 {windows.test}</div>
-                          <div>缺失处理：{missingModeLabel(preview.missing?.mode)}，插值点 {preview.missing?.imputed_points}，原始缺失 {preview.missing?.missing_points_before}</div>
-                          <div>标准化：{scalingLabel(preview.scaling)}</div>
-                        </div>
-                      </Card>
-                    ) : null}
-                  </div>
-                ),
-              },
-              {
-                key: 'windows',
-                label: <BiLabel zh="窗口预览" en="Window Preview" />,
-                children: (
-                  <div className="tn-stack">
-                    <div className="tn-inline">
-                      <Tag color="blue">数据集划分</Tag>
-                      <Button size="small" type={windowSplit === 'train' ? 'primary' : 'default'} onClick={() => setWindowSplit('train')}>训练集</Button>
-                      <Button size="small" type={windowSplit === 'validation' ? 'primary' : 'default'} onClick={() => setWindowSplit('validation')}>验证集</Button>
-                      <Button size="small" type={windowSplit === 'test' ? 'primary' : 'default'} onClick={() => setWindowSplit('test')}>测试集</Button>
-                    </div>
-                    {selectedDataset ? (
-                      <Table
-                        size="small"
-                        rowKey="origin_index"
-                        dataSource={windowRows}
-                        pagination={false}
-                        columns={[
-                          { title: 'origin_index', dataIndex: 'origin_index' },
-                          { title: 'X 范围', render: (_: unknown, row: any) => <span className="tn-muted">{row.input_start_at}<br />{row.input_end_at}</span> },
-                          { title: 'Y 目标', render: (_: unknown, row: any) => <span className="tn-muted">{row.target_start_at}<br />{row.target_end_at}</span> },
-                          { title: 'X 值', render: (_: unknown, row: any) => row.X.map((v: number) => v.toFixed(1)).join(', ') },
-                          { title: 'Y 值', render: (_: unknown, row: any) => row.Y.map((v: number) => v.toFixed(1)).join(', ') },
-                        ]}
-                      />
-                    ) : (
-                      <EmptyState text="打开一个已保存数据集后可查看真实 X/Y 样本。" />
-                    )}
-                  </div>
-                ),
-              },
-              {
-                key: 'quality',
-                label: <BiLabel zh="数据质量" en="Data Quality" />,
-                children: (
-                  <div className="tn-stack">
-                    <Card size="small" title="构建质量报告（真实统计）">
-                      {preview ? (
-                        <div className="tn-muted">
-                          <div>时间点数：{preview.time_points}（{preview.time_start} → {preview.time_end}）</div>
-                          <div>区域数：{preview.region_count}</div>
-                          <div>缺失点（处理前）：{preview.missing?.missing_points_before}</div>
-                          <div>插值点：{preview.missing?.imputed_points}（策略 {missingModeLabel(preview.missing?.mode)}）</div>
-                          <div>零值保留计数：{preview.missing?.zero_points_preserved}</div>
-                          <div>泄漏检查：目标完全落在单一 split 内；插值绝不引用预测起点之后的值。</div>
-                          {preview.empty_splits?.length ? <div style={{ color: '#d4380d' }}>空集合：{preview.empty_splits.join(', ')}</div> : null}
-                        </div>
-                      ) : (
-                        <EmptyState text="预览后显示质量报告。" />
-                      )}
-                    </Card>
-                    {selectedDataset ? (
-                      <Card size="small" title="已保存数据集质量">
-                        <pre className="tn-code">{JSON.stringify(selectedDataset.quality, null, 2)}</pre>
-                      </Card>
-                    ) : null}
-                  </div>
-                ),
-              },
-              {
-                key: 'management',
-                label: <BiLabel zh="数据集管理" en="Dataset Management" />,
-                children: (
-                  <Table
-                    size="small"
-                    rowKey="dataset_id"
-                    dataSource={datasets}
-                    pagination={{ pageSize: 8, size: 'small' }}
-                    columns={[
-                      { title: '数据集 ID', dataIndex: 'dataset_id', width: 190, render: (value: string) => <span className="tn-code">{value}</span> },
-                      { title: '预测范围', render: (_: unknown, row: any) => `${scopeLabel(row.scope)} · ${row.region_count}` },
-                      { title: 'L/H/S', render: (_: unknown, row: any) => `${row.L}/${row.H}/${row.S}` },
-                      { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} /> },
-                      { title: '创建时间', dataIndex: 'created_at', width: 150 },
-                      {
-                        title: '操作',
-                        render: (_: unknown, row: any) => (
-                          <div className="tn-inline">
-                            <Button size="small" onClick={() => openDataset(row.dataset_id)}>{ACTION_LABELS.open}</Button>
-                            <Button
-                              size="small"
-                              onClick={async () => {
-                                try {
-                                  await api.post(ENDPOINTS.datasetArchive(row.dataset_id, row.status !== 'Archived'))
-                                  messageApi.success(row.status === 'Archived' ? '已恢复' : '已归档')
-                                  loadDatasets()
-                                } catch (err) {
-                                  messageApi.error(err instanceof ApiError ? err.message : String(err))
-                                }
-                              }}
-                            >
-                              {row.status === 'Archived' ? ACTION_LABELS.unarchive : ACTION_LABELS.archive}
-                            </Button>
-                            <Tooltip title={row.is_referenced ? '已被实验或评价引用，只能归档' : '删除会同时移除工件目录'}>
-                              <Popconfirm
-                                title="删除该数据集？"
-                                description="仅当未被引用时可删除；被引用时会返回依赖保护错误。"
-                                onConfirm={async () => {
-                                  try {
-                                    await api.del(ENDPOINTS.datasetDelete(row.dataset_id))
-                                    messageApi.success('已删除')
-                                    loadDatasets()
-                                  } catch (err) {
-                                    messageApi.error(err instanceof ApiError ? err.message : String(err))
-                                  }
-                                }}
-                              >
-                                <Button size="small" danger disabled={row.is_referenced}>{ACTION_LABELS.deleteRecord}</Button>
-                              </Popconfirm>
-                            </Tooltip>
-                          </div>
-                        ),
-                      },
-                    ]}
-                  />
-                ),
-              },
-            ]}
-          />
         }
       />
     </div>

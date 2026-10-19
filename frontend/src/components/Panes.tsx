@@ -8,21 +8,23 @@ export function ThreePane({
 }: {
   config: ReactNode
   visual: ReactNode
-  info: ReactNode
+  info?: ReactNode
   /** layout variant; "m1" uses 25% / 40% / 35% for the Module 1 workspace */
-  variant?: 'default' | 'm1'
+  variant?: 'default' | 'm1' | 'two'
 }) {
   return (
-    <div className={`tn-three-pane${variant === 'm1' ? ' tn-three-pane-m1' : ''}`}>
+    <div className={`tn-three-pane${variant === 'm1' ? ' tn-three-pane-m1' : ''}${variant === 'two' ? ' tn-two-pane' : ''}`}>
       <section className="tn-pane" aria-label="配置">
         {config}
       </section>
       <section className="tn-pane" aria-label="可视化">
         {visual}
       </section>
-      <section className="tn-pane tn-pane-info" aria-label="分析信息">
-        {info}
-      </section>
+      {info ? (
+        <section className="tn-pane tn-pane-info" aria-label="分析信息">
+          {info}
+        </section>
+      ) : null}
     </div>
   )
 }
