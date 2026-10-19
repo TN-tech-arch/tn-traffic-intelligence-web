@@ -54,6 +54,95 @@ if ($sources.totals.series_regions -ne 459) { throw "installed instance does not
 $index = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8077/" -TimeoutSec 20
 Write-Host "[test] installed UI served: HTTP $($index.StatusCode), $($index.Content.Length) bytes"
 
+Write-Host "[test] deep verification: Module 3 preview/window navigation"
+$previewValues = @{
+    source_key = "milano"
+    scope = "single"
+    region_id = "ADRIANO"
+    frequency = "native"
+    aggregation = "mean"
+    input_length = 24
+    output_length = 6
+    step = 1
+    train_ratio = 0.7
+    val_ratio = 0.15
+    test_ratio = 0.15
+    missing_mode = "automatic"
+    scaling = "standard"
+    label = "install acceptance"
+}
+$previewBody = @{ values = $previewValues } | ConvertTo-Json -Depth 6
+$preview = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/datasets/preview" `
+    -ContentType "application/json" -Body $previewBody -TimeoutSec 60
+if ($preview.preview_window_total -le 2) {
+    throw "installed preview still exposes only $($preview.preview_window_total) windows"
+}
+$windowBody = @{
+    values = $previewValues
+    split = $preview.preview_split
+    window_index = 1
+    preview_region_id = $preview.preview_region_id
+} | ConvertTo-Json -Depth 6
+$window = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/datasets/preview-window" `
+    -ContentType "application/json" -Body $windowBody -TimeoutSec 60
+if ($window.window.X.Count -ne 24 -or $window.window.Y.Count -ne 6) {
+    throw "installed window X/Y dimensions are incorrect"
+}
+Write-Host ("[test] installed preview: split={0}, total={1}, selected={2}, X/Y=24/6" -f `
+        $window.split, $window.total_windows, ($window.window_index + 1))
+
+Write-Host "[test] deep verification: build dataset"
+$built = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/datasets/build" `
+    -ContentType "application/json" -Body $previewBody -TimeoutSec 180
+$dataset_id = $built.dataset_id
+if (-not $dataset_id -or $built.status -ne "Built") {
+    throw "installed dataset build failed"
+}
+
+Write-Host "[test] deep verification: Module 4 ARIMA experiment"
+$experimentBody = @{
+    dataset_id = $dataset_id
+    algorithm_key = "arima"
+    params = @{}
+} | ConvertTo-Json -Depth 6
+$run = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/experiments/run" `
+    -ContentType "application/json" -Body $experimentBody -TimeoutSec 60
+$experiment = $null
+for ($i = 0; $i -lt 120; $i++) {
+    Start-Sleep -Seconds 2
+    $experiment = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/experiments/$($run.experiment_id)" -TimeoutSec 20
+    if ($experiment.status -in @("Completed", "Partial", "Failed")) { break }
+}
+if ($experiment.status -notin @("Completed", "Partial")) {
+    throw "installed Module 4 experiment did not complete: $($experiment.status)"
+}
+$logs = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/experiments/$($run.experiment_id)/logs" -TimeoutSec 20
+if ($logs.logs.Count -eq 0) {
+    throw "installed Module 4 experiment produced no logs"
+}
+
+Write-Host "[test] deep verification: Module 5 full-test evaluation"
+$evaluationBody = @{
+    dataset_id = $dataset_id
+    scope = "single"
+    region_id = "ADRIANO"
+    experiment_ids = @($run.experiment_id)
+    test_selection = "full"
+} | ConvertTo-Json -Depth 6
+$evaluation = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/evaluations/run" `
+    -ContentType "application/json" -Body $evaluationBody -TimeoutSec 60
+$evaluationState = $null
+for ($i = 0; $i -lt 120; $i++) {
+    Start-Sleep -Seconds 2
+    $evaluationState = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/evaluations/$($evaluation.evaluation_id)" -TimeoutSec 20
+    if ($evaluationState.status -in @("Completed", "Failed")) { break }
+}
+if ($evaluationState.status -ne "Completed" -or $evaluationState.prediction_count -le 0) {
+    throw "installed Module 5 evaluation failed or produced no predictions"
+}
+Write-Host ("[test] installed core: dataset={0}, experiment={1}, evaluation={2}, predictions={3}" -f `
+        $dataset_id, $experiment.experiment_id, $evaluationState.evaluation_id, $evaluationState.prediction_count)
+
 Write-Host "[test] stopping installed services"
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
     Where-Object { $_.CommandLine -like "*$Target*" } |
