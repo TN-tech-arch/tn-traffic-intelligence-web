@@ -340,20 +340,6 @@ export default function DatasetPage() {
                     <div className="tn-muted">{row.created_at}</div>
                     <div className="tn-inline" style={{ marginTop: 5 }}>
                       <Button size="small" onClick={() => openDataset(row.dataset_id)}>{ACTION_LABELS.open}</Button>
-                      <Button
-                        size="small"
-                        onClick={async () => {
-                          try {
-                            await api.post(ENDPOINTS.datasetArchive(row.dataset_id, row.status !== 'Archived'))
-                            messageApi.success(row.status === 'Archived' ? '已恢复' : '已归档')
-                            loadDatasets()
-                          } catch (err) {
-                            messageApi.error(err instanceof ApiError ? err.message : String(err))
-                          }
-                        }}
-                      >
-                        {row.status === 'Archived' ? ACTION_LABELS.unarchive : ACTION_LABELS.archive}
-                      </Button>
                       <Popconfirm
                         title="删除该数据集？"
                         description="仅当未被引用时可删除；被引用时会返回依赖保护错误。"
@@ -367,7 +353,7 @@ export default function DatasetPage() {
                           }
                         }}
                       >
-                        <Tooltip title={row.is_referenced ? '已被实验或评价引用，只能归档' : '删除会同时移除工件目录'}>
+                        <Tooltip title={row.is_referenced ? '已被实验或评价引用，不能删除' : '删除会同时移除工件目录'}>
                           <Button size="small" danger disabled={row.is_referenced}>{ACTION_LABELS.deleteRecord}</Button>
                         </Tooltip>
                       </Popconfirm>

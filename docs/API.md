@@ -49,7 +49,6 @@
 | POST | `/api/datasets/build` | 原子构建，成功才返回 `dataset_id`（`status=Built`） |
 | GET | `/api/datasets` / `/{id}` | 历史与不可变快照 |
 | GET | `/api/datasets/{id}/windows?split=&region_id=&offset=&limit=` | 真实窗口索引与 X/Y |
-| POST | `/api/datasets/{id}/archive?archived=` | 归档/恢复 |
 | DELETE | `/api/datasets/{id}` | 未被引用时可删除；被引用返回 409 `DATASET_REFERENCED` |
 
 ## 6. Module 4 模型与批次

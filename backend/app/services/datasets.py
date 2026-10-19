@@ -14,7 +14,7 @@ import numpy as np
 from app.core.config import settings
 from app.core.errors import Conflict, NotFound
 from app.core.ids import dataset_id as make_dataset_id, now_utc, ulid
-from app.db.connection import execute, get_connection, json_dumps, json_loads, query_all, query_one
+from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.services import windows as win
 from app.services.ingest import load_series, source_row
 from app.services.series import resolve_frequency_minutes, resample, valid_region_ids
@@ -644,20 +644,11 @@ def list_datasets(*, include_archived: bool = False) -> list[dict[str, Any]]:
     return [dataset_summary(row) for row in query_all(sql)]
 
 
-def archive_dataset(dataset_id: str, *, archived: bool = True) -> dict[str, Any]:
-    dataset_row(dataset_id)
-    execute(
-        "UPDATE dataset_versions SET status = ? WHERE dataset_id = ?",
-        ("Archived" if archived else "Built", dataset_id),
-    )
-    return get_dataset(dataset_id)
-
-
 def delete_dataset(dataset_id: str) -> dict[str, Any]:
     row = dataset_row(dataset_id)
     if _is_referenced(dataset_id):
         raise Conflict(
-            f"Dataset {dataset_id} 已被 Experiment / Evaluation 引用，只能 Archive，不能删除",
+            f"Dataset {dataset_id} 已被 Experiment / Evaluation 引用，不能删除",
             code="DATASET_REFERENCED",
         )
     conn = get_connection()

@@ -9,7 +9,6 @@ from app.core.errors import Conflict, NotFound
 from app.db.connection import json_loads, query_one
 from app.services import datasets as svc
 from app.services.datasets import (
-    archive_dataset,
     create_dataset,
     delete_dataset,
     get_dataset,
@@ -166,11 +165,6 @@ def _ts(timestamps, index: int) -> str:
     import pandas as pd
 
     return pd.Timestamp(int(timestamps[index]), unit="s").isoformat(sep=" ")
-
-
-@router.post("/{dataset_id}/archive")
-def archive(dataset_id: str, archived: bool = Query(True)) -> dict:
-    return archive_dataset(dataset_id, archived=archived)
 
 
 @router.delete("/{dataset_id}")

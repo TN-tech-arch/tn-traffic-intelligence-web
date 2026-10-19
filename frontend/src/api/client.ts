@@ -110,7 +110,6 @@ export const ENDPOINTS = {
   datasetWindows: (id: string, split: string, region: string, offset = 0, limit = 20) =>
     `/api/datasets/${id}/windows?split=${split}&region_id=${encodeURIComponent(region)}&offset=${offset}&limit=${limit}`,
   datasetDelete: (id: string) => `/api/datasets/${id}`,
-  datasetArchive: (id: string, archived = true) => `/api/datasets/${id}/archive?archived=${archived}`,
   modelRegistry: '/api/models/registry',
   foundation: '/api/models/foundation',
   preflight: '/api/models/preflight',

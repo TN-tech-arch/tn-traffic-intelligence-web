@@ -155,6 +155,15 @@ def test_delete_protection_for_referenced_dataset():
     assert response.json()["code"] == "DATASET_REFERENCED"
 
 
+def test_dataset_archive_operation_is_removed_without_affecting_access():
+    dataset_id = _any_dataset_id()
+    if dataset_id is None:
+        pytest.skip("no dataset available in this database")
+    response = client.post(f"/api/datasets/{dataset_id}/archive")
+    assert response.status_code in (404, 405)
+    assert client.get(f"/api/datasets/{dataset_id}").status_code == 200
+
+
 def test_validation_schema_is_machine_readable():
     payload = client.get("/api/validation/schema").json()
     assert set(payload["modules"].keys()) == {"m1", "m2", "m3", "m5"}

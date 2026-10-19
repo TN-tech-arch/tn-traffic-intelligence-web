@@ -120,7 +120,7 @@ Temporal 内部**不再有二级 Tab**，而是按顺序纵向排列：
 1. 左侧依次选择：`Dataset/Location` → `Prediction Scope`（Single Region / All Regions）→ 分辨率与聚合 → `L / H / S` → Train/Val/Test 比例（默认 70/15/15）→ 缺失处理与标准化。
 2. 点击 `实时预览`：中央从上到下显示三个真实预览区——滑窗样例、时间切分、可预测覆盖范围。
 3. 点击 `Save & Build Dataset`：全量校验通过后原子构建，成功后返回 `Dataset ID`（状态 `Built`）；失败不会产生半成品 ID。
-4. 右侧四个 Tab：`Dataset Overview`、`Window Preview`、`Data Quality`、`Dataset Management`（Open / Archive / Delete，被引用时只能归档）。
+4. 左侧数据集管理保留打开和删除；删除前需确认，被实验或评价引用的数据集受依赖保护。
 
 ## 5. Module 4 · Training
 

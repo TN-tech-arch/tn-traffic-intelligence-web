@@ -221,6 +221,11 @@ try {
   await page.waitForTimeout(2000)
   const m3Panes = await page.locator('.tn-three-pane > section').count()
   const m3LeftText = await page.locator('.tn-three-pane > section').nth(0).innerText()
+  const firstDatasetActions = await page
+    .locator('.tn-m3-dataset-row')
+    .first()
+    .locator('button')
+    .allInnerTexts()
   record(
     'T31/T39 M3 改为左右两栏且 Data Management 位于左侧',
     m3Panes === 2 &&
@@ -228,7 +233,9 @@ try {
       (await page.locator('.tn-pane-info .ant-tabs-tab').count()) === 0 &&
       m3LeftText.includes('数据集管理（Dataset Management）') &&
       (await page.locator('.tn-m3-dataset-row').count()) > 0 &&
-      (await page.locator('.tn-m3-dataset-row').first().locator('button').count()) >= 3,
+      firstDatasetActions.length >= 2 &&
+      !firstDatasetActions.some((text) => text.includes('归档')) &&
+      m3LeftText.includes('删除记录'),
     `${m3Panes} panes`,
   )
   const m3RegionLabel = await page
