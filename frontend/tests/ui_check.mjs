@@ -150,6 +150,15 @@ try {
       !moduleTabs.some((text) => text.trim() === 'Hourly Profile'),
     moduleTabs.join('|'),
   )
+  const m1RegionLabels = await page
+    .locator('[data-field="m1.region_ids"] .ant-select-selection-item')
+    .allInnerTexts()
+  record(
+    'T33 M1 区域下拉不重复显示相同名称与标识',
+    m1RegionLabels.length > 0 &&
+      m1RegionLabels.every((label) => !/^([^·（）]+)\s*[·（]\s*\1/.test(label.trim())),
+    m1RegionLabels.join(' | '),
+  )
   const mapVisible = await page.locator('.leaflet-container').count()
   record('T04 GIS 地图常驻（切换 Tab 不消失）', mapVisible === 1, `leaflet containers: ${mapVisible}`)
   const vectorLayers = await page.evaluate(async () => {
@@ -217,6 +226,15 @@ try {
       m3Tabs.some((text) => text.includes(t)),
     ),
     m3Tabs.join('|'),
+  )
+  const m3RegionLabel = await page
+    .locator('[data-field="m3.region_id"] .ant-select-selection-item')
+    .first()
+    .innerText()
+  record(
+    'T33 M3 区域名称与标识相同时只显示一次',
+    m3RegionLabel.trim() === 'ADRIANO',
+    m3RegionLabel,
   )
   await setField(page, 'm3.train_ratio', 0.7)
   await setField(page, 'm3.val_ratio', 0.2)

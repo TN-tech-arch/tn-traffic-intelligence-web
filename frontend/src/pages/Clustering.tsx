@@ -17,7 +17,7 @@ import DateTimeField from '../components/DateTimeField'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
-  ACTION_LABELS, MODULE_META, bilingual, featureLabel, statusLabel,
+  ACTION_LABELS, MODULE_META, bilingual, featureLabel, regionDisplayLabel, statusLabel,
 } from '../i18n/terms'
 
 const DEFAULT_FEATURES = [
@@ -410,8 +410,8 @@ export default function Clustering() {
       ellipsis: true,
       sorter: (a: any, b: any) => String(a.region_id).localeCompare(String(b.region_id)),
       render: (value: string, row: any) => (
-        <Tooltip title={`${row.display_name}（${value}）`}>
-          <span>{value}</span>
+        <Tooltip title={regionDisplayLabel(value, row.display_name)}>
+          <span>{regionDisplayLabel(value, row.display_name)}</span>
         </Tooltip>
       ),
     },

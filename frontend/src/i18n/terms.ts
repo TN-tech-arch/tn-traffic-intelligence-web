@@ -342,6 +342,14 @@ export function sourceDisplayName(key: string | undefined, fallback?: string): s
   return (key ? SOURCE_DISPLAY_NAMES[key] : undefined) ?? fallback ?? key ?? '—'
 }
 
+/** Region selector label: avoid repeating an ID that is already the display name. */
+export function regionDisplayLabel(regionId: string | undefined, displayName?: string): string {
+  const id = String(regionId ?? '').trim()
+  const name = String(displayName ?? '').trim()
+  if (!name || name === id) return id || '—'
+  return `${name}（${id}）`
+}
+
 export function localizeSourceNames<T>(value: T): T {
   if (typeof value === 'string') {
     return (value as string).split('ZTE 4G Downlink').join('ZTE 4G 下行流量') as T

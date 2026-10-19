@@ -16,7 +16,8 @@ import BiLabel from '../components/BiLabel'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
-  ACTION_LABELS, MODULE_META, bilingual, localizeSourceNames, sourceDisplayName, unitDisplayLabel,
+  ACTION_LABELS, MODULE_META, bilingual, localizeSourceNames, regionDisplayLabel,
+  sourceDisplayName, unitDisplayLabel,
 } from '../i18n/terms'
 
 interface SourceRow {
@@ -180,7 +181,9 @@ export default function Exploration() {
       {
         key: 'region_ids', label_zh: '区域（可多选对比）', type: 'array',
         enum: regions.map((r) => r.region_id),
-        enum_labels: regions.map((r) => `${r.region_id}${r.has_timeseries ? '' : '（无数据）'}`),
+        enum_labels: regions.map((r) =>
+          `${regionDisplayLabel(r.region_id, r.display_name)}${r.has_timeseries ? '' : '（无数据）'}`,
+        ),
         default: [], required: false,
         help_zh: '在地图上点选区域，或用下拉框搜索；最多可同时选择 12 个区域。',
         suggestion_zh: '无数据区域没有时序数据，不能用于分析。',
@@ -519,7 +522,7 @@ export default function Exploration() {
 
   const regionOptions = regions
     .filter((r) => config.region_ids.includes(r.region_id))
-    .map((r) => ({ value: r.region_id, label: r.region_id }))
+    .map((r) => ({ value: r.region_id, label: regionDisplayLabel(r.region_id, r.display_name) }))
 
   const maxLagSpec = schema.find((s) => s.key === 'acf_max_lag')!
   const acfInfo = result?.acf

@@ -10,7 +10,7 @@ import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
   ACTION_LABELS, MODULE_META, aggregationLabel, bilingual, frequencyLabel,
-  missingModeLabel, scalingLabel, scopeLabel, sourceDisplayName, splitLabel, statusLabel,
+  missingModeLabel, regionDisplayLabel, scalingLabel, scopeLabel, sourceDisplayName, splitLabel, statusLabel,
   unitDisplayLabel,
 } from '../i18n/terms'
 
@@ -54,7 +54,7 @@ export default function DatasetPage() {
     () => [
       { key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'], enum_labels: ['Milano', 'Trentino', 'ZTE 4G Downlink'], default: 'milano', help_zh: '选择数据集所在的数据源，一个数据集只能属于一个数据源。', suggestion_zh: '三个来源的时间范围与单位不同，请分别建模。' },
       { key: 'scope', label_zh: '预测范围', type: 'enum', enum: ['single', 'all'], enum_labels: ['单区域', '全部区域'], default: 'single', help_zh: '单区域只建模一个区域；全部区域对当前数据源全部有效区域分别建模（区域独立，不做联合空间建模）。', suggestion_zh: '先用单区域验证流程。' },
-      { key: 'region_id', label_zh: '区域', type: 'enum', enum: regions.filter((r) => r.has_timeseries).map((r) => r.region_id), enum_labels: regions.filter((r) => r.has_timeseries).map((r) => `${r.region_id} · ${r.display_name}`), default: '', required: false, visible_when: { scope: 'single' }, help_zh: '单区域范围下必须选择一个有数据的区域。', suggestion_zh: '无数据区域不可选。' },
+      { key: 'region_id', label_zh: '区域', type: 'enum', enum: regions.filter((r) => r.has_timeseries).map((r) => r.region_id), enum_labels: regions.filter((r) => r.has_timeseries).map((r) => regionDisplayLabel(r.region_id, r.display_name)), default: '', required: false, visible_when: { scope: 'single' }, help_zh: '单区域范围下必须选择一个有数据的区域。', suggestion_zh: '无数据区域不可选。' },
       { key: 'frequency', label_zh: '时间分辨率', type: 'enum', enum: ['native', '30min', '60min', '1day'], enum_labels: ['原生频率', '30 分钟', '1 小时', '1 天'], default: 'native', help_zh: '重采样频率，必须是原生频率的整数倍。', suggestion_zh: '1 小时可显著减少窗口数量。' },
       { key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'], enum_labels: ['均值', '求和'], default: 'mean', help_zh: '求和为桶内观测相加，均值为桶内平均；单位未确认，不代表物理总量。', suggestion_zh: '原生频率下无影响。' },
       { key: 'input_length', label_zh: '输入长度（L）', type: 'integer', min: 1, max: 5000, default: 24, unit_zh: '点', help_zh: '每个样本的历史输入点数（按重采样后的点计）。', suggestion_zh: '10 分钟频率下 144 点 ≈ 1 天。' },
