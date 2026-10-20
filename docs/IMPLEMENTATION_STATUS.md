@@ -22,12 +22,12 @@
 | 功能 | 状态 | 说明 |
 |---|---|---|
 | 六文件真实导入与指纹校验 | Verified | 8928/8928/2784 时点；88/88、223/223、148/162；ZTE 735 零值、14 No Data |
-| 原生/30min/1h/1day 重采样（sum/mean） | Verified | 不完整桶记为缺失 |
+| 原生频率与原始观测 | Verified | M1–M3 固定读取数据源真实间隔（Milano/Trentino 10 分钟、ZTE 15 分钟），不再提供重采样控件 |
 | GIS 多边形 + No Data 渲染 | Verified | Leaflet Canvas 渲染，88/223/162 多边形与真实指标涂色 |
 | M1 三个右侧 Tab | Verified | 浏览器测试逐项断言 |
 | M2 四种聚类 + 三个分析 Tab + 中央区域列表 + 质量指标 N/A 语义 | Verified | K-Means / Spectral / Hierarchical / GMM；簇名依据当前有效区域的 Mean、CV 与时间特征百分位生成 |
 | M3 L/H/S、70/15/15、无泄漏切分、因果插值、标准化 | Verified | 单测 + 端到端 |
-| M3 Dataset ID、原子构建、Archive/Delete 依赖保护 | Verified | 失败无半成品；被引用数据集删除返回 409 |
+| M3 DS ID、原子构建、Delete 依赖保护 | Verified | 失败无半成品；手工名称输入与 Archive 入口已取消，旧归档记录仍可读取 |
 | M4 12 算法注册表与参数 schema | Verified | `test_registry_has_exactly_twelve_algorithms` 等 |
 | M4 12 算法真实训练/推理 | Verified | 见 MODEL_REGISTRY 实测表 |
 | M4 All Models（Single 与 All Regions） | Verified | Single: 12/12 完成；All Regions: 计划 1056/2676/1776，停止流程实测 |
@@ -36,6 +36,9 @@
 | M5 指标（MAE/RMSE/sMAPE/R²）与边界 | Verified | 手工样例单测；sMAPE 0/0 记 0；常量真值 R²=N/A |
 | M5 四视图 + 三 Tab + 历史管理 + CSV 导出 | Verified | 浏览器测试 + `/{id}/export` |
 | M1 日期时间范围 + 双向索引同步 + 统一时间口径 | Verified | `test_m1_time_range.py`（11 项）、`test_m1_api.py`、浏览器 `check_m1_insights.mjs` |
+| M1–M3 默认完整有效范围 | Verified | 数据源切换自动填充首末有效观测；用户主动修改后保留选择；M3 保留构建范围控件 |
+| 高级设置入口取消 | Verified | M1/M2/M3/M4 不再显示 Advanced 折叠或开关；底层默认值、校验、泄漏防护保留 |
+| DS / CLUS / EXP / BATCH 可读 ID | Verified | `readable_id_sequences` 持久化序列；删除后序号不复用；区域级 `region_experiment_id` 与 BATCH 关联 |
 | M1 三张图自动分析（Hourly / Weekday / ACF & Trend） | Verified | `test_m1_insights.py`（26 项）+ 截图 `data/screenshots/12-m1-insights.png` |
 | M1 ACF Max Lag、置信带与周期检测 | Verified | 构造正弦序列检出 24h 周期；白噪声不产生周期结论；覆盖不足时说明原因 |
 | M1 最后一轮修复（截面范围夹紧 / Auto Max Lag / 周期候选分级） | Verified | `check_m1_fixes.mjs` 12/12 + `pytest 110 passed` |
@@ -44,7 +47,8 @@
 | 全参数实时校验（前端字段下方 + 后端强制） | Verified | `ui_check.mjs` + `test_api.py` 负向测试（dropout=1.5、L=0、d_model/n_heads） |
 | 结构化错误（path/code/severity/message/suggestion/request_id） | Verified | main.py 异常处理器；失败无副作用（事务 + 临时目录） |
 | 品牌资产（SVG/ICO/横幅、无卡通人物） | Verified | `frontend/public/brand/*`；UI 测试断言无头像资源 |
-| Windows 安装包（安装/运行/卸载） | Verified | `packaging/dist/TN-Traffic-Intelligence-Setup-3.1.0.exe` + `test_install.ps1` |
+| v3.2 原生频率 / 完整范围 / 高级设置移除 / 可读 ID | Verified | 150 pytest + M1/M2/M3/UI Playwright；安装版生成 DS/EXP 并完成评价 |
+| Windows 安装包（安装/运行/卸载） | Verified | `packaging/dist/TN-Traffic-Intelligence-Setup-3.2.0.exe` + `test_install.ps1`；3.1.0 保留回退 |
 | TimesFM / Chronos Fine-tuning | Implemented=false (Blocked) | 版本未确证支持 + 未实现；UI 保持 Disabled，不显示伪造 epoch |
 | 公网 HTTPS 部署 | Blocked | 需要服务器/域名/凭据授权（见 DEPLOYMENT.md 第 4 节） |
 | GPU 性能数据 | Blocked | 本机无 CUDA；已在报告中标注全部为 CPU 实测 |

@@ -1,5 +1,27 @@
 # 测试报告（TEST_REPORT）
 
+## 0. v3.2.0 增量验收（2026-10-20）
+
+本轮修改已完成源码、开发站点、Windows 安装包和安装版验收：
+
+| 检查 | 命令 / 方式 | 结果 |
+|---|---|---|
+| 后端完整测试 | `python -m pytest -q backend\tests` | **150 passed, 2 warnings in 32.88s** |
+| 前端类型检查 | `npm run typecheck` | 通过 |
+| 前端生产构建 | `npm run build` | 通过（Vite 5.4.21） |
+| M1 浏览器回归 | `node tests/check_m1_layout.mjs` | **27/27 passed** |
+| M2 浏览器回归 | `node tests/check_m2_clusters.mjs` | **13/13 passed**，真实 K-Means 4 簇、88 区唯一归属 |
+| M3 浏览器回归 | `node tests/check_m3_simplified.mjs` | **7/7 passed**，生成 `DS-MILANO-ADRIANO-0009` 后清理 |
+| 全站 UI 回归 | `node tests/ui_check.mjs` | **44/44 passed** |
+| 中英文与布局回归 | `node tests/check_ui_language.mjs` | **26/26 passed** |
+| Windows 安装版 | `packaging\test_install.ps1` | 静默安装 → 启动 → 数据/预览 → DS/EXP → Random Forest → Full Test 评价 → 卸载全部通过 |
+
+安装版实测 ID 示例：`DS-MILANO-ADRIANO-0001`、`EXP-MILANO-ADRIANO-RANDOM-FOREST-0001`；
+Full Test 评价返回 8,010 条预测并通过卸载清理。
+
+**真实数据差异说明**：需求文字写 Trentino 为 15 分钟，但原始 `trentino_traffic_nid.csv`
+实际为 8,928 个时间点、10 分钟间隔。系统按真实原生频率读取为 10 分钟，没有为了匹配文字而硬编码错误频率。
+
 测试环境（所有结果均来自该真实环境，无模拟）：
 
 | 项目 | 值 |

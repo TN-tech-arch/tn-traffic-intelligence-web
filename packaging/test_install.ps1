@@ -131,7 +131,7 @@ $experimentBody = @{
 } | ConvertTo-Json -Depth 6
 $run = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/experiments/run" `
     -ContentType "application/json" -Body $experimentBody -TimeoutSec 60
-if ($run.experiment_id -notmatch "^EXP-MILANO-ADRIANO-RANDOM_FOREST-\d{4,}$") {
+if ($run.experiment_id -notmatch "^EXP-MILANO-ADRIANO-RANDOM[-_]FOREST-\d{4,}$") {
     throw "installed experiment ID is not readable: $($run.experiment_id)"
 }
 $experiment = $null
