@@ -49,12 +49,13 @@ const leftPane = page.locator('.tn-three-pane > section').nth(0)
 const leftText = await leftPane.innerText()
 check('2 左侧不再有 Advanced Settings 入口', !leftText.includes('Advanced Settings'), 'no advanced entry')
 check(
-  '3 左侧仅保留数据源、区域和分析时间范围，且原生频率只读显示',
+  '3 左侧仅保留数据源、区域和分析时间范围',
   !leftText.includes('最多对比区域数') &&
-    ['数据源', '对比区域', '原生频率', '分析时间范围（Analysis Time Range）'].every(
+    ['数据源', '对比区域', '分析时间范围（Analysis Time Range）'].every(
       (label, index, all) =>
         leftText.indexOf(label) >= 0 && (index === 0 || leftText.indexOf(label) > leftText.indexOf(all[index - 1])),
     ) &&
+    !leftText.includes('原生频率') &&
     !leftText.includes('时间分辨率') &&
     !leftText.includes('聚合方式'),
   'max-regions and resampling controls removed',
@@ -84,7 +85,14 @@ check(
 check('7 中央时序不再有橙色拟合线/图例', !centerText.includes('趋势拟合'), 'fitted line removed')
 check('8 中央统计包含范围与样本说明', /参与区域 \d+/.test(centerText) && centerText.includes('有效样本'), 'range note present')
 check('9 GIS 蓝色说明框已删除，改为 ⓘ', (await page.locator('.tn-hint').count()) === 0 && (await page.locator('[aria-label="时间截面 帮助信息"]').count()) === 1, 'no hint boxes, one help icon')
-check('10 地图图例、滑块、区域名称开关仍在', centerText.includes('无数据') && centerText.includes('Time Slice') && centerText.includes('在地图上显示区域名称'), 'map controls intact')
+check(
+  '10 时间截面已移入左侧配置，中央地图只保留图例与区域名称开关',
+  leftText.includes('时间截面（Time Slice）') &&
+    !centerText.includes('Time Slice') &&
+    centerText.includes('无数据') &&
+    centerText.includes('在地图上显示区域名称'),
+  'time slice moved to configuration',
+)
 
 // --------------------------------------------------------- right pane ----
 const infoPane = page.locator('.tn-three-pane > section').nth(2)

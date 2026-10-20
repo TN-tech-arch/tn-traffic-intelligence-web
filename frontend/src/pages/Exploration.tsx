@@ -190,7 +190,7 @@ export default function Exploration() {
       },
       {
         key: 'start_index', label_zh: '起始索引（高级）', type: 'integer', min: 0, default: 0,
-        help_zh: '按重采样后的时间点数计算的起点，与上方日期时间双向同步。',
+        help_zh: '按原生采样时间点数计算的起点，与上方日期时间双向同步。',
         suggestion_zh: '普通使用直接选日期时间即可。',
       },
       {
@@ -606,11 +606,6 @@ export default function Exploration() {
                   compact
                 />
               ))}
-            <div className="tn-muted" style={{ marginTop: 6 }}>
-              原生频率：{sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 使用原始观测值，不做重采样；
-              日内小时画像与工作日/周末比较仅按时钟分组统计。
-            </div>
-
             <div className="tn-section-title" style={{ marginTop: 10 }}>
               分析时间范围（Analysis Time Range）
             </div>
@@ -620,7 +615,7 @@ export default function Exploration() {
               value={config.time_start}
               issues={fieldIssues('time_start')}
               disabledDate={disabledDate}
-              help="所有统计、图表与自动结论的起点。与结束时间共同决定使用的真实观测；边界按重采样后的时间桶起点、闭区间处理。"
+              help="所有统计、图表与自动结论的起点。与结束时间共同决定使用的真实观测；边界按原生采样时间点、闭区间处理。"
               onChange={(value) => updateConfig({ time_start: value }, 'date')}
             />
             <DateField
@@ -654,19 +649,40 @@ export default function Exploration() {
                   </div>
                   <div>
                     <strong>选中时间点：</strong>
-                    {range.points} 个（重采样后） · <strong>有效观测：</strong>
+                    {range.points} 个 · <strong>有效观测：</strong>
                     {range.valid_points?.[primaryId] ?? 0} 个
                   </div>
                   <div className="tn-muted">
                     边界：{range.boundary}；原始采样间隔 {range.native_interval_minutes} 分钟
-                    {range.interval_minutes !== range.native_interval_minutes
-                      ? `，重采样后每点代表 ${range.interval_minutes} 分钟`
-                      : ''}
                   </div>
                 </>
               ) : (
                 <div className="tn-muted">选择日期时间后显示实际解析结果。</div>
               )}
+            </div>
+
+            <div className="tn-field" data-field="m1.time_slice">
+              <label className="tn-field-label" htmlFor="m1-time-slice">
+                时间截面（Time Slice）
+                <HelpTip
+                  title="Time Slice 仅决定 GIS 地图当前展示哪个时间截面的流量，不改变整个 Analysis Time Range 内的统计计算范围。"
+                  detail="滑块被限制在当前分析范围内；修改分析范围后，如果原截面越界，会自动回到范围内第一个有效时刻。"
+                  label="时间截面"
+                />
+              </label>
+              <input
+                id="m1-time-slice"
+                type="range"
+                min={sliceMin}
+                max={sliceMax}
+                value={sliceValue}
+                onChange={(event) => setSliceIndex(Number(event.target.value))}
+                style={{ width: '100%' }}
+                aria-label="时间截面位置"
+              />
+              <div className="tn-muted" style={{ marginTop: 4 }}>
+                {spatial?.time_at ?? `时间位置 ${sliceValue}`}
+              </div>
             </div>
 
             <div className="tn-inline" style={{ marginTop: 10 }}>
@@ -725,26 +741,6 @@ export default function Exploration() {
                 <span className="tn-muted">在地图上显示区域名称</span>
               </span>
               <span className="tn-muted">地图颜色 = 当前时间截面该区域的真实观测值（越深越大）</span>
-            </div>
-            <div className="tn-inline" style={{ marginTop: 8 }}>
-              <span className="tn-field-label" style={{ marginBottom: 0 }}>
-                时间截面（Time Slice）
-                <HelpTip
-                  title="Time Slice 仅决定 GIS 地图当前展示哪个时间截面的流量，不改变整个 Analysis Time Range 内的统计计算范围。"
-                  detail="滑块被限制在当前分析范围内；修改日期范围后若原截面越界，会自动回到范围内的第一个有效时刻。"
-                  label="时间截面"
-                />
-              </span>
-              <input
-                type="range"
-                min={sliceMin}
-                max={sliceMax}
-                value={sliceValue}
-                onChange={(event) => setSliceIndex(Number(event.target.value))}
-                style={{ flex: 1 }}
-                aria-label="时间截面位置"
-              />
-              <span className="tn-muted">{spatial?.time_at ?? `时间索引 ${sliceValue}`}</span>
             </div>
             <Card size="small" title="多区域时序曲线（Multi-Region Time Series）" style={{ marginTop: 10 }}>
               <div className={stale ? 'tn-stale' : undefined}>

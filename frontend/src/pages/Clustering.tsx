@@ -365,7 +365,9 @@ export default function Clustering() {
   const clusterOf = (regionId: string | null) =>
     regionId ? result?.regions?.find((r: any) => r.region_id === regionId)?.cluster_id : undefined
 
-  const normalClusters = result?.clusters ?? []
+  const normalClusters = [...(result?.clusters ?? [])].sort(
+    (left: any, right: any) => Number(left.cluster_id) - Number(right.cluster_id),
+  )
   const featureAxes = result?.pca?.available
     ? [
         { key: 'pc1', label: `PC1（${(Number(result.pca.explained_variance_ratio?.[0] ?? 0) * 100).toFixed(1)}%）` },
@@ -560,9 +562,6 @@ export default function Clustering() {
               }
             />
             {fieldsBeforeRange.map(renderParamField)}
-            <div className="tn-muted" style={{ marginTop: 4 }}>
-              原生频率：{sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 使用原始观测值，不做重采样。
-            </div>
             <div className="tn-section-title" style={{ marginTop: 4 }}>
               {bilingual('分析时间范围', 'Analysis Time Range')}
             </div>

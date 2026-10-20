@@ -111,7 +111,7 @@ export function ScatterChart({
   onSelect?: (regionId: string) => void
 }) {
   if (!points.length) return <Empty description="暂无真实数据" />
-  const groups = Array.from(new Set(points.map((p) => p.group)))
+  const groups = Array.from(new Set(points.map((p) => p.group))).sort((a, b) => a - b)
   const clusterColors = Object.fromEntries(
     groups.map((group) => [String(group), colorFor?.(group) ?? '']),
   )

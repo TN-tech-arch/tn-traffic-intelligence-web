@@ -43,7 +43,7 @@ const slider = page.locator('input[type="range"]').first()
 const sliderMin = Number(await slider.getAttribute('min'))
 const sliderMax = Number(await slider.getAttribute('max'))
 const sliderValue = Number(await slider.inputValue())
-const sliceRow = await page.locator('.tn-inline:has-text("Time Slice")').first().innerText()
+const sliceRow = await page.locator('[data-field="m1.time_slice"]').first().innerText()
 check(
   '1a 滑块范围与当前分析范围一致',
   sliderMin >= 141 && sliderMax > sliderMin,
@@ -57,9 +57,19 @@ check(
 )
 
 // move the slider to the last instant and verify it stays in range
-await slider.fill(String(sliderMax))
-await page.waitForTimeout(2500)
-const lastRow = await page.locator('.tn-inline:has-text("Time Slice")').first().innerText()
+await slider.focus()
+await slider.press('End')
+await page
+  .waitForFunction(
+    () =>
+      document
+        .querySelector('[data-field="m1.time_slice"]')
+        ?.textContent?.includes('2013-11-15'),
+    undefined,
+    { timeout: 30000 },
+  )
+  .catch(() => undefined)
+const lastRow = await page.locator('[data-field="m1.time_slice"]').first().innerText()
 check('1d 滑到末端仍显示分析范围内时间', lastRow.includes('2013-11-15'), lastRow.replace(/\n/g, ' '))
 
 // 2. Auto / manual Max Lag
@@ -88,7 +98,17 @@ check('2b 切到手动模式时用当前生效值预填', manualValue > 0, `valu
 await manualInput.click({ clickCount: 3 })
 await manualInput.fill('200')
 await page.keyboard.press('Tab')
-await page.waitForTimeout(5000)
+await page
+  .waitForFunction(
+    () =>
+      Array.from(document.querySelectorAll('.ant-card'))
+        .find((card) => card.textContent?.includes('ACF & Trend'))
+        ?.textContent?.includes('实际生效：200'),
+    undefined,
+    { timeout: 30000 },
+  )
+  .catch(() => undefined)
+await page.waitForTimeout(800)
 const manualText = await acfCard.innerText()
 check('2c 手动值生效并显示实际值', /实际生效：200 步/.test(manualText), (manualText.match(/实际生效：.*/) ?? [''])[0])
 await manualInput.click({ clickCount: 3 })

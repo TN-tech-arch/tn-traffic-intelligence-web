@@ -175,9 +175,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\test_install.ps1
 
 | 反馈 | 改动 | 验证 |
 |---|---|---|
-| Recent Activity 看不懂 | 卡片顶部新增说明块：记录类型（Dataset/Experiment/Batch/Evaluation）、状态含义、ID 与时间的用途 | `data/screenshots/01-home.png` |
+| Recent Activity 看不懂 | 已从首页移除该面板；历史数据仍保留在模块三至五的管理入口中 | `ui_check.mjs` 断言无 Recent Activity / Timeline |
 | 地图没有区域名称 | 地图新增「显示区域名称」开关（默认开启），所有多边形按区域 ID 标注；底图切换为标准 OSM（去掉 CARTO 的 “API KEY REQUIRED” 水印） | `visual_check_m1.mjs` 输出 `map labels: 88`、`carto watermark present: false` |
-| 「时间截面位置」不明 | 滑块右侧直接显示该截面的真实时间；下方新增说明：从整条时间轴选一个时刻，看该时刻所有区域的取值快照 | `data/screenshots/10-m1-map-labels-and-explain.png` |
+| 「时间截面位置」不明 | 时间截面滑块已移入左侧 Configuration，并在控件下方显示该截面的真实时间；地图面板不再重复显示滑块 | `check_m1_layout.mjs` 27/27、`check_m1_fixes.mjs` 12/12 |
 | 统计摘要各列含义不明 | 标题旁新增「各列含义 ⓘ」（均值/峰值/P95/CV/零值逐项解释）+ 统计范围说明 | `data/screenshots/11-m1-explanations.png` |
 | 周内图只有周五、周六有线段（实为 bug） | 周内模式改为基于**完整序列**计算（原先受 2 天显示窗口限制，只有两个星期几有数据）；默认分析窗口改为 1008 点（10 分钟频率约 7 天），并注明计算依据 | API 实测 `weekly non-null days: 7`，`weekly_note` 已显示 |
 | ACF 与趋势图不明 | 新增读图说明：ACF 衡量与滞后 k 步的相关性、接近 1 / 0 / 负值的含义、斜率含义 | `data/screenshots/11-m1-explanations.png` |

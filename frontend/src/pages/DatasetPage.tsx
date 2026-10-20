@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Card, Collapse, InputNumber, Popconfirm, Tooltip, message } from 'antd'
-import dayjs, { type Dayjs } from 'dayjs'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
 import { LineChart } from '../components/Charts'
-import DateTimeField from '../components/DateTimeField'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
@@ -55,8 +53,6 @@ export default function DatasetPage() {
       { key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'], enum_labels: ['Milano', 'Trentino', 'ZTE 4G Downlink'], default: 'milano', help_zh: '选择数据集所在的数据源，一个数据集只能属于一个数据源。', suggestion_zh: '三个来源的时间范围与单位不同，请分别建模。' },
       { key: 'scope', label_zh: '预测范围', type: 'enum', enum: ['single', 'all'], enum_labels: ['单区域', '全部区域'], default: 'single', help_zh: '单区域只建模一个区域；全部区域对当前数据源全部有效区域分别建模（区域独立，不做联合空间建模）。', suggestion_zh: '先用单区域验证流程。' },
       { key: 'region_id', label_zh: '区域', type: 'enum', enum: regions.filter((r) => r.has_timeseries).map((r) => r.region_id), enum_labels: regions.filter((r) => r.has_timeseries).map((r) => regionDisplayLabel(r.region_id, r.display_name)), default: '', required: false, visible_when: { scope: 'single' }, help_zh: '单区域范围下必须选择一个有数据的区域。', suggestion_zh: '无数据区域不可选。' },
-      { key: 'time_start', label_zh: '开始日期时间', type: 'string', default: '', required: false, help_zh: '预测数据集构建时间范围的起点（含边界）。默认使用数据源完整有效范围。', suggestion_zh: '格式 YYYY-MM-DD HH:mm:ss；必须早于结束时间。' },
-      { key: 'time_end', label_zh: '结束日期时间', type: 'string', default: '', required: false, help_zh: '预测数据集构建时间范围的终点（含边界）。默认使用数据源完整有效范围。', suggestion_zh: '不能超过数据源真实结束时间。' },
       { key: 'input_length', label_zh: '输入长度（L）', type: 'integer', min: 1, max: 5000, default: 24, unit_zh: '点', help_zh: '每个样本的历史输入点数（按重采样后的点计）。', suggestion_zh: '10 分钟频率下 144 点 ≈ 1 天。' },
       { key: 'output_length', label_zh: '输出长度（H）', type: 'integer', min: 1, max: 5000, default: 6, unit_zh: '点', help_zh: '预测目标点数；Module 4/5 继承该值且不可修改。', suggestion_zh: '先用 6-24 验证流程。' },
       { key: 'step', label_zh: '滑动步长（S）', type: 'integer', min: 1, max: 5000, default: 1, unit_zh: '点', help_zh: '相邻窗口起点的间隔。', suggestion_zh: 'S 越大窗口越少、训练越快。' },
@@ -115,22 +111,6 @@ export default function DatasetPage() {
       })
       .catch(() => undefined)
   }, [config.source_key])
-
-  const bounds = useMemo(() => {
-    const start = sourceMeta?.time_start ? dayjs(sourceMeta.time_start) : null
-    const end = sourceMeta?.time_end ? dayjs(sourceMeta.time_end) : null
-    return { start, end }
-  }, [sourceMeta])
-
-  const disabledDate = useCallback(
-    (current: Dayjs) => {
-      if (!current) return false
-      if (bounds.start && current.endOf('day').isBefore(bounds.start.startOf('day'))) return true
-      if (bounds.end && current.startOf('day').isAfter(bounds.end.endOf('day'))) return true
-      return false
-    },
-    [bounds],
-  )
 
   const runPreview = async () => {
     if (!valid) {
@@ -254,8 +234,6 @@ export default function DatasetPage() {
         region_id: data.region_ids?.[0] ?? '',
         frequency: 'native',
         aggregation: 'mean',
-        time_start: data.time_start ?? null,
-        time_end: data.time_end ?? null,
         input_length: data.L,
         output_length: data.H,
         step: data.S,
@@ -348,9 +326,7 @@ export default function DatasetPage() {
                 </Button>
               }
             />
-            {visibleFields(schema, config)
-              .filter((spec) => !['time_start', 'time_end'].includes(spec.key))
-              .map((spec) => (
+            {visibleFields(schema, config).map((spec) => (
               <ParamField
                 key={spec.key}
                 spec={spec}
@@ -364,31 +340,6 @@ export default function DatasetPage() {
                 compact
               />
             ))}
-            <div className="tn-section-title">构建时间范围（Dataset Time Range）</div>
-            <DateTimeField
-              id="m3.time_start"
-              label="开始日期时间"
-              value={config.time_start as string | null}
-              issues={fieldIssues('time_start')}
-              disabledDate={disabledDate}
-              help="预测数据集使用的起始时间（含边界）。默认是数据源完整有效范围，可主动缩小。"
-              detail="日期会转换为真实索引；不会读取范围以外的观测。"
-              onChange={(value) => setConfig((prev) => ({ ...prev, time_start: value }))}
-            />
-            <DateTimeField
-              id="m3.time_end"
-              label="结束日期时间"
-              value={config.time_end as string | null}
-              issues={fieldIssues('time_end')}
-              disabledDate={disabledDate}
-              help="预测数据集使用的结束时间（含边界）。"
-              detail="不能超过数据源真实结束时间；构建后时间范围冻结在数据集快照中。"
-              onChange={(value) => setConfig((prev) => ({ ...prev, time_end: value }))}
-            />
-            <div className="tn-muted">
-              数据可用范围：{sourceMeta?.time_start ?? '—'} ～ {sourceMeta?.time_end ?? '—'} · 原生频率{' '}
-              {sourceMeta?.native_frequency_minutes ?? '—'} 分钟（不重采样）
-            </div>
             <div className="tn-inline" style={{ marginTop: 8 }}>
               <Button onClick={runPreview} loading={busy}>{ACTION_LABELS.preview}</Button>
               <Button type="primary" onClick={build} loading={busy} disabled={!valid}>{ACTION_LABELS.buildDataset}</Button>
@@ -450,7 +401,7 @@ export default function DatasetPage() {
                     {' · '}L/H/S = {String(config.input_length)}/{String(config.output_length)}/{String(config.step)}
                   </div>
                   <div>
-                    构建频率：原生 {sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 原始观测（不重采样）
+                    构建频率：原生 {sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 原始观测
                     {' · '}比例：{String(config.train_ratio)}/{String(config.val_ratio)}/{String(config.test_ratio)}
                   </div>
                   <div>

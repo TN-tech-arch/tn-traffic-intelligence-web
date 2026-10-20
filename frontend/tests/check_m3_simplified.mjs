@@ -23,7 +23,7 @@ try {
   await page.goto(`${BASE}/dataset`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(2500)
   const configPane = page.locator('.tn-three-pane > section').nth(0)
-  await configPane.locator('[data-field="m3.time_start"]').waitFor({ state: 'visible', timeout: 30000 })
+  await configPane.locator('[data-field="m3.source_key"]').waitFor({ state: 'visible', timeout: 30000 })
 
   const labels = await configPane.locator('.tn-field-label').allInnerTexts()
   check(
@@ -35,16 +35,21 @@ try {
     labels.join(' | '),
   )
   check(
-    '2 构建日期范围默认覆盖完整有效数据',
-    (await page.locator('[data-field="m3.time_start"] input').inputValue()).includes('2013-11-01') &&
-      (await page.locator('[data-field="m3.time_end"] input').inputValue()).includes('2014-01-01') &&
-      (await configPane.innerText()).includes('原生频率 10 分钟'),
-    'Milano full range',
+    '2 不再显示构建时间范围控件，默认使用数据总时间',
+    (await page.locator('[data-field="m3.time_start"]').count()) === 0 &&
+      (await page.locator('[data-field="m3.time_end"]').count()) === 0 &&
+      !(await configPane.innerText()).includes('构建时间范围') &&
+      !(await configPane.innerText()).includes('数据可用范围'),
+    'date controls and availability note removed',
   )
 
   await page.locator('#field-m3_input_length').fill('144')
   await page.locator('#field-m3_output_length').fill('24')
   await page.locator('#field-m3_step').fill('144')
+  const datasetsBefore = await page.evaluate(async () => {
+    const response = await fetch('/api/datasets')
+    return (await response.json()).datasets.map((row) => row.dataset_id)
+  })
   await configPane.locator('button').filter({ hasText: '构建数据集' }).click()
 
   await page
@@ -53,11 +58,18 @@ try {
     .first()
     .waitFor({ state: 'visible', timeout: 180000 })
 
-  createdDataset = await page.evaluate(async () => {
-    const response = await fetch('/api/datasets')
-    const rows = (await response.json()).datasets
-    return rows.find((row) => /^DS-MILANO-ADRIANO-\d{4,}$/.test(row.dataset_id))
-  })
+  for (let attempt = 0; attempt < 30 && !createdDataset; attempt += 1) {
+    createdDataset = await page.evaluate(async (baseline) => {
+      const response = await fetch('/api/datasets')
+      const rows = (await response.json()).datasets
+      return rows.find(
+        (row) =>
+          /^DS-MILANO-ADRIANO-\d{4,}$/.test(row.dataset_id) &&
+          !baseline.includes(row.dataset_id),
+      )
+    }, datasetsBefore)
+    if (!createdDataset) await page.waitForTimeout(500)
+  }
   check(
     '3 新数据集生成可读 DS ID 并作为主要名称',
     Boolean(createdDataset?.dataset_id) &&
@@ -78,13 +90,22 @@ try {
     createdDataset.dataset_id,
   )
 
-  await page.goto(`${BASE}/training`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(2500)
+  await page.goto(`${BASE}/training`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await page.locator('.ant-tabs-tab').filter({ hasText: '实验历史' }).first().waitFor({
+    state: 'visible',
+    timeout: 60000,
+  })
+  await page.waitForTimeout(1200)
   const trainingText = await page.locator('body').innerText()
   check(
-    '6 模块四继承 DS ID 且不显示高频参数或高级开关',
+    '6 模块四继承 DS ID，仅显示数据频率且不显示高级开关',
     trainingText.includes('DS-MILANO-ADRIANO-') &&
-      trainingText.includes('继承自数据集') &&
+      trainingText.includes('数据频率') &&
+      trainingText.includes('原生频率') &&
+      !trainingText.includes('数据频率 / 聚合') &&
+      !trainingText.includes('（继承自数据集）') &&
+      !trainingText.includes('仅显示核心参数') &&
+      !trainingText.includes('H 继承自数据集') &&
       (await page.locator('.tn-field-label .ant-switch').count()) === 0,
     'training inherits dataset',
   )

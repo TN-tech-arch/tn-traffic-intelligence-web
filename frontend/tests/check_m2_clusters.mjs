@@ -32,6 +32,17 @@ const configPane = page.locator('.tn-three-pane > section').nth(0)
 const centerPane = page.locator('.tn-three-pane > section').nth(1)
 const infoPane = page.locator('.tn-three-pane > section').nth(2)
 
+const selectSource = async (label) => {
+  await page.locator('[data-field="m2.source_key"] .ant-select-selector').click()
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .filter({ hasText: label })
+    .first()
+    .click()
+  await page.waitForTimeout(500)
+}
+await selectSource('Milano')
+
 const grid = page.locator('.tn-three-pane').first()
 const columns = await grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns)
 const widths = columns.split(' ').map((value) => parseFloat(value))
@@ -49,9 +60,8 @@ const initialText = await configPane.innerText()
 check(
   '2 不再显示时间分辨率与聚合方式控件',
   (await page.locator('[data-field="m2.frequency"]').count()) === 0 &&
-    (await page.locator('[data-field="m2.aggregation"]').count()) === 0 &&
-    initialText.includes('原生频率：10 分钟'),
-  'native frequency is read-only',
+    (await page.locator('[data-field="m2.aggregation"]').count()) === 0,
+  'resampling controls removed',
 )
 check(
   '3 默认分析范围覆盖完整真实数据',
@@ -72,13 +82,30 @@ check(
 await page.locator('#field-m2_n_clusters').fill('9')
 await page.locator('#field-m2_standardize').uncheck()
 await configPane.locator('button').filter({ hasText: '重置配置' }).click()
-await page.waitForTimeout(1200)
+await page.waitForFunction(
+  () => {
+    const input = document.querySelector('#field-m2_n_clusters')
+    const checkbox = document.querySelector('#field-m2_standardize')
+    return input?.value === '4' && checkbox instanceof HTMLInputElement && checkbox.checked
+  },
+  undefined,
+  { timeout: 15000 },
+)
+await page.waitForTimeout(800)
 const resetText = await configPane.innerText()
 const resetOk =
   (await page.locator('#field-m2_n_clusters').inputValue()) === '4' &&
   (await page.locator('#field-m2_standardize').isChecked()) &&
   resetText.includes('实际开始：2013-11-01 00:00:00')
-check('5 重置配置恢复核心参数并回到完整范围', resetOk, resetText.split('\n').slice(-6).join(' | '))
+check(
+  '5 重置配置恢复核心参数并回到完整范围',
+  resetOk,
+  JSON.stringify({
+    k: await page.locator('#field-m2_n_clusters').inputValue(),
+    standardize: await page.locator('#field-m2_standardize').isChecked(),
+    fullRange: resetText.includes('实际开始：2013-11-01 00:00:00'),
+  }),
+)
 
 const beforeRuns = await page.evaluate(async () => {
   const response = await fetch('/api/clusters?limit=50')
@@ -86,23 +113,41 @@ const beforeRuns = await page.evaluate(async () => {
 })
 
 await configPane.locator('button').filter({ hasText: '开始聚类' }).click()
+let started = null
+for (let attempt = 0; attempt < 60; attempt += 1) {
+  await page.waitForTimeout(1000)
+  started = await page.evaluate(async (baseline) => {
+    const response = await fetch('/api/clusters?limit=50')
+    const runs = (await response.json()).runs
+    return runs.find(
+      (run) =>
+        run.algorithm_key === 'kmeans' &&
+        !baseline.includes(run.cluster_run_id),
+    )
+  }, beforeRuns)
+  if (started) break
+}
+check('6a 当前测试创建了独立的新聚类运行', Boolean(started), started?.cluster_run_id ?? 'not created')
+if (!started) throw new Error('current Module 2 run was not created')
 await page
   .locator('.tn-history-row')
-  .filter({ hasText: /CLUS-MILANO-KMEANS-/ })
+  .filter({ hasText: started?.cluster_run_id ?? 'not-created' })
   .first()
   .waitFor({ state: 'visible', timeout: 180000 })
 
-const newest = await page.evaluate(async () => {
-  const response = await fetch('/api/clusters?limit=50')
-  return (await response.json()).runs.find(
-    (run) => run.algorithm_key === 'kmeans' && run.status === 'Completed',
-  )
-})
+let newest = started
+for (let attempt = 0; attempt < 180 && newest?.status !== 'Completed'; attempt += 1) {
+  await page.waitForTimeout(1000)
+  newest = await page.evaluate(async (runId) => {
+    const response = await fetch(`/api/clusters/${runId}`)
+    return await response.json()
+  }, started.cluster_run_id)
+}
 check(
   '6 新聚类使用可读 CLUS 标识且真实完成',
   Boolean(newest?.cluster_run_id) &&
     /^CLUS-MILANO-KMEANS-\d{4,}$/.test(newest.cluster_run_id) &&
-    !beforeRuns.includes(newest.cluster_run_id),
+    newest.status === 'Completed',
   newest?.cluster_run_id ?? 'missing',
 )
 

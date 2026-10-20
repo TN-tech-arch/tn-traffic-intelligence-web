@@ -93,6 +93,10 @@ try {
     imgSources.every((src) => !/avatar|person|cartoon|mascot|face/i.test(src)),
     imgSources.join(','),
   )
+  await page
+    .locator('.tn-stat-value')
+    .nth(3)
+    .waitFor({ state: 'visible', timeout: 30000 })
   const statValues = await page.locator('.tn-stat-value').allInnerTexts()
   record(
     'T32 首页真实数字（3 数据源 / 459 有效区域 / 12 算法 / 5 模块）',
@@ -219,6 +223,14 @@ try {
   // ------------------------------------------------------------ Module 3
   await page.click('.tn-nav-item >> text=Dataset')
   await page.waitForTimeout(2000)
+  await page
+    .locator('.tn-m3-dataset-row')
+    .first()
+    .waitFor({ state: 'visible', timeout: 30000 })
+  await page
+    .locator('[data-field="m3.region_id"] .ant-select-selection-item')
+    .first()
+    .waitFor({ state: 'visible', timeout: 30000 })
   const m3Panes = await page.locator('.tn-three-pane > section').count()
   const m3LeftText = await page.locator('.tn-three-pane > section').nth(0).innerText()
   const firstDatasetActions = await page

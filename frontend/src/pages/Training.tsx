@@ -13,7 +13,7 @@ import { useGroupValidation, useSchema } from '../validation/useValidation'
 import type { Issue as IssueType } from '../api/client'
 import { fieldDisabledReason, isVisible, visibleFields, type FieldSpec, type Values } from '../validation/engine'
 import {
-  ACTION_LABELS, MODULE_META, aggregationLabel, algorithmCategoryLabel, bilingual,
+  ACTION_LABELS, MODULE_META, algorithmCategoryLabel, bilingual,
   frequencyLabel, missingModeLabel, modeLabel, scalingLabel, scopeLabel,
   sourceDisplayName, unitDisplayLabel,
 } from '../i18n/terms'
@@ -349,9 +349,11 @@ export default function Training() {
                 <Descriptions size="small" column={1} style={{ marginTop: 8, fontSize: 11 }}>
                   <Descriptions.Item label="来源">{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</Descriptions.Item>
                   <Descriptions.Item label="预测范围">{dataset.scope === 'all' ? `全部区域（${dataset.region_count} 个区域，独立建模）` : `单区域（${dataset.region_ids?.[0]}）`}</Descriptions.Item>
-                  <Descriptions.Item label="数据频率 / 聚合">{frequencyLabel(String(dataset.frequency))} · {aggregationLabel(String(dataset.aggregation))}（继承自数据集）</Descriptions.Item>
+                  <Descriptions.Item label="数据频率">
+                    {frequencyLabel(String(dataset.frequency))}（{dataset.frequency_minutes} 分钟）
+                  </Descriptions.Item>
                   <Descriptions.Item label="构建时间范围">{dataset.time_start ?? '—'} → {dataset.time_end ?? '—'}</Descriptions.Item>
-                  <Descriptions.Item label="L / H / S">{dataset.L} / {dataset.H} / {dataset.S}（H 继承自数据集，不可修改）</Descriptions.Item>
+                  <Descriptions.Item label="L / H / S">{dataset.L} / {dataset.H} / {dataset.S}</Descriptions.Item>
                   <Descriptions.Item label="训练 / 验证 / 测试">{dataset.ratios?.train} / {dataset.ratios?.validation} / {dataset.ratios?.test}</Descriptions.Item>
                   <Descriptions.Item label="窗口数">训练 {dataset.window_counts?.train} · 验证 {dataset.window_counts?.validation} · 测试 {dataset.window_counts?.test}</Descriptions.Item>
                   <Descriptions.Item label="预处理">{missingModeLabel(dataset.preprocess?.missing_mode)} · {scalingLabel(dataset.preprocess?.scaling)}</Descriptions.Item>
@@ -419,7 +421,6 @@ export default function Training() {
             <div className="tn-field">
               <label className="tn-field-label">
                 3 · 模型参数（Model Parameters）
-                <span className="tn-muted">仅显示核心参数；高级参数使用后端统一默认值</span>
               </label>
               {isAllModels ? (
                 <>
