@@ -107,6 +107,10 @@ export const ENDPOINTS = {
   datasetBuild: '/api/datasets/build',
   datasetList: '/api/datasets?include_archived=true',
   datasetGet: (id: string) => `/api/datasets/${id}`,
+  datasetInspect: (id: string, split?: string, windowIndex = 0, regionId?: string) =>
+    `/api/datasets/${id}/inspect?window_index=${windowIndex}` +
+    `${split ? `&split=${encodeURIComponent(split)}` : ''}` +
+    `${regionId ? `&region_id=${encodeURIComponent(regionId)}` : ''}`,
   datasetWindows: (id: string, split: string, region: string, offset = 0, limit = 20) =>
     `/api/datasets/${id}/windows?split=${split}&region_id=${encodeURIComponent(region)}&offset=${offset}&limit=${limit}`,
   datasetDelete: (id: string) => `/api/datasets/${id}`,

@@ -16,6 +16,7 @@
 | M1 空间分析联动 | `node tests/check_m1_spatial.mjs` | **12/12 passed**；Top 12 / Bottom 6 / 分布图随截面更新 |
 | M1/M2 图表 X 轴、图例与 Brush 布局 | Playwright 截图对比 + `check_m1_multicity` / `check_m2_clusters` / `ui_check` | 长跨度时间轴首尾刻度完整；图例统一置底、Brush 在图例上方；1600/1200/900px 无重叠 |
 | M2 周内差异归一化开关 | `check_m2_clusters.mjs` | 默认关闭并显示原始流量；开启后各簇有效周平均＝1；Tooltip 同时显示原始均值与归一化值 |
+| M3 历史数据集打开 | `check_m3_history_open.mjs` | 四内容区来自同一 Dataset ID；连续切换/窗口导航/新旧 ID/失败重试正常；左侧未保存配置保持不变 |
 | 全站 UI 回归 | `node tests/ui_check.mjs` | **44/44 passed** |
 | 中英文与布局回归 | `node tests/check_ui_language.mjs` | **26/26 passed** |
 | Windows 安装版 | `packaging\test_install.ps1` | 静默安装 → 启动 → 数据/预览 → DS/EXP → Random Forest → Full Test 评价 → 卸载全部通过 |

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Collapse, InputNumber, Popconfirm, Tooltip, message } from 'antd'
+import { Alert, Button, Card, Collapse, InputNumber, Popconfirm, Select, Spin, Tooltip, message } from 'antd'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
@@ -39,6 +39,11 @@ export default function DatasetPage() {
   const [preview, setPreview] = useState<any>(null)
   const [datasets, setDatasets] = useState<any[]>([])
   const [selectedDataset, setSelectedDataset] = useState<any>(null)
+  const [historyView, setHistoryView] = useState<any>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyWindowBusy, setHistoryWindowBusy] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyRequest, setHistoryRequest] = useState<any>(null)
   const [previewWindowInfo, setPreviewWindowInfo] = useState<any>(null)
   const [previewWindowBusy, setPreviewWindowBusy] = useState(false)
   const [windowJumpValue, setWindowJumpValue] = useState<number>(1)
@@ -46,7 +51,7 @@ export default function DatasetPage() {
   const [busy, setBusy] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
   const previewRequested = useRef(false)
-  const skipSourceDateReset = useRef(false)
+  const historySeq = useRef(0)
 
   const schema: FieldSpec[] = useMemo(
     () => [
@@ -92,13 +97,6 @@ export default function DatasetPage() {
           const current = prev.region_id as string
           const stillValid = data.regions.some((r: any) => r.region_id === current && r.has_timeseries)
           const first = data.regions.find((r: any) => r.has_timeseries)
-          if (skipSourceDateReset.current) {
-            skipSourceDateReset.current = false
-            return {
-              ...prev,
-              region_id: stillValid ? current : first?.region_id ?? '',
-            }
-          }
           return {
             ...prev,
             region_id: stillValid ? current : first?.region_id ?? '',
@@ -117,6 +115,9 @@ export default function DatasetPage() {
       messageApi.error('存在参数错误，请先修正字段下方提示的问题。')
       return
     }
+    setSelectedDataset(null)
+    setHistoryView(null)
+    setHistoryError(null)
     setBusy(true)
     setServerIssues([])
     try {
@@ -174,14 +175,6 @@ export default function DatasetPage() {
     }
   }
 
-  const commitWindowJump = () => {
-    if (!previewWindowInfo || previewWindowBusy || previewWindowTotal === 0) return
-    const target = Math.min(Math.max(1, windowJumpValue), previewWindowTotal) - 1
-    if (target !== previewWindowIndex) {
-      loadPreviewWindow(previewWindowInfo.split, target)
-    }
-  }
-
   const previewWindow = previewWindowInfo?.window
   const previewWindowTotal = previewWindowInfo?.total ?? 0
   const previewWindowIndex = previewWindowInfo?.index ?? 0
@@ -191,7 +184,7 @@ export default function DatasetPage() {
   useEffect(() => {
     if (!previewRequested.current || !valid) return
     const timer = window.setTimeout(() => {
-      runPreviewRef.current()
+      if (previewRequested.current) runPreviewRef.current()
     }, 700)
     return () => window.clearTimeout(timer)
   }, [config, valid])
@@ -206,9 +199,11 @@ export default function DatasetPage() {
     try {
       const data = await api.post<any>(ENDPOINTS.datasetBuild, { values: config })
       messageApi.success(`数据集已构建：${data.dataset_id}`)
-      setSelectedDataset(data)
+      previewRequested.current = false
+      setPreview(null)
+      setPreviewWindowInfo(null)
       loadDatasets()
-      runPreview()
+      await openDataset(data.dataset_id)
     } catch (err) {
       if (err instanceof ApiError) {
         setServerIssues(err.issues)
@@ -219,61 +214,113 @@ export default function DatasetPage() {
     }
   }
 
-  const openDataset = async (datasetId: string) => {
-    try {
-      const data = await api.get<any>(ENDPOINTS.datasetGet(datasetId))
-      setSelectedDataset(data)
-      previewRequested.current = false
+  const loadHistoryDataset = async (
+    datasetId: string,
+    options: { split?: string; windowIndex?: number; regionId?: string; windowOnly?: boolean } = {},
+  ) => {
+    const seq = ++historySeq.current
+    const windowIndex = options.windowIndex ?? 0
+    setHistoryError(null)
+    setHistoryRequest({
+      datasetId,
+      split: options.split,
+      windowIndex,
+      regionId: options.regionId,
+    })
+    previewRequested.current = false
+    if (options.windowOnly) {
+      setHistoryWindowBusy(true)
+    } else {
+      setHistoryLoading(true)
+      setHistoryView(null)
+      setSelectedDataset(null)
       setPreview(null)
       setPreviewWindowInfo(null)
-      skipSourceDateReset.current = String(data.source_key) !== String(config.source_key)
-      setConfig((prev) => ({
-        ...prev,
-        source_key: data.source_key,
-        scope: data.scope,
-        region_id: data.region_ids?.[0] ?? '',
-        frequency: 'native',
-        aggregation: 'mean',
-        input_length: data.L,
-        output_length: data.H,
-        step: data.S,
-        train_ratio: data.ratios.train,
-        val_ratio: data.ratios.validation,
-        test_ratio: data.ratios.test,
-        missing_mode: data.preprocess?.missing_mode ?? 'automatic',
-        scaling: data.preprocess?.scaling ?? 'standard',
-      }))
-      messageApi.success(`已打开 ${datasetId}（历史参数被冻结，修改需另存新的数据集 ID）`)
+    }
+    try {
+      const data = await api.get<any>(
+        ENDPOINTS.datasetInspect(datasetId, options.split, windowIndex, options.regionId),
+      )
+      if (seq !== historySeq.current) return
+      setHistoryView(data)
+      setSelectedDataset(data.dataset)
+      setWindowJumpValue((data.window_index ?? 0) + 1)
+      if (!options.windowOnly) {
+        messageApi.success(`已打开历史数据集 ${datasetId}`)
+      }
     } catch (err) {
-      messageApi.error(String(err))
+      if (seq !== historySeq.current) return
+      const detail = err instanceof ApiError ? err.message : String(err)
+      setHistoryError(detail)
+      messageApi.error(`历史数据集加载失败：${detail}`)
+    } finally {
+      if (seq === historySeq.current) {
+        setHistoryLoading(false)
+        setHistoryWindowBusy(false)
+      }
     }
   }
 
-  const train: any[] = preview?.split_boundaries ?? []
+  const openDataset = (datasetId: string) => loadHistoryDataset(datasetId)
+
+  const splitRows: any[] = historyView?.splits ?? preview?.split_boundaries ?? []
   const previewWindowStats = previewWindowInfo?.stats?.[previewWindowInfo?.split] ?? {
     candidate_windows: previewWindowInfo?.candidate ?? 0,
     valid_windows: previewWindowTotal,
     excluded_windows: previewWindowInfo?.excluded ?? 0,
   }
-  const previewXLength = previewWindow?.X?.length ?? 0
-  const previewYLength = previewWindow?.Y?.length ?? 0
-  const previewChartX = previewWindow
-    ? [...(previewWindow.X_timestamps ?? []), ...(previewWindow.Y_timestamps ?? [])]
+  const displayWindow = historyView ? historyView.window : previewWindow
+  const displaySplit = historyView?.split ?? previewWindowInfo?.split ?? ''
+  const displayRegion = historyView?.region_id ?? preview?.preview_region_id ?? ''
+  const displayTotal = historyView?.total_windows ?? previewWindowTotal
+  const displayIndex = historyView?.window_index ?? previewWindowIndex
+  const displayBusy = historyView ? historyWindowBusy : previewWindowBusy
+  const displayStats = historyView?.split_stats?.[displaySplit] ?? previewWindowStats
+  const displayL = historyView?.dataset?.L ?? preview?.L ?? Number(config.input_length)
+  const displayH = historyView?.dataset?.H ?? preview?.H ?? Number(config.output_length)
+  const displayS = historyView?.dataset?.S ?? preview?.S ?? Number(config.step)
+  const displayWindowCounts =
+    historyView?.dataset?.window_counts ?? preview?.window_counts ?? selectedDataset?.window_counts ?? {}
+  const displayXLength = displayWindow?.X?.length ?? 0
+  const displayYLength = displayWindow?.Y?.length ?? 0
+  const previewChartX = displayWindow
+    ? [...(displayWindow.X_timestamps ?? []), ...(displayWindow.Y_timestamps ?? [])]
     : []
-  const previewChartSeries = previewWindow
+  const previewChartSeries = displayWindow
     ? [
         {
-          name: `X 历史输入（L=${preview?.L ?? config.input_length}）`,
-          data: [...previewWindow.X, ...Array(previewYLength).fill(null)],
+          name: `X 历史输入（L=${displayL}）`,
+          data: [...displayWindow.X, ...Array(displayYLength).fill(null)],
           color: '#2467E8',
         },
         {
-          name: `Y 预测目标（H=${preview?.H ?? config.output_length}）`,
-          data: [...Array(previewXLength).fill(null), ...previewWindow.Y],
+          name: `Y 预测目标（H=${displayH}）`,
+          data: [...Array(displayXLength).fill(null), ...displayWindow.Y],
           color: '#D98F00',
         },
       ]
     : []
+
+  const loadSelectedWindow = (split: string, index: number, regionId = displayRegion) => {
+    if (historyView?.dataset) {
+      loadHistoryDataset(historyView.dataset.dataset_id, {
+        split,
+        windowIndex: index,
+        regionId,
+        windowOnly: true,
+      })
+    } else {
+      loadPreviewWindow(split, index)
+    }
+  }
+
+  const commitWindowJump = () => {
+    if (!displayWindow || displayBusy || displayTotal === 0) return
+    const target = Math.min(Math.max(1, windowJumpValue), displayTotal) - 1
+    if (target !== displayIndex) {
+      loadSelectedWindow(displaySplit, target)
+    }
+  }
   const datasetPageSize = 6
   const datasetPageCount = Math.max(1, Math.ceil(datasets.length / datasetPageSize))
   const currentDatasetPage = Math.min(datasetPage, datasetPageCount - 1)
@@ -301,6 +348,42 @@ export default function DatasetPage() {
       {serverIssues.length > 0 ? (
         <Alert type="error" showIcon style={{ marginBottom: 10 }} message="后端拒绝了请求（未产生任何数据）" description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')} />
       ) : null}
+      {historyLoading ? (
+        <Alert
+          type="info"
+          showIcon
+          icon={<Spin size="small" />}
+          style={{ marginBottom: 10 }}
+          message="正在加载历史数据集…"
+          description={historyRequest?.datasetId ?? ''}
+        />
+      ) : null}
+      {historyError ? (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message="历史数据集加载失败"
+          description={historyError}
+          action={
+            <Button
+              size="small"
+              disabled={!historyRequest?.datasetId}
+              onClick={() => {
+                if (!historyRequest?.datasetId) return
+                loadHistoryDataset(historyRequest.datasetId, {
+                  split: historyRequest.split,
+                  windowIndex: historyRequest.windowIndex ?? 0,
+                  regionId: historyRequest.regionId,
+                  windowOnly: Boolean(historyView),
+                })
+              }}
+            >
+              重试
+            </Button>
+          }
+        />
+      ) : null}
       <ThreePane
         variant="two"
         config={
@@ -321,6 +404,9 @@ export default function DatasetPage() {
                   setPreview(null)
                   setPreviewWindowInfo(null)
                   setSelectedDataset(null)
+                  setHistoryView(null)
+                  setHistoryError(null)
+                  setHistoryLoading(false)
                 }}>
                   {ACTION_LABELS.reset}
                 </Button>
@@ -394,62 +480,121 @@ export default function DatasetPage() {
           <div className="tn-stack">
             <Card size="small" style={{ order: 1 }} title="1 · 数据集概览（Dataset Overview）">
               <div className="tn-stack" data-testid="dataset-overview">
-                <div className="tn-muted">
-                  <div>
-                    当前配置：{sourceDisplayName(String(config.source_key), String(config.source_key))}
-                    {' · '}{config.scope === 'all' ? `全部区域（${regions.filter((r) => r.has_timeseries).length}）` : `单区域（${regionDisplayLabel(String(config.region_id), regions.find((r) => r.region_id === config.region_id)?.display_name)}）`}
-                    {' · '}L/H/S = {String(config.input_length)}/{String(config.output_length)}/{String(config.step)}
-                  </div>
-                  <div>
-                    构建频率：原生 {sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 原始观测
-                    {' · '}比例：{String(config.train_ratio)}/{String(config.val_ratio)}/{String(config.test_ratio)}
-                  </div>
-                  <div>
-                    构建范围：{String(config.time_start ?? '完整有效范围').replace('T', ' ')}
-                    {' ～ '}{String(config.time_end ?? '完整有效范围').replace('T', ' ')}
-                  </div>
-                  <div>
-                    预处理默认规则：{missingModeLabel(String(config.missing_mode))} · {scalingLabel(String(config.scaling))}
-                  </div>
-                  <div>
-                    状态：{selectedDataset
-                      ? `已保存 ${selectedDataset.dataset_id} · ${statusLabel(selectedDataset.status)}`
-                      : preview
-                        ? '当前草稿已预览，尚未保存'
-                        : '当前草稿尚未预览'}
-                  </div>
-                </div>
-                {(preview || selectedDataset) ? (
+                {selectedDataset ? (
                   <div className="tn-muted">
+                    <div><strong>数据集 ID：</strong>{selectedDataset.dataset_id}</div>
                     <div>
-                      窗口数：训练 {preview?.window_counts?.train ?? selectedDataset?.window_counts?.train ?? 0}
-                      {' · '}验证 {preview?.window_counts?.validation ?? selectedDataset?.window_counts?.validation ?? 0}
-                      {' · '}测试 {preview?.window_counts?.test ?? selectedDataset?.window_counts?.test ?? 0}
+                      <strong>数据源：</strong>{selectedDataset.source_display_name ?? selectedDataset.source_key}
+                      {' · '}<strong>预测范围：</strong>{scopeLabel(selectedDataset.scope)}
                     </div>
                     <div>
-                      首个有效 X/Y 起点：{preview?.preview_first_input_start_at ?? '—'}
-                      {' · '}最后有效 Y 目标：{preview?.preview_last_target_end_at ?? '—'}
+                      <strong>区域：</strong>{selectedDataset.scope === 'all'
+                        ? `全部有效区域（${selectedDataset.region_count}）`
+                        : (selectedDataset.region_ids ?? []).join('、') || '—'}
+                    </div>
+                    <div>
+                      <strong>时间范围：</strong>{selectedDataset.time_start ?? '—'} ～ {selectedDataset.time_end ?? '—'}
+                    </div>
+                    <div>
+                      <strong>L/H/S：</strong>{selectedDataset.L}/{selectedDataset.H}/{selectedDataset.S}
+                      {' · '}<strong>频率：</strong>原生 {selectedDataset.frequency_minutes} 分钟
+                    </div>
+                    <div>
+                      <strong>实际窗口数：</strong>训练 {selectedDataset.window_counts?.train ?? 0}
+                      {' · '}验证 {selectedDataset.window_counts?.validation ?? 0}
+                      {' · '}测试 {selectedDataset.window_counts?.test ?? 0}
+                    </div>
+                    <div>
+                      <strong>状态：</strong>{statusLabel(selectedDataset.status)}
+                      {' · '}<strong>预处理：</strong>
+                      {missingModeLabel(selectedDataset.preprocess?.missing_mode)} · {scalingLabel(selectedDataset.preprocess?.scaling)}
+                    </div>
+                    <div>
+                      <strong>首个有效输入：</strong>{historyView?.window?.input_start_at ?? '—'}
+                      {' · '}<strong>最后有效目标：</strong>
+                      {historyView?.splits?.find((row: any) => row.split === 'test')?.end_at
+                        ?? historyView?.splits?.slice(-1)?.[0]?.end_at
+                        ?? selectedDataset.time_end
+                        ?? '—'}
                     </div>
                   </div>
-                ) : null}
+                ) : (
+                  <>
+                    <div className="tn-muted">
+                      <div>
+                        当前配置：{sourceDisplayName(String(config.source_key), String(config.source_key))}
+                        {' · '}{config.scope === 'all' ? `全部区域（${regions.filter((r) => r.has_timeseries).length}）` : `单区域（${regionDisplayLabel(String(config.region_id), regions.find((r) => r.region_id === config.region_id)?.display_name)}）`}
+                        {' · '}L/H/S = {String(config.input_length)}/{String(config.output_length)}/{String(config.step)}
+                      </div>
+                      <div>
+                        构建频率：原生 {sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 原始观测
+                        {' · '}比例：{String(config.train_ratio)}/{String(config.val_ratio)}/{String(config.test_ratio)}
+                      </div>
+                      <div>
+                        构建范围：{String(config.time_start ?? '完整有效范围').replace('T', ' ')}
+                        {' ～ '}{String(config.time_end ?? '完整有效范围').replace('T', ' ')}
+                      </div>
+                      <div>
+                        预处理默认规则：{missingModeLabel(String(config.missing_mode))} · {scalingLabel(String(config.scaling))}
+                      </div>
+                      <div>
+                        状态：{preview ? '当前草稿已预览，尚未保存' : '当前草稿尚未预览'}
+                      </div>
+                    </div>
+                    {preview ? (
+                      <div className="tn-muted">
+                        <div>
+                          窗口数：训练 {preview.window_counts?.train ?? 0}
+                          {' · '}验证 {preview.window_counts?.validation ?? 0}
+                          {' · '}测试 {preview.window_counts?.test ?? 0}
+                        </div>
+                        <div>
+                          首个有效 X/Y 起点：{preview.preview_first_input_start_at ?? '—'}
+                          {' · '}最后有效 Y 目标：{preview.preview_last_target_end_at ?? '—'}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             </Card>
 
             <div data-testid="sliding-window-preview" style={{ order: 3 }}>
             <Card size="small" title="3 · 滑动窗口预览（Sliding Window Preview）">
-              {previewWindow ? (
+              {displayWindow ? (
                 <>
+                  {historyView && (historyView.dataset.region_ids?.length ?? 0) > 1 ? (
+                    <div className="tn-inline" style={{ marginBottom: 8 }}>
+                      <span className="tn-muted">预览区域：</span>
+                      <Select
+                        size="small"
+                        value={displayRegion}
+                        style={{ minWidth: 180 }}
+                        options={(historyView.dataset.region_ids ?? []).map((region: string) => ({
+                          value: region,
+                          label: regionDisplayLabel(
+                            region,
+                            regions.find((item) => item.region_id === region)?.display_name,
+                          ),
+                        }))}
+                        disabled={historyWindowBusy}
+                        onChange={(region) => loadSelectedWindow(displaySplit, 0, region)}
+                      />
+                    </div>
+                  ) : null}
                   <div className="tn-inline" style={{ marginBottom: 8 }}>
                     <span className="tn-muted">数据集划分：</span>
                     {['train', 'validation', 'test'].map((split) => {
-                      const count = previewWindowInfo?.stats?.[split]?.valid_windows ?? 0
+                      const count = historyView
+                        ? historyView.split_stats?.[split]?.valid_windows ?? 0
+                        : previewWindowInfo?.stats?.[split]?.valid_windows ?? 0
                       return (
                         <Button
                           key={split}
                           size="small"
-                          type={previewWindowInfo?.split === split ? 'primary' : 'default'}
-                          disabled={count === 0 || previewWindowBusy}
-                          onClick={() => loadPreviewWindow(split, 0)}
+                          type={displaySplit === split ? 'primary' : 'default'}
+                          disabled={count === 0 || displayBusy}
+                          onClick={() => loadSelectedWindow(split, 0)}
                         >
                           {splitLabel(split)}（{count}）
                         </Button>
@@ -459,42 +604,42 @@ export default function DatasetPage() {
                   <div className="tn-inline" style={{ marginBottom: 8 }}>
                     <Button
                       size="small"
-                      disabled={previewWindowBusy || previewWindowIndex <= 0}
-                      onClick={() => loadPreviewWindow(previewWindowInfo.split, previewWindowIndex - 1)}
+                      disabled={displayBusy || displayIndex <= 0}
+                      onClick={() => loadSelectedWindow(displaySplit, displayIndex - 1)}
                     >
                       上一窗口
                     </Button>
                     <Button
                       size="small"
-                      disabled={previewWindowBusy || previewWindowIndex >= previewWindowTotal - 1}
-                      onClick={() => loadPreviewWindow(previewWindowInfo.split, previewWindowIndex + 1)}
+                      disabled={displayBusy || displayIndex >= displayTotal - 1}
+                      onClick={() => loadSelectedWindow(displaySplit, displayIndex + 1)}
                     >
                       下一窗口
                     </Button>
                     <span className="tn-muted">
-                      当前窗口 {previewWindowIndex + 1} / {previewWindowTotal}
+                      当前窗口 {displayIndex + 1} / {displayTotal}
                     </span>
                     <InputNumber
                       size="small"
                       min={1}
-                      max={Math.max(1, previewWindowTotal)}
+                      max={Math.max(1, displayTotal)}
                       value={windowJumpValue}
-                      disabled={previewWindowBusy || previewWindowTotal === 0}
+                      disabled={displayBusy || displayTotal === 0}
                       onChange={(value) => setWindowJumpValue(typeof value === 'number' ? value : 1)}
                       onPressEnter={commitWindowJump}
                       style={{ width: 96 }}
                       aria-label="窗口序号"
                     />
-                    <Button size="small" disabled={previewWindowBusy || previewWindowTotal === 0} onClick={commitWindowJump}>
+                    <Button size="small" disabled={displayBusy || displayTotal === 0} onClick={commitWindowJump}>
                       跳转
                     </Button>
                   </div>
                   <div className="tn-muted" style={{ marginBottom: 6 }}>
-                    区域 {preview.preview_region_id} · X：{previewWindow.input_start_at} → {previewWindow.input_end_at}
-                    {' '}· Y：{previewWindow.target_start_at} → {previewWindow.target_end_at}
-                    {' '}· L/H/S = {preview.L}/{preview.H}/{preview.S}
-                    {previewWindow.imputed_input_positions?.length
-                      ? ` · X 含 ${previewWindow.imputed_input_positions.length} 个因果插值点`
+                    区域 {displayRegion} · X：{displayWindow.input_start_at} → {displayWindow.input_end_at}
+                    {' '}· Y：{displayWindow.target_start_at} → {displayWindow.target_end_at}
+                    {' '}· L/H/S = {displayL}/{displayH}/{displayS}
+                    {displayWindow.imputed_input_positions?.length
+                      ? ` · X 含 ${displayWindow.imputed_input_positions.length} 个因果插值点`
                       : ''}
                   </div>
                   <LineChart
@@ -503,58 +648,79 @@ export default function DatasetPage() {
                     series={previewChartSeries}
                     xName="真实时间"
                     yName="数值"
-                    empty={!preview}
+                    empty={!displayWindow}
                   />
                   <div className="tn-muted" style={{ marginTop: 4 }}>
                     <div>
-                      当前划分 {splitLabel(previewWindowInfo.split)}：候选窗口 {previewWindowStats.candidate_windows}，
-                      有效窗口 {previewWindowStats.valid_windows}，排除窗口 {previewWindowStats.excluded_windows}。
+                      当前划分 {splitLabel(displaySplit)}：候选窗口 {displayStats.candidate_windows}，
+                      有效窗口 {displayStats.valid_windows}，排除窗口 {displayStats.excluded_windows}。
                     </div>
                     <div>
-                      窗口起点每前进 S={preview.S} 个时间点；相邻窗口共享最多{' '}
-                      {Math.max(0, Number(preview.L) - Number(preview.S))} 个输入点
+                      窗口起点每前进 S={displayS} 个时间点；相邻窗口共享最多{' '}
+                      {Math.max(0, Number(displayL) - Number(displayS))} 个输入点
                       （L−S，最小为 0）。X 使用历史输入，Y 为后续目标；Y 目标均为真实观测，缺失目标不会补造。
                     </div>
                     <div>
-                      X 可利用预测起点之前的因果插值；切换数据源、区域、日期范围或 L/H/S 后，
-                      自动重新计算窗口。
+                      {historyView
+                        ? '当前显示已保存数据集冻结的真实窗口；修改左侧未保存配置不会改变此历史视图。'
+                        : 'X 可利用预测起点之前的因果插值；切换数据源、区域、日期范围或 L/H/S 后，自动重新计算窗口。'}
                     </div>
                   </div>
                 </>
               ) : (
-                <EmptyState text="点击“实时预览”后显示真实有效窗口。" />
+                <EmptyState
+                  text={
+                    historyLoading
+                      ? '正在加载历史数据集的真实窗口…'
+                      : selectedDataset
+                        ? '该历史数据集没有可用窗口，请查看数据质量摘要。'
+                        : '点击“实时预览”后显示真实有效窗口。'
+                  }
+                />
               )}
             </Card>
             </div>
 
             <Card size="small" style={{ order: 2 }} title="2 · 时间顺序划分预览（Chronological Split Preview）">
-              {train.length ? (
+              {splitRows.length ? (
                 <>
                   <table style={{ width: '100%', fontSize: 12 }}>
                     <thead>
                       <tr style={{ color: '#5b7095', textAlign: 'left' }}>
-                        <th>数据集划分</th><th>时间范围</th><th>窗口数</th><th>候选窗口</th>
+                        <th>数据集划分</th><th>时间范围</th><th>候选窗口</th><th>有效窗口</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {train.map((row: any) => (
+                      {splitRows.map((row: any) => (
                         <tr key={row.split} style={{ borderTop: '1px dashed #e3ebf6' }}>
                           <td>{splitLabel(row.split)}</td>
                           <td className="tn-muted">{row.start_at} → {row.end_at}</td>
-                          <td>{row.window_count}</td>
-                          <td>{row.candidate_windows}</td>
+                          <td>{row.dataset_candidate_windows ?? row.candidate_windows ?? 0}</td>
+                          <td>{row.dataset_valid_windows ?? row.window_count ?? 0}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                   <LineChart
                     height={170}
-                    x={train.map((row: any) => row.split)}
+                    x={splitRows.map((row: any) => row.split)}
                     xName="数据集划分"
                     yName="窗口数"
                     series={[
-                      { name: '窗口数', data: train.map((row: any) => row.window_count), type: 'bar' },
-                      { name: '候选窗口', data: train.map((row: any) => row.candidate_windows), type: 'bar' },
+                      {
+                        name: '有效窗口',
+                        data: splitRows.map(
+                          (row: any) => row.dataset_valid_windows ?? row.window_count ?? 0,
+                        ),
+                        type: 'bar',
+                      },
+                      {
+                        name: '候选窗口',
+                        data: splitRows.map(
+                          (row: any) => row.dataset_candidate_windows ?? row.candidate_windows ?? 0,
+                        ),
+                        type: 'bar',
+                      },
                     ]}
                   />
                 </>
@@ -565,7 +731,43 @@ export default function DatasetPage() {
 
             <Card size="small" style={{ order: 4 }} title="4 · 数据质量摘要（Data Quality Summary）">
               <div className="tn-stack" data-testid="data-quality-summary">
-                {preview ? (
+                {selectedDataset ? (
+                  (historyView?.quality && Object.keys(historyView.quality).length) ? (
+                    <div className="tn-muted">
+                      <div>
+                        时间点数：{historyView.quality.time_points ?? '—'}
+                        {selectedDataset.time_start ? `（${selectedDataset.time_start} → ${selectedDataset.time_end}）` : ''}
+                      </div>
+                      <div>区域数：{historyView.quality.regions ?? selectedDataset.region_count}</div>
+                      <div>
+                        原始缺失点：{historyView.quality.missing_points_before ?? '—'}
+                        {' · '}缺失处理：{missingModeLabel(String(historyView.quality.missing_mode ?? selectedDataset.preprocess?.missing_mode ?? 'automatic'))}
+                      </div>
+                      <div>因果插值点：{historyView.quality.imputed_points ?? 0}</div>
+                      <div>真实零值保留：{historyView.quality.zero_values_kept ?? 0}</div>
+                      <div>
+                        候选窗口：训练 {historyView.quality.candidate_windows?.train ?? '—'}
+                        {' · '}验证 {historyView.quality.candidate_windows?.validation ?? '—'}
+                        {' · '}测试 {historyView.quality.candidate_windows?.test ?? '—'}
+                      </div>
+                      <div>
+                        有效窗口：训练 {historyView.quality.valid_windows?.train ?? selectedDataset.window_counts?.train ?? '—'}
+                        {' · '}验证 {historyView.quality.valid_windows?.validation ?? selectedDataset.window_counts?.validation ?? '—'}
+                        {' · '}测试 {historyView.quality.valid_windows?.test ?? selectedDataset.window_counts?.test ?? '—'}
+                      </div>
+                      <div>
+                        数据泄漏检查：{historyView.quality.leakage_check ?? '历史记录未保存此项检查说明'}
+                      </div>
+                    </div>
+                  ) : (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="该历史数据集没有完整的数据质量记录"
+                      description="数据集本身及窗口仍可查看，但旧记录可能未保存缺失值或泄漏检查摘要。"
+                    />
+                  )
+                ) : preview ? (
                   <div className="tn-muted">
                     <div>时间点数：{preview.time_points}（{preview.time_start} → {preview.time_end}）</div>
                     <div>区域数：{preview.region_count} · 原始缺失点：{preview.missing?.missing_points_before}</div>
@@ -579,7 +781,7 @@ export default function DatasetPage() {
                 ) : (
                   <EmptyState text="实时预览后显示当前草稿的完整质量摘要。" />
                 )}
-                {selectedDataset?.quality ? (
+                {selectedDataset?.quality && Object.keys(selectedDataset.quality).length ? (
                   <Collapse
                     size="small"
                     ghost

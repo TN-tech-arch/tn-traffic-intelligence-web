@@ -1,5 +1,7 @@
 """Module 3 sliding-window preview and saved-dataset consistency tests."""
 
+import re
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -115,3 +117,55 @@ def test_preview_window_matches_the_saved_dataset_window():
         assert saved_window["Y"] == preview_window["window"]["Y"]
     finally:
         client.delete(f"/api/datasets/{dataset_id}")
+
+
+def test_saved_dataset_inspect_returns_all_four_history_sections():
+    built = client.post("/api/datasets/build", json=_payload())
+    assert built.status_code == 200, built.text
+    dataset_id = built.json()["dataset_id"]
+    try:
+        response = client.get(f"/api/datasets/{dataset_id}/inspect")
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["dataset"]["dataset_id"] == dataset_id
+        assert len(data["splits"]) == 3
+        assert {row["split"] for row in data["splits"]} == {"train", "validation", "test"}
+        assert data["quality"]["time_points"] > 0
+        assert data["quality"]["regions"] == 1
+        assert data["window"]["X"] and data["window"]["Y"]
+        assert len(data["window"]["X"]) == data["dataset"]["L"]
+        assert len(data["window"]["Y"]) == data["dataset"]["H"]
+
+        next_window = client.get(
+            f"/api/datasets/{dataset_id}/inspect",
+            params={"split": data["split"], "window_index": 1},
+        )
+        assert next_window.status_code == 200, next_window.text
+        assert next_window.json()["window_index"] == 1
+
+        invalid = client.get(
+            f"/api/datasets/{dataset_id}/inspect",
+            params={"split": data["split"], "window_index": data["total_windows"]},
+        )
+        assert invalid.status_code == 409
+        assert invalid.json()["code"] == "WINDOW_INDEX_OUT_OF_RANGE"
+    finally:
+        client.delete(f"/api/datasets/{dataset_id}")
+
+
+def test_dataset_inspect_supports_legacy_ids_and_reports_missing_datasets():
+    old = next(
+        (
+            row
+            for row in client.get("/api/datasets").json()["datasets"]
+            if not re.search(r"-\d{4,}$", row["dataset_id"])
+        ),
+        None,
+    )
+    if old:
+        response = client.get(f"/api/datasets/{old['dataset_id']}/inspect")
+        assert response.status_code == 200, response.text
+        assert response.json()["dataset"]["dataset_id"] == old["dataset_id"]
+
+    missing = client.get("/api/datasets/DS-DOES-NOT-EXIST/inspect")
+    assert missing.status_code == 404

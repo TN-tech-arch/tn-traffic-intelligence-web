@@ -12,6 +12,7 @@ from app.services.datasets import (
     create_dataset,
     delete_dataset,
     get_dataset,
+    inspect_dataset,
     list_datasets,
     preview_dataset,
     preview_window,
@@ -106,6 +107,21 @@ def list_all(include_archived: bool = Query(True)) -> dict:
 @router.get("/{dataset_id}")
 def detail(dataset_id: str) -> dict:
     return get_dataset(dataset_id)
+
+
+@router.get("/{dataset_id}/inspect")
+def inspect(
+    dataset_id: str,
+    split: str | None = Query(None),
+    window_index: int = Query(0, ge=0),
+    region_id: str | None = Query(None),
+) -> dict:
+    return inspect_dataset(
+        dataset_id,
+        split=split,
+        window_index=window_index,
+        region_id=region_id,
+    )
 
 
 @router.get("/{dataset_id}/windows")

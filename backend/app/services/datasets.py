@@ -257,8 +257,16 @@ def _window_payload(
 ) -> dict[str, Any]:
     x_start, x_end = int(start), int(start + L - 1)
     y_start, y_end = int(start + L), int(start + L + H - 1)
-    column = pre.filled[:, region_index]
-    observed = pre.observed[:, region_index]
+    values = pre.values if hasattr(pre, "values") else None
+    filled = pre.filled if hasattr(pre, "filled") else values
+    observed_values = pre.observed if hasattr(pre, "observed") else np.isfinite(values)
+    imputed_end = (
+        pre.imputed_end
+        if hasattr(pre, "imputed_end")
+        else np.full(values.shape, -1, dtype="int32")
+    )
+    column = filled[:, region_index]
+    observed = observed_values[:, region_index]
     return {
         "origin_index": int(start),
         "input_start_at": _ts(data.timestamps, x_start),
@@ -274,7 +282,7 @@ def _window_payload(
         "imputed_input_positions": [
             i - x_start
             for i in range(x_start, x_end + 1)
-            if pre.imputed_end[i, region_index] >= 0
+            if imputed_end[i, region_index] >= 0
         ],
     }
 
@@ -410,6 +418,96 @@ def preview_window(
         "H": int(H),
         "S": int(S),
         "window": _window_payload(data, pre, sridx, int(starts[window_index]), L, H),
+    }
+
+
+def inspect_dataset(
+    dataset_id: str,
+    *,
+    split: str | None = None,
+    window_index: int = 0,
+    region_id: str | None = None,
+) -> dict[str, Any]:
+    """Read a saved dataset artifact for the history inspector.
+
+    This never uses the unsaved UI configuration and never rebuilds a dataset.
+    """
+    try:
+        bundle = load_dataset(dataset_id)
+    except (FileNotFoundError, OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
+        raise Conflict(
+            f"数据集 {dataset_id} 的工件文件缺失或配置不完整：{exc}",
+            code="DATASET_ARTIFACT_INVALID",
+        ) from exc
+    selected_region = region_id if region_id in bundle.region_ids else bundle.region_ids[0]
+    region_index = bundle.region_index(selected_region)
+    quality = bundle.dataset.get("quality") or {}
+    global_candidates = quality.get("candidate_windows") or {}
+    global_valid = quality.get("valid_windows") or bundle.dataset.get("window_counts") or {}
+
+    split_stats: dict[str, dict[str, int]] = {}
+    starts_by_split: dict[str, np.ndarray] = {}
+    for name in win.SPLIT_NAMES:
+        entry = bundle.window_ranges[name][region_index]
+        candidates = (
+            0
+            if entry["high"] < entry["low"]
+            else (entry["high"] - entry["low"]) // entry["step"] + 1
+        )
+        starts = bundle.valid_starts(selected_region, name)
+        starts_by_split[name] = starts
+        split_stats[name] = {
+            "candidate_windows": int(candidates),
+            "valid_windows": int(starts.size),
+            "excluded_windows": int(candidates - starts.size),
+            "dataset_candidate_windows": int(global_candidates.get(name, candidates)),
+            "dataset_valid_windows": int(global_valid.get(name, starts.size)),
+        }
+
+    selected_split = split if split in win.SPLIT_NAMES else next(
+        (name for name in ("test", "validation", "train") if starts_by_split[name].size),
+        "train",
+    )
+    starts = starts_by_split[selected_split]
+    if starts.size and (window_index < 0 or window_index >= starts.size):
+        raise Conflict(
+            f"窗口序号必须在 1 到 {starts.size} 之间，收到 {window_index + 1}。",
+            code="WINDOW_INDEX_OUT_OF_RANGE",
+        )
+    selected_index = int(window_index) if starts.size else 0
+    window = (
+        _window_payload(
+            bundle,
+            bundle,
+            region_index,
+            int(starts[selected_index]),
+            bundle.L,
+            bundle.H,
+        )
+        if starts.size
+        else None
+    )
+    boundaries = bundle.dataset.get("split_boundaries") or []
+    splits = []
+    for row in boundaries:
+        name = row.get("split")
+        if name not in split_stats:
+            continue
+        splits.append({**row, **split_stats[name]})
+
+    return {
+        "dataset": bundle.dataset,
+        "region_id": selected_region,
+        "split": selected_split,
+        "window_index": selected_index,
+        "total_windows": int(starts.size),
+        "candidate_windows": split_stats[selected_split]["candidate_windows"],
+        "excluded_windows": split_stats[selected_split]["excluded_windows"],
+        "overlap_points": max(0, bundle.L - bundle.S),
+        "split_stats": split_stats,
+        "splits": splits,
+        "quality": quality,
+        "window": window,
     }
 
 
