@@ -63,3 +63,13 @@ def test_zte_respects_no_data_regions():
     assert data["no_data_region_count"] == 0  # no missing values inside the 148 time-series regions
     assert data["gis_no_data_count"] == 14     # GIS-only polygons are reported separately
     assert len(data["top"]) == 12
+
+
+def test_time_slice_index_is_clamped_to_the_analysis_range():
+    first = client.post("/api/analysis/spatial", json=payload(time_index=0)).json()
+    assert first["time_index"] == first["range"]["start_index"]
+    assert first["time_at"].startswith("2013-11-01 00:00:00")
+
+    last = client.post("/api/analysis/spatial", json=payload(time_index=999999)).json()
+    assert last["time_index"] == last["range"]["end_index"] - 1
+    assert last["time_at"].startswith("2013-11-07 23:50:00")

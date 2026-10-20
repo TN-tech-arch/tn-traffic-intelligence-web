@@ -299,18 +299,16 @@ def spatial_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     aggregation = payload.get("aggregation", "mean")
     data = resample(source["key"], frequency=frequency, aggregation=aggregation)
     total = int(data.timestamps.size)
-    index_value = payload.get("time_index")
-    if index_value is None:
-        index_value = total - 1
-    index_value = int(np.clip(int(index_value), 0, max(0, total - 1)))
-    slice_values = data.values[index_value]
 
     # The analysis range only feeds the range statistics; the map slice is an
-    # independent "one instant" view and never changes the range statistics.
+    # independent "one instant" view. Its index is nevertheless clamped to the
+    # resolved range so a bypassing client can never display outside the range.
     range_info: dict[str, Any] = {}
     range_means: dict[str, float | None] = {}
     range_counts: dict[str, int] = {}
     range_warnings: list[str] = []
+    slice_low = 0
+    slice_high = max(0, total - 1)
     try:
         resolved = resolve_range(
             source["key"], frequency,
@@ -319,7 +317,9 @@ def spatial_analysis(payload: dict[str, Any]) -> dict[str, Any]:
         )
         range_info = resolved.to_public()
         range_warnings = [i["message"] for i in resolved.issues if i["severity"] == "warning"]
-        if not has_blocking(resolved.issues):
+        if not has_blocking(resolved.issues) and resolved.points:
+            slice_low = resolved.start_index
+            slice_high = max(resolved.start_index, resolved.end_index - 1)
             block = data.values[resolved.start_index: resolved.end_index]
             for position, region_id in enumerate(data.region_ids):
                 column = block[:, position]
@@ -328,6 +328,11 @@ def spatial_analysis(payload: dict[str, Any]) -> dict[str, Any]:
                 range_counts[region_id] = int(finite.sum())
     except Exception as exc:  # range statistics are supplementary for the map view
         range_warnings.append(f"时间范围统计不可用：{exc}")
+
+    index_value = payload.get("time_index")
+    index_value = slice_low if index_value is None else int(index_value)
+    index_value = int(np.clip(index_value, slice_low, slice_high))
+    slice_values = data.values[index_value]
 
     region_rows = regions_for(source["source_id"])
     names = {r["region_id"]: r["display_name"] for r in region_rows}

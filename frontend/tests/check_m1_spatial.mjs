@@ -98,7 +98,8 @@ check('7 点击排名条形可在中央地图定位', /地图已定位 [A-Z]/.te
 // time slice change updates rankings/insights
 const beforeSlice = await panel.locator('section[aria-label="Top 12 Regions"] .tn-insight-card').innerText()
 const slider = page.locator('input[type="range"]').first()
-await slider.fill(await slider.getAttribute('max'))
+await slider.focus()
+await slider.press('End')
 await page.waitForTimeout(4000)
 const afterSlice = await panel.locator('section[aria-label="Top 12 Regions"] .tn-insight-card').innerText()
 check('8 时间截面改变后排名与 Insights 更新', beforeSlice !== afterSlice, `${beforeSlice.split('\n')[2]?.slice(0, 50)} → ${afterSlice.split('\n')[2]?.slice(0, 50)}`)

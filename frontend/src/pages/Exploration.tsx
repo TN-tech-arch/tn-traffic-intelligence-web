@@ -159,6 +159,7 @@ export default function Exploration() {
   const [result, setResult] = useState<any>(null)
   const [spatial, setSpatial] = useState<any>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
+  const [slicePickerNonce, setSlicePickerNonce] = useState(0)
   const [loading, setLoading] = useState(false)
   const [autoLag, setAutoLag] = useState(true)
   const [errorIssues, setErrorIssues] = useState<Issue[]>([])
@@ -169,6 +170,7 @@ export default function Exploration() {
   const [focusRegion, setFocusRegion] = useState<string | null>(null)
   const [showLabels, setShowLabels] = useState(true)
   const requestSeq = useRef(0)
+  const spatialKeyRef = useRef<string | null>(null)
 
   const schema: FieldSpec[] = useMemo(
     () => [
@@ -298,6 +300,9 @@ export default function Exploration() {
           }
         })
         setGeojson(null)
+        setSpatial(null)
+        setSliceIndex(0)
+        spatialKeyRef.current = null
         api.get<any>(ENDPOINTS.geometry(key)).then(setGeojson).catch(() => undefined)
       })
       .catch(() => undefined)
@@ -332,6 +337,7 @@ export default function Exploration() {
         if (seq !== requestSeq.current) return
         setResult(temporal)
         setSpatial(spatialData)
+        spatialKeyRef.current = `${key}|${clampedSlice}`
         setSliceIndex(clampedSlice)
         setComputedKey(key)
         const range = temporal.range
@@ -384,11 +390,58 @@ export default function Exploration() {
     setComputedKey(null)
     setErrorIssues([])
     setSliceIndex(0)
+    spatialKeyRef.current = null
   }, [config.region_ids.length])
 
   const sliceMin = result?.range?.start_index ?? 0
   const sliceMax = Math.max(sliceMin, (result?.range?.end_index ?? 1) - 1)
   const sliceValue = Math.min(Math.max(sliceIndex, sliceMin), sliceMax)
+  const sliceTimestamps: string[] = result?.series?.[0]?.timestamps ?? []
+  const sliceEpochs = useMemo(
+    () => sliceTimestamps.map((timestamp) => dayjs(timestamp).valueOf()),
+    [result],
+  )
+  const sliceRelativeIndex = Math.max(0, sliceValue - sliceMin)
+  const sliceTotal = Math.max(0, sliceMax - sliceMin + 1)
+  const derivedSliceTime = sliceTimestamps[sliceRelativeIndex] ?? null
+  const currentSliceTime =
+    (spatial?.time_index === sliceValue ? spatial?.time_at : null) ?? derivedSliceTime
+
+  const sliceDisabledDate = useCallback(
+    (current: Dayjs) => {
+      const start = result?.range?.start_at ? dayjs(result.range.start_at) : null
+      const end = result?.range?.end_at ? dayjs(result.range.end_at) : null
+      if (!current || !start || !end) return true
+      return (
+        current.endOf('day').isBefore(start.startOf('day')) ||
+        current.startOf('day').isAfter(end.endOf('day'))
+      )
+    },
+    [result],
+  )
+
+  const selectSliceTime = useCallback(
+    (next: Dayjs | null) => {
+      if (!next || !sliceEpochs.length) return
+      const target = next.valueOf()
+      let low = 0
+      let high = sliceEpochs.length - 1
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2)
+        if (sliceEpochs[middle] < target) low = middle + 1
+        else high = middle
+      }
+      let nearest = low
+      if (low > 0) {
+        const before = Math.abs(sliceEpochs[low - 1] - target)
+        const after = Math.abs(sliceEpochs[low] - target)
+        if (before <= after) nearest = low - 1
+      }
+      setSliceIndex(sliceMin + nearest)
+      setSlicePickerNonce((value) => value + 1)
+    },
+    [sliceEpochs, sliceMin],
+  )
 
   useEffect(() => {
     if (!result?.range) return
@@ -401,12 +454,17 @@ export default function Exploration() {
   const spatialSeq = useRef(0)
   useEffect(() => {
     if (!computedKey || !config.region_ids.length) return
+    const requestKey = `${computedKey}|${sliceValue}`
+    if (spatialKeyRef.current === requestKey) return
     const seq = ++spatialSeq.current
     const timer = window.setTimeout(async () => {
       try {
         const payload = { ...JSON.parse(computedKey), time_index: sliceValue }
         const data = await api.post<any>(ENDPOINTS.spatial, payload)
-        if (seq === spatialSeq.current) setSpatial(data)
+        if (seq === spatialSeq.current) {
+          setSpatial(data)
+          spatialKeyRef.current = requestKey
+        }
       } catch {
         /* keep the previous snapshot; the analysis itself is unaffected */
       }
@@ -662,26 +720,71 @@ export default function Exploration() {
             </div>
 
             <div className="tn-field" data-field="m1.time_slice">
-              <label className="tn-field-label" htmlFor="m1-time-slice">
+              <label className="tn-field-label" htmlFor="m1-time-slice-date">
                 时间截面（Time Slice）
                 <HelpTip
-                  title="Time Slice 仅决定 GIS 地图当前展示哪个时间截面的流量，不改变整个 Analysis Time Range 内的统计计算范围。"
-                  detail="滑块被限制在当前分析范围内；修改分析范围后，如果原截面越界，会自动回到范围内第一个有效时刻。"
+                  title="用于选择当前分析时刻。所选时间将同步更新中央 GIS 地图中的区域流量及颜色，以及右侧空间分析的 Top 12 高流量区域、Bottom 6 低流量区域和区域流量分布图。可拖动滑块或直接选择日期时间，查看不同时间点的空间流量变化。"
                   label="时间截面"
                 />
               </label>
+              <DatePicker
+                key={slicePickerNonce}
+                id="m1-time-slice-date"
+                data-testid="m1-time-slice-date"
+                showTime={{ format: 'HH:mm' }}
+                format="YYYY-MM-DD HH:mm"
+                style={{ width: '100%' }}
+                size="small"
+                allowClear={false}
+                value={currentSliceTime ? dayjs(currentSliceTime) : null}
+                disabled={!result || !sliceEpochs.length}
+                disabledDate={sliceDisabledDate}
+                onChange={selectSliceTime}
+                onBlur={() => setSlicePickerNonce((value) => value + 1)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  const typed = dayjs((event.target as HTMLInputElement).value)
+                  if (typed.isValid()) {
+                    selectSliceTime(typed)
+                  } else {
+                    setSlicePickerNonce((value) => value + 1)
+                  }
+                }}
+                placeholder="等待分析后选择时间"
+              />
               <input
                 id="m1-time-slice"
                 type="range"
                 min={sliceMin}
                 max={sliceMax}
                 value={sliceValue}
+                disabled={!result || !sliceEpochs.length}
                 onChange={(event) => setSliceIndex(Number(event.target.value))}
-                style={{ width: '100%' }}
+                style={{ width: '100%', marginTop: 8 }}
                 aria-label="时间截面位置"
               />
+              <div className="tn-inline" style={{ marginTop: 6, flexWrap: 'wrap' }}>
+                <Button
+                  size="small"
+                  disabled={!result || sliceValue <= sliceMin}
+                  onClick={() => setSliceIndex(Math.max(sliceMin, sliceValue - 1))}
+                >
+                  上一时刻
+                </Button>
+                <Button
+                  size="small"
+                  disabled={!result || sliceValue >= sliceMax}
+                  onClick={() => setSliceIndex(Math.min(sliceMax, sliceValue + 1))}
+                >
+                  下一时刻
+                </Button>
+                <span className="tn-muted">
+                  当前时间：{currentSliceTime ?? '—'}
+                </span>
+              </div>
               <div className="tn-muted" style={{ marginTop: 4 }}>
-                {spatial?.time_at ?? `时间位置 ${sliceValue}`}
+                时间点 {sliceTotal ? sliceRelativeIndex + 1 : 0} / {sliceTotal} · 数据索引 {sliceValue}
               </div>
             </div>
 
