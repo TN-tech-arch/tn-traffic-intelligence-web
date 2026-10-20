@@ -180,6 +180,28 @@ check(
   `slider=${await slider.inputValue()}`,
 )
 
+await dateInput.click()
+await dateInput.fill('2013-11-05 13:07')
+await page.locator('.ant-picker-dropdown:visible .ant-picker-ok button').click()
+await page.waitForFunction(
+  () => {
+    const input = document.querySelector('[data-field="m1.time_slice"] .ant-picker input')
+    return input instanceof HTMLInputElement && input.value === '2013-11-05 13:10'
+  },
+  undefined,
+  { timeout: 30000 },
+)
+await centerPane.getByText('空间截面：2013-11-05 13:10:00').waitFor({
+  state: 'visible',
+  timeout: 30000,
+})
+check(
+  '7b 日期时间面板点击“确定”可正常提交',
+  (await dateInput.inputValue()) === '2013-11-05 13:10' &&
+    (await centerPane.innerText()).includes('空间截面：2013-11-05 13:10:00'),
+  await dateInput.inputValue(),
+)
+
 await sliceField.getByRole('button', { name: '上一时刻' }).click()
 await page.waitForTimeout(300)
 const prevDate = await dateInput.inputValue()
@@ -187,7 +209,7 @@ await sliceField.getByRole('button', { name: '下一时刻' }).click()
 await page.waitForTimeout(300)
 check(
   '8 日期选择后前后时刻按原生采样间隔移动',
-  prevDate === '2013-11-05 12:00' && (await dateInput.inputValue()) === '2013-11-05 12:10',
+  prevDate === '2013-11-05 13:00' && (await dateInput.inputValue()) === '2013-11-05 13:10',
   `${prevDate} → ${await dateInput.inputValue()}`,
 )
 check(

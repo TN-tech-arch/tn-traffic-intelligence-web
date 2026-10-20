@@ -159,7 +159,6 @@ export default function Exploration() {
   const [result, setResult] = useState<any>(null)
   const [spatial, setSpatial] = useState<any>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
-  const [slicePickerNonce, setSlicePickerNonce] = useState(0)
   const [loading, setLoading] = useState(false)
   const [autoLag, setAutoLag] = useState(true)
   const [errorIssues, setErrorIssues] = useState<Issue[]>([])
@@ -438,7 +437,6 @@ export default function Exploration() {
         if (before <= after) nearest = low - 1
       }
       setSliceIndex(sliceMin + nearest)
-      setSlicePickerNonce((value) => value + 1)
     },
     [sliceEpochs, sliceMin],
   )
@@ -728,7 +726,6 @@ export default function Exploration() {
                 />
               </label>
               <DatePicker
-                key={slicePickerNonce}
                 id="m1-time-slice-date"
                 data-testid="m1-time-slice-date"
                 showTime={{ format: 'HH:mm' }}
@@ -740,16 +737,19 @@ export default function Exploration() {
                 disabled={!result || !sliceEpochs.length}
                 disabledDate={sliceDisabledDate}
                 onChange={selectSliceTime}
-                onBlur={() => setSlicePickerNonce((value) => value + 1)}
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter') return
                   event.preventDefault()
-                  const typed = dayjs((event.target as HTMLInputElement).value)
+                  const input = event.target as HTMLInputElement
+                  const typed = dayjs(input.value)
                   if (typed.isValid()) {
                     selectSliceTime(typed)
                   } else {
-                    setSlicePickerNonce((value) => value + 1)
+                    input.value = currentSliceTime
+                      ? dayjs(currentSliceTime).format('YYYY-MM-DD HH:mm')
+                      : ''
                   }
+                  input.blur()
                 }}
                 placeholder="等待分析后选择时间"
               />
