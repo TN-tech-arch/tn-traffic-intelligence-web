@@ -81,7 +81,7 @@ const weeklyCard = clusterInfo.locator('.ant-card').filter({ hasText: '周内差
 if (await weeklyCard.locator('.ant-switch').count()) {
   await weeklyCard.locator('.ant-switch').click()
   await page.waitForTimeout(700)
-  await shot(weeklyCard, 'm2-weekly-raw')
+  await shot(weeklyCard, 'm2-weekly-normalized')
 }
 
 await page.setViewportSize({ width: 1200, height: 1000 })

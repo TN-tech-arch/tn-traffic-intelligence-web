@@ -97,7 +97,7 @@ export default function Clustering() {
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null)
   const [focusRegion, setFocusRegion] = useState<string | null>(null)
   const [normalizedPatterns, setNormalizedPatterns] = useState(false)
-  const [normalizedWeekly, setNormalizedWeekly] = useState(true)
+  const [normalizedWeekly, setNormalizedWeekly] = useState(false)
   const [regionSearch, setRegionSearch] = useState('')
   const [clusterFilter, setClusterFilter] = useState('all')
   const [tab, setTab] = useState('overview')
@@ -250,7 +250,7 @@ export default function Clustering() {
     setSelectedRegion(null)
     setFocusRegion(null)
     setNormalizedPatterns(false)
-    setNormalizedWeekly(true)
+    setNormalizedWeekly(false)
     setRegionSearch('')
     setClusterFilter('all')
     setTab('overview')
@@ -411,8 +411,11 @@ export default function Clustering() {
       const normalizedText = normalized === null || normalized === undefined
         ? '不可计算（周均值为 0 或无有效数据）'
         : Number(normalized).toFixed(3)
+      const seriesName = item
+        ? `${clusterDisplayName(item.cluster.cluster_id)} · ${item.cluster.region_count} 区`
+        : entry.seriesName
       return (
-        `<div>${entry.marker}${entry.seriesName}: ` +
+        `<div>${entry.marker}${seriesName}: ` +
         `原始平均 ${rawText} · 归一化 ${normalizedText}</div>`
       )
     })
@@ -421,6 +424,26 @@ export default function Clustering() {
       `<div><b>${WEEKDAY_LABELS[index] ?? '—'}</b></div>` +
       rows.join('') +
       `<div style="color:#c3cadb;margin-top:3px">归一化＝原始周均值 / 该簇有效周平均；缺失值不补 0</div>` +
+      `</div>`
+    )
+  }
+  const typicalTooltipFormatter = (params: any[]) => {
+    const index = params[0]?.dataIndex ?? 0
+    const rows = params.map((entry) => {
+      const cluster = normalClusters[entry.seriesIndex]
+      const value = cluster?.intraday_profile?.[index]
+      const valueText = value === null || value === undefined
+        ? '无数据'
+        : Number(value).toFixed(2)
+      return (
+        `<div>${entry.marker}${clusterDisplayName(cluster?.cluster_id)} · ${cluster?.region_count ?? 0} 区: ` +
+        `<b>${valueText}</b></div>`
+      )
+    })
+    return (
+      `<div style="font-size:12px;line-height:1.75">` +
+      `<div><b>${index}:00</b></div>` +
+      rows.join('') +
       `</div>`
     )
   }
@@ -782,6 +805,12 @@ export default function Clustering() {
                     groupNames={Object.fromEntries(
                       normalClusters.map((cluster: any) => [
                         String(cluster.cluster_id),
+                        `簇 ${cluster.cluster_id}`,
+                      ]),
+                    )}
+                    groupTooltipNames={Object.fromEntries(
+                      normalClusters.map((cluster: any) => [
+                        String(cluster.cluster_id),
                         clusterDisplayName(cluster.cluster_id),
                       ]),
                     )}
@@ -983,15 +1012,22 @@ export default function Clustering() {
                         </span>
                       )}
                     >
-                      <div data-testid="cluster-pattern-chart" data-cluster-colors={JSON.stringify(clusterColorMap)}>
+                      <div
+                        data-testid="cluster-pattern-chart"
+                        data-cluster-colors={JSON.stringify(clusterColorMap)}
+                        data-legend-labels={JSON.stringify(
+                          normalClusters.map((cluster: any) => `簇 ${cluster.cluster_id}`),
+                        )}
+                      >
                         <LineChart
                           height={250}
                           x={Array.from({ length: 24 }, (_, i) => `${i}:00`)}
                           xName="小时"
                           xLabelInterval={2}
                           yName={normalizedPatterns ? '相对水平（各簇均值＝1）' : '流量值'}
+                          tooltipFormatter={typicalTooltipFormatter}
                           series={normalClusters.map((cluster: any) => ({
-                            name: `${clusterDisplayName(cluster.cluster_id)} · ${cluster.region_count} 区`,
+                            name: `簇 ${cluster.cluster_id}`,
                             data: normalizedPatterns ? cluster.normalized_profile : cluster.intraday_profile,
                             color: clusterColor(cluster.cluster_id),
                           }))}
@@ -1020,6 +1056,9 @@ export default function Clustering() {
                         data-displayed-series={JSON.stringify(
                           weeklyPatternData.map((item) => normalizedWeekly ? item.normalized : item.raw),
                         )}
+                        data-legend-labels={JSON.stringify(
+                          weeklyPatternData.map((item) => `簇 ${item.cluster.cluster_id}`),
+                        )}
                         data-weekly-series={JSON.stringify(
                           weeklyPatternData.map((item) => ({
                             cluster_id: item.cluster.cluster_id,
@@ -1036,7 +1075,7 @@ export default function Clustering() {
                           yName={weeklyYAxisTitle}
                           tooltipFormatter={weeklyTooltipFormatter}
                           series={weeklyPatternData.map((item) => ({
-                            name: `${clusterDisplayName(item.cluster.cluster_id)} · ${item.cluster.region_count} 区`,
+                            name: `簇 ${item.cluster.cluster_id}`,
                             data: normalizedWeekly ? item.normalized : item.raw,
                             color: clusterColor(item.cluster.cluster_id),
                           }))}

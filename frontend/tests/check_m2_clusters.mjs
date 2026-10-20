@@ -175,6 +175,14 @@ check(
   JSON.stringify([...new Set(legendIds)].sort((a, b) => a - b)) === JSON.stringify([0, 1, 2, 3]),
   legendIds.join(','),
 )
+const scatterLegend = JSON.parse(
+  await page.locator('[data-testid="cluster-feature-scatter"]').getAttribute('data-legend-labels'),
+)
+check(
+  '8b Feature Space 图例只显示纯簇编号',
+  JSON.stringify(scatterLegend) === JSON.stringify(['簇 0', '簇 1', '簇 2', '簇 3']),
+  JSON.stringify(scatterLegend),
+)
 
 await infoPane.locator('.ant-tabs-tab').filter({ hasText: '典型模式' }).click()
 await page.waitForTimeout(800)
@@ -186,6 +194,21 @@ check(
     patternText.includes('簇 0') &&
     patternText.includes('簇 3'),
   patternText.split('\n').slice(0, 6).join(' | '),
+)
+const patternLegend = JSON.parse(
+  await page.locator('[data-testid="cluster-pattern-chart"]').getAttribute('data-legend-labels'),
+)
+check(
+  '9a 日内与周内图表图例只显示纯簇编号',
+  JSON.stringify(patternLegend) === JSON.stringify(['簇 0', '簇 1', '簇 2', '簇 3']) &&
+    JSON.stringify(
+      JSON.parse(
+        await infoPane
+          .locator('[data-testid="cluster-weekly-pattern-chart"]')
+          .getAttribute('data-legend-labels'),
+      ),
+    ) === JSON.stringify(['簇 0', '簇 1', '簇 2', '簇 3']),
+  JSON.stringify(patternLegend),
 )
 
 const weeklyCard = infoPane.locator('.ant-card').filter({ hasText: '周内差异' }).first()
@@ -199,10 +222,11 @@ const normalizedMeansOk = weeklySeries.every((item) => {
   return Math.abs(mean - 1) < 1e-9
 })
 check(
-  '9b 周内图默认开启归一化且每簇有效周平均为 1',
-  (await weeklyChart.getAttribute('data-normalized')) === 'true' &&
-    (await weeklyChart.getAttribute('data-y-axis-title')) === '相对水平（各簇周均值＝1）' &&
-    normalizedMeansOk,
+  '9b 周内图默认关闭归一化并显示原始平均流量',
+  (await weeklyChart.getAttribute('data-normalized')) === 'false' &&
+    (await weeklyChart.getAttribute('data-y-axis-title')) === '平均流量值' &&
+    JSON.stringify(JSON.parse(await weeklyChart.getAttribute('data-displayed-series'))) ===
+      JSON.stringify(weeklySeries.map((item) => item.raw)),
   JSON.stringify(weeklySeries.map((item) => item.mean)),
 )
 
@@ -232,15 +256,17 @@ await page.waitForFunction(
   () =>
     document
       .querySelector('[data-testid="cluster-weekly-pattern-chart"]')
-      ?.getAttribute('data-normalized') === 'false',
+      ?.getAttribute('data-normalized') === 'true',
   undefined,
   { timeout: 10000 },
 )
-const displayedOff = JSON.parse(await weeklyChart.getAttribute('data-displayed-series'))
+const displayedOn = JSON.parse(await weeklyChart.getAttribute('data-displayed-series'))
 check(
-  '9d 关闭归一化后恢复原始流量、纵轴标题和原始数据序列',
-  (await weeklyChart.getAttribute('data-y-axis-title')) === '平均流量值' &&
-    JSON.stringify(displayedOff) === JSON.stringify(weeklySeries.map((item) => item.raw)),
+  '9d 开启归一化后纵轴、数据序列和有效周均值同步更新',
+  (await weeklyChart.getAttribute('data-y-axis-title')) === '相对水平（各簇周均值＝1）' &&
+    normalizedMeansOk &&
+    JSON.stringify(displayedOn) ===
+      JSON.stringify(weeklySeries.map((item) => item.normalized)),
   (await weeklyChart.getAttribute('data-y-axis-title')) ?? 'missing',
 )
 

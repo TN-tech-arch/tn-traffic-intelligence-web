@@ -141,6 +141,7 @@ export function ScatterChart({
   yName,
   colorFor,
   groupNames,
+  groupTooltipNames,
   onSelect,
 }: {
   points: Array<{
@@ -156,6 +157,7 @@ export function ScatterChart({
   yName?: string
   colorFor?: (group: number) => string
   groupNames?: Record<string, string>
+  groupTooltipNames?: Record<string, string>
   onSelect?: (regionId: string) => void
 }) {
   if (!points.length) return <Empty description="暂无真实数据" />
@@ -165,6 +167,8 @@ export function ScatterChart({
   )
   const groupName = (group: number) =>
     groupNames?.[String(group)] ?? `簇 ${group}`
+  const groupTooltipName = (group: number) =>
+    groupTooltipNames?.[String(group)] ?? groupName(group)
   const option = {
     tooltip: {
       trigger: 'item',
@@ -173,7 +177,7 @@ export function ScatterChart({
         return (
           `<div style="font-size:12px;line-height:1.7">` +
           `<div><b>${data.name ?? '—'}</b></div>` +
-          `<div>所属簇：<b>${groupName(data.group)}</b></div>` +
+          `<div>所属簇：<b>${groupTooltipName(data.group)}</b></div>` +
           `<div>${xName ?? '横轴特征'}：${Number(data.value?.[0]).toFixed(3)}</div>` +
           `<div>${yName ?? '纵轴特征'}：${Number(data.value?.[1]).toFixed(3)}</div>` +
           (data.extra ? `<div style="color:#c3cadb">${data.extra}</div>` : '') +
@@ -222,6 +226,7 @@ export function ScatterChart({
       data-testid="cluster-feature-scatter"
       data-cluster-axes={`${xName ?? '—'}|${yName ?? '—'}`}
       data-cluster-colors={JSON.stringify(clusterColors)}
+      data-legend-labels={JSON.stringify(groups.map(groupName))}
     >
       <ReactECharts
         option={option}
