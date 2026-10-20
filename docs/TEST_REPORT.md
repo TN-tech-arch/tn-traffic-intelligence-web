@@ -14,6 +14,7 @@
 | M3 浏览器回归 | `node tests/check_m3_simplified.mjs` | **7/7 passed**，生成 `DS-MILANO-ADRIANO-0009` 后清理 |
 | M1 时间截面专项 | `node tests/check_m1_timeslice.mjs` | **14/14 passed**；滑块、日期、前后按钮、越界吸附、ZTE 时间轴与单次请求 |
 | M1 空间分析联动 | `node tests/check_m1_spatial.mjs` | **12/12 passed**；Top 12 / Bottom 6 / 分布图随截面更新 |
+| M1/M2 图表 X 轴、图例与 Brush 布局 | Playwright 截图对比 + `check_m1_multicity` / `check_m2_clusters` / `ui_check` | 长跨度时间轴首尾刻度完整；图例置顶、Brush 独立在底部；1600/1200/900px 无重叠 |
 | 全站 UI 回归 | `node tests/ui_check.mjs` | **44/44 passed** |
 | 中英文与布局回归 | `node tests/check_ui_language.mjs` | **26/26 passed** |
 | Windows 安装版 | `packaging\test_install.ps1` | 静默安装 → 启动 → 数据/预览 → DS/EXP → Random Forest → Full Test 评价 → 卸载全部通过 |

@@ -1,6 +1,31 @@
 import ReactECharts from 'echarts-for-react'
 import { Empty, Spin } from 'antd'
 
+function timeLabelFormatter(labels: string[]) {
+  if (!labels.length || !labels.every((label) => /^\d{4}-\d{2}-\d{2}/.test(String(label)))) {
+    return undefined
+  }
+  const sameDay = new Set(labels.map((label) => String(label).slice(0, 10))).size === 1
+  return (value: string) => {
+    const text = String(value)
+    if (sameDay && text.length >= 16) return text.slice(11, 16)
+    if (text.length >= 16) return `${text.slice(5, 10)} ${text.slice(11, 16)}`
+    return text.slice(5, 10)
+  }
+}
+
+function autoAxisLabel(labels: string[], interval?: number) {
+  return {
+    fontSize: 10,
+    hideOverlap: true,
+    showMinLabel: true,
+    showMaxLabel: true,
+    margin: 10,
+    interval: interval ?? 'auto',
+    formatter: timeLabelFormatter(labels),
+  }
+}
+
 export function LineChart({
   series,
   x,
@@ -22,25 +47,43 @@ export function LineChart({
 }) {
   if (loading) return <Spin />
   if (empty || series.length === 0) return <Empty description="暂无真实数据" />
+  const labelFormatter = timeLabelFormatter(x)
   const option = {
     tooltip: { trigger: 'axis' },
-    legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 56, right: 16, top: 18, bottom: 46 },
+    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: {
+      left: 58,
+      right: labelFormatter ? 46 : 24,
+      top: 44,
+      bottom: 94,
+      containLabel: false,
+    },
     xAxis: {
       type: 'category',
       data: x,
       name: xName,
-      nameTextStyle: { fontSize: 10 },
+      nameLocation: 'middle',
+      nameGap: 40,
+      nameTextStyle: { fontSize: 10, color: '#5b7095' },
       axisLabel: {
-        fontSize: 10,
-        hideOverlap: true,
+        ...autoAxisLabel(x, xLabelInterval),
+        formatter: labelFormatter ?? ((value: string) => value),
         ...(xLabelInterval === undefined ? {} : { interval: xLabelInterval }),
       },
+      axisTick: { alignWithLabel: true },
     },
-    yAxis: { type: 'value', name: yName ?? '数值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    yAxis: {
+      type: 'value',
+      name: yName ?? '数值',
+      nameLocation: 'middle',
+      nameGap: 46,
+      nameRotate: 90,
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: { fontSize: 10 },
+    },
     dataZoom: [
       { type: 'inside', throttle: 60 },
-      { type: 'slider', height: 16, bottom: 24 },
+      { type: 'slider', height: 18, bottom: 8, showDetail: false },
     ],
     series: series.map((item: any) => ({
       name: item.name,
@@ -134,10 +177,25 @@ export function ScatterChart({
         )
       },
     },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 56, right: 16, top: 18, bottom: 46 },
-    xAxis: { type: 'value', name: xName ?? '特征值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'value', name: yName ?? '特征值', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: { left: 58, right: 18, top: 44, bottom: 58, containLabel: false },
+    xAxis: {
+      type: 'value',
+      name: xName ?? '特征值',
+      nameLocation: 'middle',
+      nameGap: 32,
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: { fontSize: 10, hideOverlap: true },
+    },
+    yAxis: {
+      type: 'value',
+      name: yName ?? '特征值',
+      nameLocation: 'middle',
+      nameGap: 44,
+      nameRotate: 90,
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: { fontSize: 10 },
+    },
     series: groups.map((group) => ({
       name: groupName(group),
       type: 'scatter',
@@ -298,7 +356,7 @@ export function HistogramChart({
   if (!bins.length) return <Empty description="当前时间截面没有有效区域" />
   const labels = bins.map((bin) => `${compactNumber(bin.start)}–${compactNumber(bin.end)}`)
   const option = {
-    grid: { left: 6, right: 14, top: 18, bottom: 10, containLabel: true },
+    grid: { left: 8, right: 16, top: 20, bottom: 56, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -318,8 +376,18 @@ export function HistogramChart({
       type: 'category',
       data: labels,
       name: '流量值区间',
+      nameLocation: 'middle',
+      nameGap: 44,
       nameTextStyle: { fontSize: 10 },
-      axisLabel: { fontSize: 9, rotate: 32, hideOverlap: true, interval: 0 },
+      axisLabel: {
+        fontSize: 9,
+        rotate: 28,
+        hideOverlap: true,
+        interval: 'auto',
+        showMinLabel: true,
+        showMaxLabel: true,
+        margin: 9,
+      },
     },
     yAxis: {
       type: 'value',
@@ -378,19 +446,22 @@ export function MultiCityZChart({
         )
       },
     },
-    legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 10 } },
-    grid: { left: 62, right: 18, top: 22, bottom: 60 },
+    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { fontSize: 10 } },
+    grid: { left: 64, right: 20, top: 44, bottom: 62, containLabel: false },
     xAxis: {
       type: 'category',
       data: x,
       boundaryGap: false,
       name: '小时（0–23）',
       nameLocation: 'middle',
-      nameGap: 27,
+      nameGap: 36,
       nameTextStyle: { fontSize: 10, color: '#5b7095' },
       axisLabel: {
         fontSize: 9,
-        interval: 0,
+        interval: 'auto',
+        hideOverlap: true,
+        showMinLabel: true,
+        showMaxLabel: true,
         formatter: (value: string) => value.slice(0, 2),
       },
       axisLine: { lineStyle: { color: '#b8c6dc' } },
@@ -468,10 +539,32 @@ export function HourlyChart({
         return `<div style="font-size:12px"><b>${x[params[0]?.dataIndex ?? 0]} 时段</b>${rows.join('')}</div>`
       },
     },
-    legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 56, right: 16, top: 18, bottom: 42 },
-    yAxis: { type: 'value', name: yName, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
-    xAxis: { type: 'category', data: x, name: '小时', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: { left: 58, right: 18, top: 44, bottom: 60, containLabel: false },
+    yAxis: {
+      type: 'value',
+      name: yName,
+      nameLocation: 'middle',
+      nameGap: 46,
+      nameRotate: 90,
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: { fontSize: 10 },
+    },
+    xAxis: {
+      type: 'category',
+      data: x,
+      name: '小时',
+      nameLocation: 'middle',
+      nameGap: 34,
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: {
+        fontSize: 10,
+        hideOverlap: true,
+        interval: 'auto',
+        showMinLabel: true,
+        showMaxLabel: true,
+      },
+    },
     series: regions.map((region, index) => ({
       name: region.region_id,
       type: 'line',
@@ -517,10 +610,32 @@ export function WeekdayChart({
           })
           .join('')}</div>`,
     },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 56, right: 16, top: 18, bottom: 42 },
-    xAxis: { type: 'category', data: x, name: '小时', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'value', name: yName, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 10 } },
+    legend: { top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: { left: 58, right: 18, top: 44, bottom: 60, containLabel: false },
+    xAxis: {
+      type: 'category',
+      data: x,
+      name: '小时',
+      nameLocation: 'middle',
+      nameGap: 34,
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: {
+        fontSize: 10,
+        hideOverlap: true,
+        interval: 'auto',
+        showMinLabel: true,
+        showMaxLabel: true,
+      },
+    },
+    yAxis: {
+      type: 'value',
+      name: yName,
+      nameLocation: 'middle',
+      nameGap: 46,
+      nameRotate: 90,
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: { fontSize: 10 },
+    },
     series: [
       {
         name: weekdayLabel,
@@ -578,16 +693,34 @@ export function AcfChart({
         }<br/><span style="color:#8a99b5">±95% 白噪声带：${ci[index]?.toFixed(3) ?? '—'}</span></div>`
       },
     },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    grid: { left: 56, right: 16, top: 18, bottom: 42 },
+    legend: { top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: { left: 58, right: 18, top: 44, bottom: 60, containLabel: false },
     xAxis: {
       type: 'category',
       data: lags.map(String),
-      axisLabel: { fontSize: 10, hideOverlap: true },
+      axisLabel: {
+        fontSize: 10,
+        hideOverlap: true,
+        interval: 'auto',
+        showMinLabel: true,
+        showMaxLabel: true,
+      },
       name: '滞后步数（Lag）',
+      nameLocation: 'middle',
+      nameGap: 34,
       nameTextStyle: { fontSize: 10 },
     },
-    yAxis: { type: 'value', name: '自相关系数（ACF）', nameTextStyle: { fontSize: 10 }, min: -1, max: 1, axisLabel: { fontSize: 10 } },
+    yAxis: {
+      type: 'value',
+      name: '自相关系数（ACF）',
+      nameLocation: 'middle',
+      nameGap: 46,
+      nameRotate: 90,
+      nameTextStyle: { fontSize: 10 },
+      min: -1,
+      max: 1,
+      axisLabel: { fontSize: 10 },
+    },
     series: [
       {
         name: 'ACF',
