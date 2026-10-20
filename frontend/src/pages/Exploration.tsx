@@ -189,21 +189,6 @@ export default function Exploration() {
         suggestion_zh: '无数据区域没有时序数据，不能用于分析。',
       },
       {
-        key: 'frequency', label_zh: '时间分辨率', type: 'enum',
-        enum: ['native', '30min', '60min', '1day'], enum_labels: ['原生频率', '30 分钟', '1 小时', '1 天'],
-        default: 'native',
-        help_zh: '时间重采样：把原始观测聚合成更粗的桶（求和为桶内相加，均值为桶内平均）。' +
-                 '它与“日内小时画像的跨日期平均”是两件事：前者改变时间点，后者只是按时钟小时分组统计。',
-        suggestion_zh: '探索分析建议先用原生频率，避免丢失细节。',
-      },
-      {
-        key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'],
-        enum_labels: ['均值', '求和'], default: 'mean',
-        help_zh: '重采样时每个时间桶的合并方式。均值为桶内样本平均，求和为桶内样本相加；' +
-                 '源单位未确认时，求和结果不代表物理总量。',
-        suggestion_zh: '原生频率下该参数无影响。',
-      },
-      {
         key: 'start_index', label_zh: '起始索引（高级）', type: 'integer', min: 0, default: 0,
         help_zh: '按重采样后的时间点数计算的起点，与上方日期时间双向同步。',
         suggestion_zh: '普通使用直接选日期时间即可。',
@@ -301,17 +286,15 @@ export default function Exploration() {
           const regionIds = keep.length ? keep : firstValid ? [firstValid] : []
           const start = data.source?.time_start ? dayjs(data.source.time_start) : null
           const end = data.source?.time_end ? dayjs(data.source.time_end) : null
-          const nativeMinutes = Number(data.source?.native_frequency_minutes ?? 10)
-          const weekEnd = start ? start.add(7, 'day').subtract(nativeMinutes, 'minute') : null
-          const defaultEnd = weekEnd && end ? (weekEnd.isBefore(end) ? weekEnd : end) : end
           return {
             ...prev,
+            frequency: 'native',
+            aggregation: 'mean',
             region_ids: regionIds,
             insight_region_id: regionIds[0] ?? null,
-            // switching source always moves to that source's own default window,
-            // otherwise stale dates would fall outside the new data bounds
+            // The default analysis range is the source's complete valid range.
             time_start: start ? start.format('YYYY-MM-DD HH:mm:ss') : null,
-            time_end: defaultEnd ? defaultEnd.format('YYYY-MM-DD HH:mm:ss') : null,
+            time_end: end ? end.format('YYYY-MM-DD HH:mm:ss') : null,
           }
         })
         setGeojson(null)
@@ -580,16 +563,13 @@ export default function Exploration() {
                   onClick={() => {
                     const start = bounds.start
                     const end = bounds.end
-                    const nativeMinutes = Number(sourceMeta?.native_frequency_minutes ?? 10)
-                    const weekEnd = start ? start.add(7, 'day').subtract(nativeMinutes, 'minute') : null
-                    const defaultEnd = weekEnd && end ? (weekEnd.isBefore(end) ? weekEnd : end) : end
                     setConfig({
                       ...DEFAULT_CONFIG,
                       source_key: config.source_key,
                       region_ids: selected.length ? selected : config.region_ids,
                       insight_region_id: config.insight_region_id,
                       time_start: start ? start.format('YYYY-MM-DD HH:mm:ss') : null,
-                      time_end: defaultEnd ? defaultEnd.format('YYYY-MM-DD HH:mm:ss') : null,
+                      time_end: end ? end.format('YYYY-MM-DD HH:mm:ss') : null,
                     })
                     setLastEdit('date')
                     setResult(null)
@@ -602,7 +582,7 @@ export default function Exploration() {
               }
             />
             {visibleFields(schema, validationValues as any)
-              .filter((spec) => ['source_key', 'region_ids', 'frequency', 'aggregation'].includes(spec.key))
+              .filter((spec) => ['source_key', 'region_ids'].includes(spec.key))
               .map((spec) => (
                 <ParamField
                   key={spec.key}
@@ -626,6 +606,10 @@ export default function Exploration() {
                   compact
                 />
               ))}
+            <div className="tn-muted" style={{ marginTop: 6 }}>
+              原生频率：{sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 使用原始观测值，不做重采样；
+              日内小时画像与工作日/周末比较仅按时钟分组统计。
+            </div>
 
             <div className="tn-section-title" style={{ marginTop: 10 }}>
               分析时间范围（Analysis Time Range）

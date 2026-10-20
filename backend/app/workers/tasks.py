@@ -151,7 +151,9 @@ def run_experiment(
     mode = row["mode"]
     source_key = bundle.dataset["source_key"]
 
-    regions = json_loads(row["snapshot_json"]).get("region_ids") if json_loads(row["snapshot_json"]) else None
+    snapshot = json_loads(row["snapshot_json"]) or {}
+    regions = snapshot.get("region_ids")
+    region_experiment_ids = snapshot.get("region_experiment_ids") or {}
     regions = regions or bundle.region_ids
 
     started = time.time()
@@ -241,9 +243,9 @@ def run_experiment(
             get_connection().execute(
                 """
                 INSERT INTO experiment_region_models
-                    (experiment_id, region_id, status, model_artifact_ref, checkpoint_ref, metrics_json,
+                    (experiment_id, region_id, region_experiment_id, status, model_artifact_ref, checkpoint_ref, metrics_json,
                      history_json, logs_ref, error, started_at, ended_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(experiment_id, region_id) DO UPDATE SET
                     status=excluded.status, model_artifact_ref=excluded.model_artifact_ref,
                     checkpoint_ref=excluded.checkpoint_ref, metrics_json=excluded.metrics_json,
@@ -253,6 +255,7 @@ def run_experiment(
                 (
                     experiment_id,
                     region_id,
+                    region_experiment_ids.get(region_id),
                     "Completed",
                     artifact_ref,
                     result.state.get("checkpoint_id"),
@@ -289,12 +292,13 @@ def run_experiment(
             get_connection().execute(
                 """
                 INSERT INTO experiment_region_models
-                    (experiment_id, region_id, status, error, started_at, ended_at)
-                VALUES (?,?,?,?,?,?)
+                    (experiment_id, region_id, region_experiment_id, status, error, started_at, ended_at)
+                VALUES (?,?,?,?,?,?,?)
                 ON CONFLICT(experiment_id, region_id) DO UPDATE SET status='Failed', error=excluded.error,
                     ended_at=excluded.ended_at
                 """,
-                (experiment_id, region_id, "Failed", f"{type(exc).__name__}: {exc}", now_utc(), now_utc()),
+                (experiment_id, region_id, region_experiment_ids.get(region_id), "Failed",
+                 f"{type(exc).__name__}: {exc}", now_utc(), now_utc()),
             )
             append_log(experiment_id, "error", f"region {region_id} failed: {exc}",
                        region_id=region_id, traceback=traceback.format_exc(limit=3))

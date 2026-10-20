@@ -12,12 +12,13 @@ from typing import Any
 import numpy as np
 
 from app.core.config import settings
-from app.core.errors import Conflict, NotFound
+from app.core.errors import Conflict, NotFound, RequestRejected
 from app.core.ids import dataset_id as make_dataset_id, now_utc, ulid
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.services import windows as win
 from app.services.ingest import load_series, source_row
 from app.services.series import resolve_frequency_minutes, resample, valid_region_ids
+from app.services.time_range import has_blocking, resolve_range
 
 
 def dataset_dir(dataset_id: str) -> Path:
@@ -130,14 +131,30 @@ def _compute(payload: dict[str, Any]) -> dict[str, Any]:
         raise Conflict("该数据源没有可用时序区域", code="NO_VALID_REGION")
     native_minutes = int(source["native_frequency_minutes"])
     frequency_minutes = resolve_frequency_minutes(native_minutes, payload["frequency"])
+    resolved = resolve_range(
+        source["key"],
+        payload["frequency"],
+        time_start=payload.get("time_start") or None,
+        time_end=payload.get("time_end") or None,
+        start_index=payload.get("start_index"),
+        window_points=payload.get("window_points"),
+        path_prefix="m3",
+    )
+    if has_blocking(resolved.issues):
+        raise RequestRejected(
+            [issue for issue in resolved.issues if issue["severity"] == "error"],
+            message="数据集时间范围校验未通过",
+        )
     data = resample(
         source["key"],
         region_ids=region_ids,
         frequency=payload["frequency"],
         aggregation=payload["aggregation"],
-        time_start=payload.get("time_start"),
-        time_end=payload.get("time_end"),
     )
+    low, high = resolved.start_index, resolved.end_index
+    data.timestamps = data.timestamps[low:high]
+    data.values = data.values[low:high]
+    data.complete = data.complete[low:high]
     pre = win.preprocess(data.values, payload["missing_mode"])
     total_points = data.timestamps.size
     ratios = (payload["train_ratio"], payload["val_ratio"], payload["test_ratio"])
@@ -420,7 +437,11 @@ def create_dataset(payload: dict[str, Any]) -> dict[str, Any]:
             "构建后以下集合没有任何合法窗口: " + ", ".join(computed["empty_splits"]),
             code="EMPTY_SPLIT",
         )
-    new_id = make_dataset_id(computed["source"]["key"], payload["scope"])
+    new_id = make_dataset_id(
+        computed["source"]["key"],
+        payload["scope"],
+        payload.get("region_id"),
+    )
     target_dir = dataset_dir(new_id)
     tmp_dir = Path(tempfile.mkdtemp(prefix=f".build-{ulid()[:8]}-", dir=str(settings.artifacts_dir)))
     data = computed["data"]
@@ -543,7 +564,7 @@ def create_dataset(payload: dict[str, Any]) -> dict[str, Any]:
             (
                 new_id,
                 computed["source"]["source_id"],
-                payload.get("label") or f"{computed['source']['display_name']} {payload['scope']}",
+                new_id,
                 payload["scope"],
                 json_dumps(computed["region_ids"]),
                 payload["frequency"],
@@ -593,6 +614,8 @@ def dataset_row(dataset_id: str):
 def dataset_summary(row) -> dict[str, Any]:
     source = query_one("SELECT * FROM data_sources WHERE source_id = ?", (row["source_id"],))
     boundaries = json_loads(row["split_boundaries_json"])
+    time_start = boundaries[0].get("start_at") if boundaries else None
+    time_end = boundaries[-1].get("end_at") if boundaries else None
     return {
         "dataset_id": row["dataset_id"],
         "label": row["label"],
@@ -613,6 +636,8 @@ def dataset_summary(row) -> dict[str, Any]:
         "split_boundaries": boundaries,
         "preprocess": json_loads(row["preprocess_json"]),
         "window_counts": json_loads(row["window_counts_json"]),
+        "time_start": time_start,
+        "time_end": time_end,
         "quality": json_loads(row["quality_json"]),
         "status": row["status"],
         "hash": row["hash"],

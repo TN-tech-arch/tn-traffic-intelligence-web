@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Card, Collapse, InputNumber, Popconfirm, Tooltip, message } from 'antd'
+import dayjs, { type Dayjs } from 'dayjs'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
 import { LineChart } from '../components/Charts'
+import DateTimeField from '../components/DateTimeField'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
-  ACTION_LABELS, MODULE_META, aggregationLabel, bilingual, frequencyLabel,
+  ACTION_LABELS, MODULE_META, bilingual,
   missingModeLabel, regionDisplayLabel, scalingLabel, scopeLabel, sourceDisplayName, splitLabel, statusLabel,
 } from '../i18n/terms'
 
@@ -18,6 +20,8 @@ const DEFAULT_CONFIG: Record<string, unknown> = {
   region_id: '',
   frequency: 'native',
   aggregation: 'mean',
+  time_start: null,
+  time_end: null,
   input_length: 24,
   output_length: 6,
   step: 1,
@@ -26,7 +30,6 @@ const DEFAULT_CONFIG: Record<string, unknown> = {
   test_ratio: 0.15,
   missing_mode: 'automatic',
   scaling: 'standard',
-  label: '',
 }
 
 export default function DatasetPage() {
@@ -34,6 +37,7 @@ export default function DatasetPage() {
   const [config, setConfig] = useState<Record<string, unknown>>({ ...DEFAULT_CONFIG })
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [regions, setRegions] = useState<any[]>([])
+  const [sourceMeta, setSourceMeta] = useState<any>(null)
   const [preview, setPreview] = useState<any>(null)
   const [datasets, setDatasets] = useState<any[]>([])
   const [selectedDataset, setSelectedDataset] = useState<any>(null)
@@ -44,23 +48,21 @@ export default function DatasetPage() {
   const [busy, setBusy] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
   const previewRequested = useRef(false)
+  const skipSourceDateReset = useRef(false)
 
   const schema: FieldSpec[] = useMemo(
     () => [
       { key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'], enum_labels: ['Milano', 'Trentino', 'ZTE 4G Downlink'], default: 'milano', help_zh: '选择数据集所在的数据源，一个数据集只能属于一个数据源。', suggestion_zh: '三个来源的时间范围与单位不同，请分别建模。' },
       { key: 'scope', label_zh: '预测范围', type: 'enum', enum: ['single', 'all'], enum_labels: ['单区域', '全部区域'], default: 'single', help_zh: '单区域只建模一个区域；全部区域对当前数据源全部有效区域分别建模（区域独立，不做联合空间建模）。', suggestion_zh: '先用单区域验证流程。' },
       { key: 'region_id', label_zh: '区域', type: 'enum', enum: regions.filter((r) => r.has_timeseries).map((r) => r.region_id), enum_labels: regions.filter((r) => r.has_timeseries).map((r) => regionDisplayLabel(r.region_id, r.display_name)), default: '', required: false, visible_when: { scope: 'single' }, help_zh: '单区域范围下必须选择一个有数据的区域。', suggestion_zh: '无数据区域不可选。' },
-      { key: 'frequency', label_zh: '时间分辨率', type: 'enum', enum: ['native', '30min', '60min', '1day'], enum_labels: ['原生频率', '30 分钟', '1 小时', '1 天'], default: 'native', help_zh: '重采样频率，必须是原生频率的整数倍。', suggestion_zh: '1 小时可显著减少窗口数量。' },
-      { key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'], enum_labels: ['均值', '求和'], default: 'mean', help_zh: '求和为桶内观测相加，均值为桶内平均；单位未确认，不代表物理总量。', suggestion_zh: '原生频率下无影响。' },
+      { key: 'time_start', label_zh: '开始日期时间', type: 'string', default: '', required: false, help_zh: '预测数据集构建时间范围的起点（含边界）。默认使用数据源完整有效范围。', suggestion_zh: '格式 YYYY-MM-DD HH:mm:ss；必须早于结束时间。' },
+      { key: 'time_end', label_zh: '结束日期时间', type: 'string', default: '', required: false, help_zh: '预测数据集构建时间范围的终点（含边界）。默认使用数据源完整有效范围。', suggestion_zh: '不能超过数据源真实结束时间。' },
       { key: 'input_length', label_zh: '输入长度（L）', type: 'integer', min: 1, max: 5000, default: 24, unit_zh: '点', help_zh: '每个样本的历史输入点数（按重采样后的点计）。', suggestion_zh: '10 分钟频率下 144 点 ≈ 1 天。' },
       { key: 'output_length', label_zh: '输出长度（H）', type: 'integer', min: 1, max: 5000, default: 6, unit_zh: '点', help_zh: '预测目标点数；Module 4/5 继承该值且不可修改。', suggestion_zh: '先用 6-24 验证流程。' },
       { key: 'step', label_zh: '滑动步长（S）', type: 'integer', min: 1, max: 5000, default: 1, unit_zh: '点', help_zh: '相邻窗口起点的间隔。', suggestion_zh: 'S 越大窗口越少、训练越快。' },
       { key: 'train_ratio', label_zh: '训练集比例', type: 'number', min: 0.05, max: 0.95, default: 0.7, help_zh: '按时序划分的训练段比例。', suggestion_zh: '常用 0.7。' },
       { key: 'val_ratio', label_zh: '验证集比例', type: 'number', min: 0, max: 0.9, default: 0.15, help_zh: '验证段比例。', suggestion_zh: '常用 0.15。' },
       { key: 'test_ratio', label_zh: '测试集比例', type: 'number', min: 0, max: 0.9, default: 0.15, help_zh: '测试段比例，Module 5 的正式评分来源。', suggestion_zh: '常用 0.15。' },
-      { key: 'missing_mode', label_zh: '缺失值处理', type: 'enum', enum: ['automatic', 'causal_interpolation', 'drop_invalid'], enum_labels: ['自动（前向填充）', '因果安全插值（Causal-safe Interpolation）', '丢弃无效窗口（Drop Invalid Windows）'], default: 'automatic', level: 'advanced', help_zh: '自动模式只用过去值前向填充；因果安全插值在两个已观测端点间插值，但窗口预测起点必须晚于插值右端点，否则该窗口作废；丢弃无效窗口会直接移除含缺失的窗口。', suggestion_zh: 'ZTE 真实零值不会被视为缺失。' },
-      { key: 'scaling', label_zh: '标准化', type: 'enum', enum: ['standard', 'minmax', 'none'], enum_labels: ['标准化（StandardScaler）', '最小-最大缩放（MinMaxScaler）', '无归一化'], default: 'standard', level: 'advanced', help_zh: '仅用训练段已观测样本拟合；评估时逆变换回源单位。', suggestion_zh: '默认使用标准化。' },
-      { key: 'label', label_zh: '数据集名称', type: 'string', default: '', required: false, help_zh: '可选名称，便于在历史中识别。', suggestion_zh: '留空自动生成。' },
     ],
     [regions],
   )
@@ -89,16 +91,46 @@ export default function DatasetPage() {
       .get<any>(ENDPOINTS.regions(key))
       .then((data) => {
         setRegions(data.regions)
+        setSourceMeta(data.source)
         setConfig((prev) => {
           const current = prev.region_id as string
           const stillValid = data.regions.some((r: any) => r.region_id === current && r.has_timeseries)
-          if (stillValid) return prev
           const first = data.regions.find((r: any) => r.has_timeseries)
-          return { ...prev, region_id: first?.region_id ?? '' }
+          if (skipSourceDateReset.current) {
+            skipSourceDateReset.current = false
+            return {
+              ...prev,
+              region_id: stillValid ? current : first?.region_id ?? '',
+            }
+          }
+          return {
+            ...prev,
+            region_id: stillValid ? current : first?.region_id ?? '',
+            frequency: 'native',
+            aggregation: 'mean',
+            time_start: data.source?.time_start ?? null,
+            time_end: data.source?.time_end ?? null,
+          }
         })
       })
       .catch(() => undefined)
   }, [config.source_key])
+
+  const bounds = useMemo(() => {
+    const start = sourceMeta?.time_start ? dayjs(sourceMeta.time_start) : null
+    const end = sourceMeta?.time_end ? dayjs(sourceMeta.time_end) : null
+    return { start, end }
+  }, [sourceMeta])
+
+  const disabledDate = useCallback(
+    (current: Dayjs) => {
+      if (!current) return false
+      if (bounds.start && current.endOf('day').isBefore(bounds.start.startOf('day'))) return true
+      if (bounds.end && current.startOf('day').isAfter(bounds.end.endOf('day'))) return true
+      return false
+    },
+    [bounds],
+  )
 
   const runPreview = async () => {
     if (!valid) {
@@ -214,13 +246,16 @@ export default function DatasetPage() {
       previewRequested.current = false
       setPreview(null)
       setPreviewWindowInfo(null)
+      skipSourceDateReset.current = String(data.source_key) !== String(config.source_key)
       setConfig((prev) => ({
         ...prev,
         source_key: data.source_key,
         scope: data.scope,
         region_id: data.region_ids?.[0] ?? '',
-        frequency: data.frequency,
-        aggregation: data.aggregation,
+        frequency: 'native',
+        aggregation: 'mean',
+        time_start: data.time_start ?? null,
+        time_end: data.time_end ?? null,
         input_length: data.L,
         output_length: data.H,
         step: data.S,
@@ -297,7 +332,13 @@ export default function DatasetPage() {
               extra={
                 <Button size="small" onClick={() => {
                   previewRequested.current = false
-                  setConfig({ ...DEFAULT_CONFIG })
+                  const first = regions.find((r) => r.has_timeseries)
+                  setConfig({
+                    ...DEFAULT_CONFIG,
+                    region_id: first?.region_id ?? '',
+                    time_start: sourceMeta?.time_start ?? null,
+                    time_end: sourceMeta?.time_end ?? null,
+                  })
                   setDrafts({})
                   setPreview(null)
                   setPreviewWindowInfo(null)
@@ -307,7 +348,9 @@ export default function DatasetPage() {
                 </Button>
               }
             />
-            {visibleFields(schema, config).map((spec) => (
+            {visibleFields(schema, config)
+              .filter((spec) => !['time_start', 'time_end'].includes(spec.key))
+              .map((spec) => (
               <ParamField
                 key={spec.key}
                 spec={spec}
@@ -321,6 +364,31 @@ export default function DatasetPage() {
                 compact
               />
             ))}
+            <div className="tn-section-title">构建时间范围（Dataset Time Range）</div>
+            <DateTimeField
+              id="m3.time_start"
+              label="开始日期时间"
+              value={config.time_start as string | null}
+              issues={fieldIssues('time_start')}
+              disabledDate={disabledDate}
+              help="预测数据集使用的起始时间（含边界）。默认是数据源完整有效范围，可主动缩小。"
+              detail="日期会转换为真实索引；不会读取范围以外的观测。"
+              onChange={(value) => setConfig((prev) => ({ ...prev, time_start: value }))}
+            />
+            <DateTimeField
+              id="m3.time_end"
+              label="结束日期时间"
+              value={config.time_end as string | null}
+              issues={fieldIssues('time_end')}
+              disabledDate={disabledDate}
+              help="预测数据集使用的结束时间（含边界）。"
+              detail="不能超过数据源真实结束时间；构建后时间范围冻结在数据集快照中。"
+              onChange={(value) => setConfig((prev) => ({ ...prev, time_end: value }))}
+            />
+            <div className="tn-muted">
+              数据可用范围：{sourceMeta?.time_start ?? '—'} ～ {sourceMeta?.time_end ?? '—'} · 原生频率{' '}
+              {sourceMeta?.native_frequency_minutes ?? '—'} 分钟（不重采样）
+            </div>
             <div className="tn-inline" style={{ marginTop: 8 }}>
               <Button onClick={runPreview} loading={busy}>{ACTION_LABELS.preview}</Button>
               <Button type="primary" onClick={build} loading={busy} disabled={!valid}>{ACTION_LABELS.buildDataset}</Button>
@@ -382,11 +450,15 @@ export default function DatasetPage() {
                     {' · '}L/H/S = {String(config.input_length)}/{String(config.output_length)}/{String(config.step)}
                   </div>
                   <div>
-                    频率/聚合：{frequencyLabel(String(config.frequency))} · {aggregationLabel(String(config.aggregation))}
+                    构建频率：原生 {sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 原始观测（不重采样）
                     {' · '}比例：{String(config.train_ratio)}/{String(config.val_ratio)}/{String(config.test_ratio)}
                   </div>
                   <div>
-                    预处理：{missingModeLabel(String(config.missing_mode))} · {scalingLabel(String(config.scaling))}
+                    构建范围：{String(config.time_start ?? '完整有效范围').replace('T', ' ')}
+                    {' ～ '}{String(config.time_end ?? '完整有效范围').replace('T', ' ')}
+                  </div>
+                  <div>
+                    预处理默认规则：{missingModeLabel(String(config.missing_mode))} · {scalingLabel(String(config.scaling))}
                   </div>
                   <div>
                     状态：{selectedDataset
@@ -493,7 +565,7 @@ export default function DatasetPage() {
                       （L−S，最小为 0）。X 使用历史输入，Y 为后续目标；Y 目标均为真实观测，缺失目标不会补造。
                     </div>
                     <div>
-                      X 可利用预测起点之前的因果插值；切换数据源、区域、日期范围、时间分辨率、L/H/S 或缺失值处理后，
+                      X 可利用预测起点之前的因果插值；切换数据源、区域、日期范围或 L/H/S 后，
                       自动重新计算窗口。
                     </div>
                   </div>

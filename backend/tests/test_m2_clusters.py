@@ -309,7 +309,7 @@ def test_dbscan_cleanup_is_scoped_and_preserves_other_histories():
     conn = get_connection()
     source = query_one("SELECT source_id FROM data_sources WHERE key = 'milano'")
     assert source is not None
-    run_id = make_cluster_id()
+    run_id = make_cluster_id("milano", "dbscan")
     preserved_before = conn.execute(
         "SELECT COUNT(*) AS n FROM clusters WHERE lower(algorithm_key) <> 'dbscan'"
     ).fetchone()["n"]

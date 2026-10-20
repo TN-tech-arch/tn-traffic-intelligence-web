@@ -430,16 +430,11 @@ try {
   await setField(page, 'model_configs.lstm.params.dropout', 1.5)
   const dropoutError = await fieldErrorText(page, 'model_configs.lstm.params.dropout')
   record('T48 dropout=1.5 前端字段下方报错', Boolean(dropoutError && dropoutError.includes('小于 1')), dropoutError ?? 'no error')
-  const advancedSwitch = page.locator('.tn-field-label .ant-switch').first()
-  await advancedSwitch.click()
-  await page.waitForTimeout(500)
-  await setField(page, 'model_configs.lstm.params.epochs', 10000)
-  const epochsWarning = await fieldWarningText(page, 'model_configs.lstm.params.epochs')
-  const epochsError = await fieldErrorText(page, 'model_configs.lstm.params.epochs')
+  const advancedSwitchCount = await page.locator('.tn-field-label .ant-switch').count()
   record(
-    'T46/T49 Epochs=10000 显示为 Warning（与 Error 分离，且不是取值非法）',
-    Boolean(epochsWarning) && !epochsError,
-    `warning=${epochsWarning ?? 'none'} error=${epochsError ?? 'none'}`,
+    'T46/T49 高级设置入口已移除，核心参数校验仍正常',
+    advancedSwitchCount === 0,
+    `advanced switches: ${advancedSwitchCount}`,
   )
   const runButtonDisabled = await page.locator('button:has-text("开始训练")').first().isDisabled()
   record('T46 仅存在 Warning 时不会误禁用提交（Dropout 错误仍在，需先修正）', runButtonDisabled === true, `run disabled: ${runButtonDisabled}`)

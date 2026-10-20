@@ -7,7 +7,12 @@ from fastapi import APIRouter, Body, Query
 
 from app.api.deps import create_job, job_public, raise_if_invalid
 from app.core.errors import Conflict, NotFound
-from app.core.ids import experiment_id as make_id, now_utc
+from app.core.ids import (
+    batch_id as make_batch_id,
+    experiment_id as make_id,
+    now_utc,
+    region_experiment_ids as make_region_experiment_ids,
+)
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.forecast.registry import MODEL_BY_KEY, default_params
 from app.services.datasets import load_dataset
@@ -59,6 +64,7 @@ def _experiment_public(row, *, include_logs: bool = False) -> dict[str, Any]:
         payload["region_models"] = [
             {
                 "region_id": r["region_id"],
+                "region_experiment_id": r["region_experiment_id"] if "region_experiment_id" in r.keys() else None,
                 "status": r["status"],
                 "metrics": json_loads(r["metrics_json"]),
                 "history": json_loads(r["history_json"]),
@@ -195,7 +201,7 @@ def _foundation_gate(algorithm_key: str, params: dict[str, Any]) -> list[dict[st
 
 
 def _snapshot(dataset_summary: dict[str, Any], params: dict[str, Any], mode: str, region_ids: list[str],
-              algorithm_key: str) -> dict[str, Any]:
+              algorithm_key: str, region_experiment_ids: dict[str, str] | None = None) -> dict[str, Any]:
     return {
         "dataset_snapshot": {
             "dataset_id": dataset_summary["dataset_id"],
@@ -216,6 +222,7 @@ def _snapshot(dataset_summary: dict[str, Any], params: dict[str, Any], mode: str
         "algorithm_params": params,
         "mode": mode,
         "region_ids": region_ids,
+        "region_experiment_ids": region_experiment_ids or {},
         "environment": environment_snapshot(),
         "frozen_at": now_utc(),
     }
@@ -240,21 +247,61 @@ def run_experiment(payload: dict[str, Any] = Body(...)) -> dict:
             }
     bundle = prepared["bundle"]
     model = prepared["model"]
-    new_id = make_id(model["key"])
-    snapshot = _snapshot(bundle.dataset, prepared["params"], prepared["mode"], prepared["region_ids"], model["key"])
+    source_key = bundle.dataset["source_key"]
+    scope = prepared["scope"]
+    primary_region = prepared["region_ids"][0] if scope == "single" else None
+    new_id = make_id(source_key, scope, model["key"], primary_region)
+    region_ids = prepared["region_ids"]
+    region_exp_ids = (
+        {region_ids[0]: new_id}
+        if scope == "single" and len(region_ids) == 1
+        else make_region_experiment_ids(source_key, model["key"], region_ids)
+    )
+    batch_ref = None
+    if scope == "all":
+        batch_ref = make_batch_id(source_key, "all", model_key=model["key"])
+    snapshot = _snapshot(
+        bundle.dataset,
+        prepared["params"],
+        prepared["mode"],
+        region_ids,
+        model["key"],
+        region_exp_ids,
+    )
     conn = get_connection()
     conn.execute("BEGIN IMMEDIATE")
     try:
+        if batch_ref:
+            conn.execute(
+                """
+                INSERT INTO batches (batch_id, dataset_id, scope, algorithm_count, region_count,
+                    planned_tasks, policy_json, params_snapshot_json, task_summary_json, status,
+                    created_at, started_at)
+                VALUES (?,?,'all',1,?,?,?,?,?,'Running',?,?)
+                """,
+                (
+                    batch_ref,
+                    bundle.dataset["dataset_id"],
+                    len(region_ids),
+                    len(region_ids),
+                    json_dumps({"sequential": True, "continue_on_error": True}),
+                    json_dumps({model["key"]: {"mode": prepared["mode"], "params": prepared["params"]}}),
+                    json_dumps({"total": 1}),
+                    now_utc(),
+                    now_utc(),
+                ),
+            )
         conn.execute(
             """
             INSERT INTO experiments (experiment_id, dataset_id, batch_id, algorithm_key, algorithm_label,
                 category, mode, scope, params_json, snapshot_json, status, region_total, region_completed,
                 region_failed, created_at, idempotency_key)
-            VALUES (?,?,NULL,?,?,?,?,?,?,?,'Queued',?,0,0,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,'Queued',?,0,0,?,?)
             """,
             (
                 new_id,
                 bundle.dataset["dataset_id"],
+                batch_ref,
                 model["key"],
                 model["label"],
                 model["category"],
@@ -267,15 +314,30 @@ def run_experiment(payload: dict[str, Any] = Body(...)) -> dict:
                 idempotency_key,
             ),
         )
+        for region_id in region_ids:
+            conn.execute(
+                """
+                INSERT INTO experiment_region_models
+                    (experiment_id, region_id, region_experiment_id, status)
+                VALUES (?,?,?,'Queued')
+                """,
+                (new_id, region_id, region_exp_ids[region_id]),
+            )
     except Exception:
         conn.execute("ROLLBACK")
         raise
     else:
         conn.execute("COMMIT")
-    job = create_job(job_type="experiment", experiment_id=new_id, dataset_id=bundle.dataset["dataset_id"],
-                     payload={"experiment_id": new_id})
+    job = create_job(
+        job_type="experiment",
+        experiment_id=new_id,
+        dataset_id=bundle.dataset["dataset_id"],
+        parent_batch_id=batch_ref,
+        payload={"experiment_id": new_id, "batch_id": batch_ref},
+    )
     return {
         "experiment_id": new_id,
+        "batch_id": batch_ref,
         "status": "Queued",
         "job_id": job,
         "region_count": len(prepared["region_ids"]),

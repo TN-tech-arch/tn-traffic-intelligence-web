@@ -28,25 +28,12 @@ def _validate(payload: dict[str, Any], *, deep: bool) -> tuple[list, dict]:
     source = source_row(values.get("source_key") or "")
     context: dict[str, Any] = {}
     issues = validate_m3(values, dataset_context=None)
+    _, coerced = check_module("m3", values)
     if not any(i["severity"] == "error" for i in issues) and deep:
         try:
-            computed = svc._compute(
-                {
-                    "source_key": source["key"],
-                    "scope": values.get("scope", "single"),
-                    "region_id": values.get("region_id"),
-                    "frequency": values.get("frequency", "native"),
-                    "aggregation": values.get("aggregation", "mean"),
-                    "input_length": values.get("input_length", 24),
-                    "output_length": values.get("output_length", 6),
-                    "step": values.get("step", 1),
-                    "train_ratio": values.get("train_ratio", 0.7),
-                    "val_ratio": values.get("val_ratio", 0.15),
-                    "test_ratio": values.get("test_ratio", 0.15),
-                    "missing_mode": values.get("missing_mode", "automatic"),
-                    "scaling": values.get("scaling", "standard"),
-                }
-            )
+            compute_values = dict(coerced)
+            compute_values["source_key"] = source["key"]
+            computed = svc._compute(compute_values)
             context = {
                 "empty_splits": computed["empty_splits"],
                 "train_windows": computed["counts"]["train"],
@@ -64,7 +51,6 @@ def _validate(payload: dict[str, Any], *, deep: bool) -> tuple[list, dict]:
                     "received_value": None,
                 }
             )
-    _, coerced = check_module("m3", values)
     return issues, {"values": coerced, "context": context, "source": source}
 
 
@@ -107,7 +93,6 @@ def build(payload: dict[str, Any] = Body(...)) -> dict:
     raise_if_invalid(issues)
     values = dict(info["values"])
     values["source_key"] = info["source"]["key"]
-    values["label"] = (payload.get("values") or payload).get("label") or ""
     dataset = create_dataset(values)
     return dataset
 

@@ -96,8 +96,6 @@ export default function Clustering() {
   const schema: FieldSpec[] = useMemo(
     () => [
       { key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'], enum_labels: ['Milano', 'Trentino', 'ZTE 4G Downlink'], default: 'milano', help_zh: '聚类使用的数据源。', suggestion_zh: 'ZTE 的无数据区域不会参与聚类。' },
-      { key: 'frequency', label_zh: '时间分辨率', type: 'enum', enum: ['native', '30min', '60min', '1day'], enum_labels: ['原生', '30 分钟', '1 小时', '1 天'], default: 'native', help_zh: '特征提取所用的频率。', suggestion_zh: '日内模式建议原生或 30 分钟。' },
-      { key: 'aggregation', label_zh: '聚合方式', type: 'enum', enum: ['mean', 'sum'], enum_labels: ['均值', '求和'], default: 'mean', help_zh: '聚合方式，会影响特征量级。', suggestion_zh: '均值更利于形状比较。' },
       { key: 'time_start', label_zh: '开始日期时间', type: 'string', default: '', required: false, help_zh: '聚类特征使用的起始时间（含边界，按重采样后的时间桶起点计）。', suggestion_zh: '格式 YYYY-MM-DD HH:mm:ss；必须早于结束时间。' },
       { key: 'time_end', label_zh: '结束日期时间', type: 'string', default: '', required: false, help_zh: '聚类特征使用的结束时间（含边界）。', suggestion_zh: '不能超过数据源真实结束时间。' },
       { key: 'start_index', label_zh: '起始时间点', type: 'integer', min: 0, default: 0, help_zh: '特征提取窗口起点（重采样后的点数）。', suggestion_zh: '默认 0。' },
@@ -149,16 +147,15 @@ export default function Clustering() {
         setSourceMeta(data.source)
         const start = data.source?.time_start ? dayjs(data.source.time_start) : null
         const end = data.source?.time_end ? dayjs(data.source.time_end) : null
-        const nativeMinutes = Number(data.source?.native_frequency_minutes ?? 10)
-        const weekEnd = start ? start.add(7, 'day').subtract(nativeMinutes, 'minute') : null
-        const defaultEnd = weekEnd && end ? (weekEnd.isBefore(end) ? weekEnd : end) : end
         if (skipSourceDateReset.current) {
           skipSourceDateReset.current = false
         } else {
           setConfig((prev) => ({
             ...prev,
+            frequency: 'native',
+            aggregation: 'mean',
             time_start: start ? start.format('YYYY-MM-DD HH:mm:ss') : null,
-            time_end: defaultEnd ? defaultEnd.format('YYYY-MM-DD HH:mm:ss') : null,
+            time_end: end ? end.format('YYYY-MM-DD HH:mm:ss') : null,
           }))
         }
       })
@@ -223,11 +220,8 @@ export default function Clustering() {
       if (source?.time_start) {
         const start = dayjs(source.time_start)
         const availableEnd = source.time_end ? dayjs(source.time_end) : null
-        const nativeMinutes = Number(source.native_frequency_minutes ?? 10)
-        const weekEnd = start.add(7, 'day').subtract(nativeMinutes, 'minute')
-        const defaultEnd = availableEnd && weekEnd.isAfter(availableEnd) ? availableEnd : weekEnd
         next.time_start = start.format('YYYY-MM-DD HH:mm:ss')
-        next.time_end = defaultEnd.format('YYYY-MM-DD HH:mm:ss')
+        next.time_end = availableEnd ? availableEnd.format('YYYY-MM-DD HH:mm:ss') : null
       }
     } catch {
       // Keep the schema defaults; the source metadata effect will retry the range.
@@ -487,14 +481,15 @@ export default function Clustering() {
   )
 
   const visibleConfigFields = visibleFields(schema, config).filter((spec) => (
+    spec.level !== 'advanced' &&
     !['time_start', 'time_end', 'start_index', 'window_points'].includes(spec.key) &&
     (spec.key !== 'random_state' || ['kmeans', 'spectral', 'gmm'].includes(String(config.algorithm)))
   ))
   const fieldsBeforeRange = visibleConfigFields.filter((spec) =>
-    ['source_key', 'frequency', 'aggregation'].includes(spec.key),
+    spec.key === 'source_key',
   )
   const fieldsAfterRange = visibleConfigFields.filter((spec) =>
-    !['source_key', 'frequency', 'aggregation'].includes(spec.key),
+    spec.key !== 'source_key',
   )
   const renderParamField = (spec: FieldSpec) => (
     <ParamField
@@ -565,6 +560,9 @@ export default function Clustering() {
               }
             />
             {fieldsBeforeRange.map(renderParamField)}
+            <div className="tn-muted" style={{ marginTop: 4 }}>
+              原生频率：{sourceMeta?.native_frequency_minutes ?? '—'} 分钟 · 使用原始观测值，不做重采样。
+            </div>
             <div className="tn-section-title" style={{ marginTop: 4 }}>
               {bilingual('分析时间范围', 'Analysis Time Range')}
             </div>

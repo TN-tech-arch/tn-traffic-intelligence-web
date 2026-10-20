@@ -2,6 +2,14 @@
 
 适用于本仓库的所有后续功能修改、缺陷修复和界面优化。
 
+## 长期产品约束（不得回退）
+
+1. 模块一至模块三只使用数据源真实原生采样频率和原始观测值，不再提供 Temporal Resolution / Aggregation 用户设置；日内小时画像、工作日/周末等按小时分组属于分析统计，不是重采样。
+2. 模块一、模块二、模块三的默认时间范围是当前数据源完整有效范围；用户主动修改日期后保留其选择。模块三仍允许主动缩小构建范围。
+3. 不恢复 Advanced / 高级设置入口。高级参数只保留后端默认值、校验、数据泄漏防护和算法能力。
+4. 模块三不要求用户填写数据集名称，DS ID 是唯一主要标识；旧数据集的 label 字段和历史记录保留兼容。
+5. 历史 ID 由后端持久化序列生成，删除记录后序号不复用：DS-{DATASET}-{REGION|REGIONS}-{SEQ}、CLUS-{DATASET}-{ALGORITHM}-{SEQ}、EXP-{DATASET}-{REGION|REGIONS}-{MODEL}-{SEQ}、BATCH-{DATASET}-{REGION|REGIONS}-{MODEL|MODELS}-{SEQ}。全区域仍按区域独立建模。
+
 ## 修改前
 
 1. 先运行 `git status`，保留用户已有修改，不覆盖、不回滚无关内容。

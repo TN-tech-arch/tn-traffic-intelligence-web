@@ -83,8 +83,11 @@ def _auto_max_lag(points: int, interval_minutes: int) -> int:
 
 def _analysis_frame(payload: dict[str, Any]):
     source = source_row(payload["source_key"])
-    frequency = payload.get("frequency", "native")
-    aggregation = payload.get("aggregation", "mean")
+    # Native observations are the single analysis basis for Module 1.  Hourly
+    # profiles and weekday grouping are statistical groupings, not a
+    # user-selected resampling setting.
+    frequency = "native"
+    aggregation = "mean"
     resolved = resolve_range(
         source["key"],
         frequency,

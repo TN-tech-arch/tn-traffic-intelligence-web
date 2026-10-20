@@ -2,7 +2,7 @@
 
 **PROJECT_SPEC v3.1 的完整实现**：真实数据、真实算法、真实评价，带 Windows 安装包。
 
-作者：田诺（TianNuo）· 版本 3.1.0 · 平台：Windows 10/11 x64（已在 Python 3.12.10 / Node 24 / 16 GB RAM / 无独显 CPU 环境实测）
+作者：田诺（TianNuo）· 版本 3.2.0 · 平台：Windows 10/11 x64（已在 Python 3.12.10 / Node 24 / 16 GB RAM / 无独显 CPU 环境实测）
 
 ---
 
@@ -17,15 +17,16 @@
 * `All Models` 是批量编排（1 个 Batch ID → 12 个 Experiment ID），不是第 13 种算法。
 * Dataset ID → Experiment ID / Batch ID → Evaluation ID 全链路真实持久化。
 * 所有可编辑参数实时校验，错误显示在输入框下方，Warning 与 Error 分离，后端不可绕过。
-* Module 1 支持**日期时间范围**（与高级索引双向同步）、统一时间口径，并为
+* Module 1 支持**日期时间范围**（默认完整有效范围）、统一原生时间口径，并为
   日内小时画像、工作日/周末、ACF 与趋势三张图**自动生成可解释结论**（真实统计规则，非固定文案；
   详见 `docs/M1_ANALYSIS.md`）。
+* 3.2.0 起取消时间分辨率、聚合方式、高级设置和手动数据集名称；DS / CLUS / EXP / BATCH 使用持久化可读序号，删除历史后序号不复用。
 
 ## 2. 交付物
 
 | 交付物 | 位置 |
 |---|---|
-| Windows 安装包（正式交付路线 A） | `packaging/dist/TN-Traffic-Intelligence-Setup-3.1.0.exe`（约 255 MB，含便携 Python 运行时与全部依赖，可离线安装） |
+| Windows 安装包（正式交付路线 A） | `packaging/dist/TN-Traffic-Intelligence-Setup-3.2.0.exe`（约 255 MB，含便携 Python 运行时与全部依赖，可离线安装） |
 | 完整源代码 | `backend/`（FastAPI + 真实算法）、`frontend/`（React + TS + Vite）、`scripts/`、`packaging/` |
 | 文档 | `docs/`（USER_GUIDE、ARCHITECTURE、API、MODEL_REGISTRY、DEPLOYMENT、TEST_REPORT、IMPLEMENTATION_STATUS、ACCEPTANCE_REPORT、LICENSE_NOTICES） |
 | 测试证据 | `docs/TEST_REPORT.md`、`docs/ACCEPTANCE_REPORT.md`、`data/screenshots/`、`data/logs/` |
@@ -35,7 +36,7 @@
 
 ### 方式 A：安装包（推荐给课程验收）
 
-1. 双击 `packaging/dist/TN-Traffic-Intelligence-Setup-3.1.0.exe`。
+1. 双击 `packaging/dist/TN-Traffic-Intelligence-Setup-3.2.0.exe`。
 2. 安装向导会：安装便携 Python 运行时与依赖 → 初始化数据库 → 导入并校验六个数据文件 → 创建开始菜单 / 桌面快捷方式。
 3. 开始菜单 → **启动 TN Traffic Intelligence**：后台启动 Worker 与 API，并自动打开 <http://127.0.0.1:8077/>。
 4. 停止服务用 **停止服务** 快捷方式；卸载用 **卸载 TN Traffic Intelligence**（同时清理运行时与数据目录）。

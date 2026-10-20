@@ -15,7 +15,6 @@ from typing import Any, Iterable
 
 from app.core.errors import Issue, error, warning
 from app.forecast.registry import MODEL_BY_KEY, MODELS, default_params
-from app.services.series import FREQUENCY_MINUTES
 from app.services.time_range import resolve_range
 
 # ---------------------------------------------------------------------------
@@ -343,14 +342,7 @@ M1_SCHEMA: list[dict[str, Any]] = [
      "default": "", "required": False,
      "help_zh": "分析时间范围的终点（含边界）。所有图表只使用该闭区间内的真实观测。",
      "suggestion_zh": "格式 YYYY-MM-DD HH:mm:ss；不能超过数据终点。"},
-    {"key": "frequency", "label": "Temporal Resolution", "label_zh": "时间分辨率", "type": "enum",
-     "default": "native", "enum": ["native", "30min", "60min", "1day"],
-     "help_zh": "原生频率或聚合后的频率（必须是原生频率的整数倍）。",
-     "suggestion_zh": "探索分析建议先用原生频率。"},
-    {"key": "aggregation", "label": "Aggregation", "label_zh": "聚合方式", "type": "enum",
-     "default": "mean", "enum": ["mean", "sum"],
-     "help_zh": "mean 为桶内样本平均，sum 为桶内样本求和；源单位未确认，不代表物理总量。",
-     "suggestion_zh": "原生频率下该参数无影响。"},
+    # Native frequency and mean aggregation are fixed by the pipeline.
     {"key": "max_regions", "label": "Max Compare Regions", "label_zh": "最多对比区域数", "type": "integer",
      "default": 12, "min": 1, "max": 12,
      "help_zh": "内部多区域对比上限（界面上不暴露该参数）。", "suggestion_zh": "默认 12。"},
@@ -383,12 +375,7 @@ M2_SCHEMA: list[dict[str, Any]] = [
     {"key": "source_key", "label": "Data Source", "label_zh": "数据源", "type": "enum",
      "default": "milano", "enum": ["milano", "trentino", "zte"],
      "help_zh": "聚类使用的数据源。", "suggestion_zh": "ZTE 的 No Data 区域不会参与聚类。"},
-    {"key": "frequency", "label": "Temporal Resolution", "label_zh": "时间分辨率", "type": "enum",
-     "default": "native", "enum": ["native", "30min", "60min", "1day"],
-     "help_zh": "聚类特征提取所用的频率。", "suggestion_zh": "日内模式建议原生或 30 分钟。"},
-    {"key": "aggregation", "label": "Aggregation", "label_zh": "聚合方式", "type": "enum",
-     "default": "mean", "enum": ["mean", "sum"], "help_zh": "聚合方式，影响特征量级。",
-     "suggestion_zh": "mean 更利于形状比较。"},
+    # Native frequency and mean aggregation are fixed by the pipeline.
     {"key": "time_start", "label": "Start Date & Time", "label_zh": "开始日期时间", "type": "string",
      "default": "", "required": False,
      "help_zh": "聚类特征使用的起始时间（含边界，按当前时间分辨率的时间桶起点计）。",
@@ -489,12 +476,15 @@ M3_SCHEMA: list[dict[str, Any]] = [
      "help_zh": "Single Region 时必须选择一个有数据的区域。",
      "suggestion_zh": "从区域列表中选择；No Data 区域不可选。", "required": False,
      "visible_when": {"scope": "single"}},
-    {"key": "frequency", "label": "Temporal Resolution", "label_zh": "时间分辨率", "type": "enum",
-     "default": "native", "enum": ["native", "30min", "60min", "1day"],
-     "help_zh": "重采样频率，必须是原生频率的整数倍。", "suggestion_zh": "1 小时常用于减少窗口数量。"},
-    {"key": "aggregation", "label": "Aggregation", "label_zh": "聚合方式", "type": "enum", "default": "mean",
-     "enum": ["mean", "sum"], "help_zh": "sum 为桶内求和，mean 为桶内平均；单位未确认，不代表物理总量。",
-     "suggestion_zh": "原生频率下无影响。"},
+    {"key": "time_start", "label": "Start Date & Time", "label_zh": "开始日期时间", "type": "string",
+     "default": "", "required": False,
+     "help_zh": "数据集构建时间范围的起点（含边界）。默认使用所选数据源完整有效范围。",
+     "suggestion_zh": "格式 YYYY-MM-DD HH:mm:ss；不能早于数据起点或晚于结束时间。"},
+    {"key": "time_end", "label": "End Date & Time", "label_zh": "结束日期时间", "type": "string",
+     "default": "", "required": False,
+     "help_zh": "数据集构建时间范围的终点（含边界）。默认使用所选数据源完整有效范围。",
+     "suggestion_zh": "格式 YYYY-MM-DD HH:mm:ss；不能超过数据终点。"},
+    # Native frequency and mean aggregation are fixed by the pipeline.
     {"key": "input_length", "label": "Input Length (L)", "label_zh": "输入长度 L", "type": "integer",
      "default": 24, "min": 1, "max": 5000, "unit_zh": "点",
      "help_zh": "每个样本的历史输入点数（按重采样后的点计）。", "suggestion_zh": "10 分钟频率下 144 点 ≈ 1 天。"},
@@ -525,9 +515,6 @@ M3_SCHEMA: list[dict[str, Any]] = [
      "enum": ["standard", "minmax", "none"], "enum_labels": ["StandardScaler", "MinMaxScaler", "None"],
      "level": "advanced",
      "help_zh": "仅用训练段已观测样本拟合；评估时逆变换回源单位。", "suggestion_zh": "默认 StandardScaler。"},
-    {"key": "label", "label": "Dataset Label", "label_zh": "数据集名称", "type": "string", "default": "",
-     "help_zh": "可选的自定义名称，便于在历史列表中识别。", "suggestion_zh": "留空则自动生成。",
-     "required": False},
 ]
 
 M5_SCHEMA: list[dict[str, Any]] = [
@@ -577,6 +564,11 @@ def check_module(kind: str, values: dict[str, Any]) -> tuple[list[Issue], dict[s
         field_issues, value = check_field(spec, merged.get(spec["key"]), path)
         issues.extend(field_issues)
         coerced[spec["key"]] = value if value is not None else merged.get(spec["key"])
+    if kind in ("m1", "m2", "m3"):
+        # Resampling is no longer a user-facing choice.  Enforce the same rule
+        # on the server so an old client cannot produce a different result.
+        coerced["frequency"] = "native"
+        coerced["aggregation"] = "mean"
     return issues, coerced
 
 
@@ -599,10 +591,21 @@ def validate_m3(values: dict[str, Any], *, dataset_context: dict[str, Any] | Non
     if values.get("scope") == "single" and not values.get("region_id"):
         issues.append(error("m3.region_id", "REGION_REQUIRED",
                             "Single Region 必须选择一个区域。", "请在地图或列表中选择一个有效区域。", None))
-    if coerced.get("frequency") and coerced["frequency"] not in FREQUENCY_MINUTES:
-        issues.append(error("m3.frequency", "ENUM_INVALID",
-                            f"不支持的时间分辨率 {coerced['frequency']}。", "请选择原生/30min/1h/1day。",
-                            coerced["frequency"]))
+    source_key = coerced.get("source_key")
+    if source_key:
+        try:
+            resolved = resolve_range(
+                str(source_key),
+                "native",
+                time_start=coerced.get("time_start") or None,
+                time_end=coerced.get("time_end") or None,
+                path_prefix="m3",
+            )
+            issues.extend(resolved.issues)
+        except Exception as exc:  # unknown source is reported by the API layer
+            issues.append(warning("m3.time_start", "RANGE_CHECK_FAILED",
+                                  f"时间范围暂时无法校验：{exc}",
+                                  "请确认数据源已导入。", None))
     if dataset_context:
         empty = dataset_context.get("empty_splits") or []
         for name in empty:
@@ -726,7 +729,7 @@ def validate_m1(values: dict[str, Any], *, available_regions: list[str] | None =
                             "例如白天 06:00–18:00 表示 start=6, end=18。", day_end))
     # Real time range resolution (date <-> index, data bounds, empty ranges).
     source_key = values.get("source_key")
-    frequency = values.get("frequency") or "native"
+    frequency = "native"
     if source_key:
         from app.services.time_range import resolve_range
 

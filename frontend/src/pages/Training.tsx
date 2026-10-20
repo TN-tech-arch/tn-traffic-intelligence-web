@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Button, Card, Collapse, Descriptions, Popconfirm, Progress, Select, Switch, Table, Tabs, Tag, Tooltip, message,
+  Alert, Button, Card, Collapse, Descriptions, Popconfirm, Progress, Select, Table, Tabs, Tag, Tooltip, message,
 } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
@@ -31,7 +31,6 @@ export default function Training() {
   const [params, setParams] = useState<Values>({})
   const [allParams, setAllParams] = useState<Record<string, Values>>({})
   const [customized, setCustomized] = useState<Record<string, boolean>>({})
-  const [advanced, setAdvanced] = useState(false)
   const [preflight, setPreflight] = useState<any>(null)
   const [batch, setBatch] = useState<any>(null)
   const [experiment, setExperiment] = useState<any>(null)
@@ -144,7 +143,7 @@ export default function Training() {
   }, [experiment?.experiment_id, experiment?.status, experiment?.progress?.percent])
 
   const singleValidation = useGroupValidation({
-    specs: (activeModel?.params ?? []).filter((spec) => (advanced ? true : spec.level !== 'advanced')),
+    specs: (activeModel?.params ?? []).filter((spec) => spec.level !== 'advanced'),
     values: params,
     pathPrefix: `model_configs.${algorithm}.params`,
     algorithmKey: algorithm,
@@ -350,7 +349,8 @@ export default function Training() {
                 <Descriptions size="small" column={1} style={{ marginTop: 8, fontSize: 11 }}>
                   <Descriptions.Item label="来源">{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</Descriptions.Item>
                   <Descriptions.Item label="预测范围">{dataset.scope === 'all' ? `全部区域（${dataset.region_count} 个区域，独立建模）` : `单区域（${dataset.region_ids?.[0]}）`}</Descriptions.Item>
-                  <Descriptions.Item label="时间分辨率 / 聚合方式">{frequencyLabel(String(dataset.frequency))} · {aggregationLabel(String(dataset.aggregation))}</Descriptions.Item>
+                  <Descriptions.Item label="数据频率 / 聚合">{frequencyLabel(String(dataset.frequency))} · {aggregationLabel(String(dataset.aggregation))}（继承自数据集）</Descriptions.Item>
+                  <Descriptions.Item label="构建时间范围">{dataset.time_start ?? '—'} → {dataset.time_end ?? '—'}</Descriptions.Item>
                   <Descriptions.Item label="L / H / S">{dataset.L} / {dataset.H} / {dataset.S}（H 继承自数据集，不可修改）</Descriptions.Item>
                   <Descriptions.Item label="训练 / 验证 / 测试">{dataset.ratios?.train} / {dataset.ratios?.validation} / {dataset.ratios?.test}</Descriptions.Item>
                   <Descriptions.Item label="窗口数">训练 {dataset.window_counts?.train} · 验证 {dataset.window_counts?.validation} · 测试 {dataset.window_counts?.test}</Descriptions.Item>
@@ -419,8 +419,7 @@ export default function Training() {
             <div className="tn-field">
               <label className="tn-field-label">
                 3 · 模型参数（Model Parameters）
-                <Switch size="small" checked={advanced} onChange={setAdvanced} />
-                <span className="tn-muted">{advanced ? '显示基础与高级参数' : '仅显示基础参数'}</span>
+                <span className="tn-muted">仅显示核心参数；高级参数使用后端统一默认值</span>
               </label>
               {isAllModels ? (
                 <>
@@ -463,7 +462,7 @@ export default function Training() {
                               ) : null}
                             </div>
                             {visibleFields(model.params, allParams[model.key] ?? {})
-                              .filter((spec) => (advanced ? true : spec.level !== 'advanced'))
+                              .filter((spec) => spec.level !== 'advanced')
                               .map((spec) => (
                                 <ParamField
                                   key={spec.key}
@@ -503,7 +502,7 @@ export default function Training() {
                     {activeModel.capabilities?.requires_checkpoint ? <Tag color="purple">需要模型权重</Tag> : null}
                   </div>
                   {visibleFields(activeModel.params, params)
-                    .filter((spec) => (advanced ? true : spec.level !== 'advanced'))
+                    .filter((spec) => spec.level !== 'advanced')
                     .map((spec) => (
                       <ParamField
                         key={spec.key}
@@ -615,6 +614,7 @@ export default function Training() {
                           <div className="tn-inline">
                             <StatusTag status={experiment.status} error={experiment.error} />
                             <Tag>{experiment.experiment_id}</Tag>
+                            {experiment.batch_id ? <Tag color="blue">BATCH {experiment.batch_id}</Tag> : null}
                             <span className="tn-muted">{scopeLabel(experiment.scope)} · {experiment.region_completed}/{experiment.region_total} 区域完成</span>
                           </div>
                           <Progress percent={Math.round(experiment.progress?.percent ?? 0)} status={experiment.status === 'Failed' ? 'exception' : undefined} style={{ marginTop: 8 }} />
@@ -656,6 +656,7 @@ export default function Training() {
                               dataSource={experiment.region_models ?? []}
                               columns={[
                                 { title: '区域', dataIndex: 'region_id' },
+                                { title: '区域实验 ID', dataIndex: 'region_experiment_id', render: (value: string | null) => value ?? '—' },
                                 { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                                 { title: '验证 RMSE', render: (_: unknown, row: any) => row.metrics?.rmse ? Number(row.metrics.rmse).toFixed(1) : '—' },
                                 { title: '训练轮数', render: (_: unknown, row: any) => row.history?.epochs_completed ?? '—' },
@@ -683,6 +684,7 @@ export default function Training() {
                           pagination={false}
                           dataSource={batch.experiments ?? []}
                           columns={[
+                            { title: '实验 ID', dataIndex: 'experiment_id', width: 210 },
                             { title: '模型', dataIndex: 'algorithm_label', sorter: (a: any, b: any) => a.algorithm_label.localeCompare(b.algorithm_label) },
                             { title: '执行模式', dataIndex: 'mode', width: 100, render: (value: string) => modeLabel(value) },
                             {

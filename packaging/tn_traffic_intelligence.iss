@@ -5,7 +5,7 @@
   #define StageDir "..\dist-stage"
 #endif
 #ifndef AppVersion
-  #define AppVersion "3.1.0"
+  #define AppVersion "3.2.0"
 #endif
 
 [Setup]

@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$installer = Join-Path $PSScriptRoot "dist\TN-Traffic-Intelligence-Setup-3.1.0.exe"
+$installer = Join-Path $PSScriptRoot "dist\TN-Traffic-Intelligence-Setup-3.2.0.exe"
 $logDir = Join-Path $root "data\logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
@@ -51,6 +51,14 @@ Write-Host ("[test] installed data baseline: sources={0} series_regions={1} gis_
         $sources.totals.sources, $sources.totals.series_regions, $sources.totals.gis_regions, $sources.totals.no_data_regions)
 if ($sources.totals.series_regions -ne 459) { throw "installed instance does not report 459 valid regions" }
 
+$validationSchema = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/validation/schema" -TimeoutSec 20
+$m3Keys = @($validationSchema.modules.m3 | ForEach-Object { $_.key })
+foreach ($removedField in @("frequency", "aggregation", "label")) {
+    if ($m3Keys -contains $removedField) {
+        throw "installed Module 3 schema still exposes removed field: $removedField"
+    }
+}
+
 $index = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8077/" -TimeoutSec 20
 Write-Host "[test] installed UI served: HTTP $($index.StatusCode), $($index.Content.Length) bytes"
 
@@ -69,11 +77,13 @@ $previewValues = @{
     test_ratio = 0.15
     missing_mode = "automatic"
     scaling = "standard"
-    label = "install acceptance"
 }
 $previewBody = @{ values = $previewValues } | ConvertTo-Json -Depth 6
 $preview = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/datasets/preview" `
     -ContentType "application/json" -Body $previewBody -TimeoutSec 60
+if ($preview.frequency -ne "native" -or $preview.frequency_minutes -ne 10) {
+    throw "installed preview did not use Milano native 10-minute frequency"
+}
 if ($preview.preview_window_total -le 2) {
     throw "installed preview still exposes only $($preview.preview_window_total) windows"
 }
@@ -98,6 +108,15 @@ $dataset_id = $built.dataset_id
 if (-not $dataset_id -or $built.status -ne "Built") {
     throw "installed dataset build failed"
 }
+if ($dataset_id -notmatch "^DS-MILANO-ADRIANO-\d{4,}$") {
+    throw "installed dataset ID is not readable: $dataset_id"
+}
+if ($built.label -ne $dataset_id) {
+    throw "installed dataset primary label is not the DS ID"
+}
+if ($built.time_start -ne "2013-11-01 00:00:00" -or $built.time_end -ne "2014-01-01 23:50:00") {
+    throw "installed dataset did not default to the full Milano range"
+}
 
 Write-Host "[test] deep verification: Module 4 Random Forest experiment"
 $experimentBody = @{
@@ -112,6 +131,9 @@ $experimentBody = @{
 } | ConvertTo-Json -Depth 6
 $run = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/experiments/run" `
     -ContentType "application/json" -Body $experimentBody -TimeoutSec 60
+if ($run.experiment_id -notmatch "^EXP-MILANO-ADRIANO-RANDOM_FOREST-\d{4,}$") {
+    throw "installed experiment ID is not readable: $($run.experiment_id)"
+}
 $experiment = $null
 for ($i = 0; $i -lt 90; $i++) {
     Start-Sleep -Seconds 2

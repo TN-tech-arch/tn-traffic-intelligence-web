@@ -4,7 +4,7 @@
 #
 # Produces: packaging\dist\TN-Traffic-Intelligence-Setup-<version>.exe
 param(
-    [string]$Version = "3.1.0",
+    [string]$Version = "3.2.0",
     [switch]$SkipSitePackages
 )
 

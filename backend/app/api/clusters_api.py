@@ -51,7 +51,7 @@ def range_preview(payload: dict[str, Any] = Body(...)) -> dict:
     _, coerced = check_module("m2", values)
     resolved = resolve_range(
         source["key"],
-        str(coerced.get("frequency") or "native"),
+        "native",
         time_start=coerced.get("time_start") or None,
         time_end=coerced.get("time_end") or None,
         start_index=coerced.get("start_index"),
@@ -63,8 +63,8 @@ def range_preview(payload: dict[str, Any] = Body(...)) -> dict:
     if not has_blocking(issues) and resolved.points:
         data = resample(
             source["key"],
-            frequency=str(coerced.get("frequency") or "native"),
-            aggregation=str(coerced.get("aggregation") or "mean"),
+            frequency="native",
+            aggregation="mean",
         )
         values_window = data.values[resolved.start_index:resolved.end_index]
         finite = np.isfinite(values_window)
@@ -98,7 +98,7 @@ def run(payload: dict[str, Any] = Body(...)) -> dict:
     region_count = len(valid_region_ids(source["key"]))
     issues = validate_m2(values, region_count=region_count)
     _, coerced = check_module("m2", values)
-    frequency = str(coerced.get("frequency") or "native")
+    frequency = "native"
     resolved = resolve_range(
         source["key"],
         frequency,
@@ -112,7 +112,7 @@ def run(payload: dict[str, Any] = Body(...)) -> dict:
         preview = resample(
             source["key"],
             frequency=frequency,
-            aggregation=str(coerced.get("aggregation") or "mean"),
+            aggregation="mean",
         )
         finite = np.isfinite(preview.values[resolved.start_index:resolved.end_index])
         if int(finite.any(axis=1).sum()) < 2:
@@ -127,7 +127,7 @@ def run(payload: dict[str, Any] = Body(...)) -> dict:
                 }
             )
     raise_if_invalid(issues)
-    new_id = make_id()
+    new_id = make_id(source["key"], coerced["algorithm"])
     get_connection().execute(
         """
         INSERT INTO clusters (cluster_run_id, source_id, algorithm_key, params_json, features_json,

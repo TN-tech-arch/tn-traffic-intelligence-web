@@ -8,7 +8,12 @@ from fastapi import APIRouter, Body, Query
 
 from app.api.deps import create_job, raise_if_invalid
 from app.core.errors import Conflict, NotFound
-from app.core.ids import batch_id as make_batch_id, experiment_id as make_id, now_utc
+from app.core.ids import (
+    batch_id as make_batch_id,
+    experiment_id as make_id,
+    now_utc,
+    region_experiment_ids as make_region_experiment_ids,
+)
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.forecast.registry import MODELS, MODEL_BY_KEY, default_params
 from app.services.datasets import load_dataset
@@ -69,7 +74,9 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
         if existing:
             return _batch_public(existing, include_members=True) | {"idempotent_replay": True}
 
-    new_batch = make_batch_id()
+    source_key = bundle.dataset["source_key"]
+    primary_region = region_ids[0] if scope == "single" else None
+    new_batch = make_batch_id(source_key, scope, region_id=primary_region)
     planned = len(region_ids) * 12
     frozen: dict[str, Any] = {}
     for model in MODELS:
@@ -110,7 +117,12 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
         for model in MODELS:
             entry = per_model[model["key"]]
             config = frozen[model["key"]]
-            new_experiment = make_id(model["key"])
+            new_experiment = make_id(source_key, scope, model["key"], primary_region)
+            region_exp_ids = (
+                {region_ids[0]: new_experiment}
+                if scope == "single" and len(region_ids) == 1
+                else make_region_experiment_ids(source_key, model["key"], region_ids)
+            )
             errors = entry["errors"]
             status = "Queued"
             error_text = None
@@ -129,6 +141,7 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
                 "algorithm_params": config["params"],
                 "mode": config["mode"],
                 "region_ids": region_ids,
+                "region_experiment_ids": region_exp_ids,
                 "batch_id": new_batch,
                 "frozen_at": now_utc(),
                 "skipped_reason": errors or None,
@@ -158,9 +171,24 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
                     now_utc() if status != "Queued" else None,
                 ),
             )
+            for region_id in region_ids:
+                conn.execute(
+                    """
+                    INSERT INTO experiment_region_models
+                        (experiment_id, region_id, region_experiment_id, status)
+                    VALUES (?,?,?,?)
+                    """,
+                    (
+                        new_experiment,
+                        region_id,
+                        region_exp_ids[region_id],
+                        status if status in ("Skipped", "Unavailable") else "Queued",
+                    ),
+                )
             created.append(
                 {
                     "experiment_id": new_experiment,
+                    "region_experiment_ids": region_exp_ids,
                     "algorithm_key": model["key"],
                     "algorithm_label": model["label"],
                     "status": status,
@@ -259,7 +287,7 @@ def _region_summary(experiment_ids: list[str]) -> list[dict[str, Any]]:
     placeholders = ",".join("?" for _ in experiment_ids)
     rows = query_all(
         f"""
-        SELECT experiment_id, region_id, status, metrics_json, error
+        SELECT experiment_id, region_id, region_experiment_id, status, metrics_json, error
         FROM experiment_region_models WHERE experiment_id IN ({placeholders})
         ORDER BY experiment_id, region_id
         """,
@@ -269,6 +297,7 @@ def _region_summary(experiment_ids: list[str]) -> list[dict[str, Any]]:
         {
             "experiment_id": r["experiment_id"],
             "region_id": r["region_id"],
+            "region_experiment_id": r["region_experiment_id"],
             "status": r["status"],
             "metrics": json_loads(r["metrics_json"]),
             "error": r["error"],

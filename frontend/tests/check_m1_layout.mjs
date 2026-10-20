@@ -49,13 +49,15 @@ const leftPane = page.locator('.tn-three-pane > section').nth(0)
 const leftText = await leftPane.innerText()
 check('2 左侧不再有 Advanced Settings 入口', !leftText.includes('Advanced Settings'), 'no advanced entry')
 check(
-  '3 左侧顺序正确且已删除“最多对比区域数”',
+  '3 左侧仅保留数据源、区域和分析时间范围，且原生频率只读显示',
   !leftText.includes('最多对比区域数') &&
-    ['数据源', '对比区域', '时间分辨率', '聚合方式', '分析时间范围（Analysis Time Range）'].every(
+    ['数据源', '对比区域', '原生频率', '分析时间范围（Analysis Time Range）'].every(
       (label, index, all) =>
         leftText.indexOf(label) >= 0 && (index === 0 || leftText.indexOf(label) > leftText.indexOf(all[index - 1])),
-    ),
-  'max-regions control removed',
+    ) &&
+    !leftText.includes('时间分辨率') &&
+    !leftText.includes('聚合方式'),
+  'max-regions and resampling controls removed',
 )
 check('4 日期范围与范围摘要仍在', (await page.locator('[data-field="m1.time_start"] input').count()) === 1 && leftText.includes('实际起点') && leftText.includes('时间跨度'), 'date pickers + summary')
 check('5 已移除可见的时间索引输入', (await page.locator('[data-field="m1.start_index"] input').count()) === 0, 'no index inputs')

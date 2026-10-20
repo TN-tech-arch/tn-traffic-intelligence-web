@@ -132,10 +132,10 @@ await page.waitForTimeout(1000)
 const datasetLabels = await page.locator('.tn-field-label').allInnerTexts()
 check(
   '11 Module 3 参数标签默认使用中文',
-  ['数据源', '预测范围', '区域', '时间分辨率', '聚合方式', '输入长度（L）', '输出长度（H）', '滑动步长（S）', '训练集比例', '验证集比例', '测试集比例'].every(
+  ['数据源', '预测范围', '区域', '开始日期时间', '结束日期时间', '输入长度（L）', '输出长度（H）', '滑动步长（S）', '训练集比例', '验证集比例', '测试集比例'].every(
     (text) => datasetLabels.some((label) => label.replace(/\s+/g, '').includes(text)),
   ) &&
-    !datasetLabels.some((label) => /Dataset \/ Location|Prediction Scope|Temporal Resolution|Train Ratio|Validation Ratio|Test Ratio/.test(label)),
+    !datasetLabels.some((label) => /Dataset \/ Location|Prediction Scope|Temporal Resolution|Aggregation|Dataset Label|Train Ratio|Validation Ratio|Test Ratio/.test(label)),
   datasetLabels.join(' | '),
 )
 
