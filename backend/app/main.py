@@ -29,6 +29,7 @@ from app.api import (
 )
 from app.core.config import PROJECT_ROOT, settings
 from app.core.errors import Conflict, NotFound, RequestRejected
+from app.db.history_ids import migrate_readable_history_ids
 from app.db.maintenance import purge_legacy_dbscan_history
 from app.db.migrate import run_migrations
 from app.services.ingest import SOURCE_DEFINITIONS, import_all, sources_summary
@@ -37,6 +38,7 @@ from app.services.ingest import SOURCE_DEFINITIONS, import_all, sources_summary
 def bootstrap() -> dict:
     settings.ensure_dirs()
     applied = run_migrations()
+    history_ids = migrate_readable_history_ids()
     cluster_maintenance = purge_legacy_dbscan_history()
     imported: list[str] = []
     missing: list[str] = []
@@ -50,6 +52,7 @@ def bootstrap() -> dict:
             imported = list(results.keys())
     return {
         "migrations": applied,
+        "history_id_migration": history_ids,
         "imported": imported,
         "missing_files": missing,
         "cluster_maintenance": cluster_maintenance,

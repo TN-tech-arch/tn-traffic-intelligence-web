@@ -225,7 +225,7 @@ export default function Training() {
         mode: activeModel?.default_mode,
         params,
       })
-      messageApi.success(`实验 ${created.experiment_id} 已提交（${created.region_count} 个区域）`)
+      messageApi.success(`实验 ${created.display_id ?? created.experiment_id} 已提交（${created.region_count} 个区域）`)
       const data = await api.get<any>(ENDPOINTS.experimentGet(created.experiment_id))
       setExperiment(data)
       setMonitorTab('monitor')
@@ -247,7 +247,7 @@ export default function Training() {
     }
     const confirmed = window.confirm(
       `将按顺序运行 12 个算法：\n` +
-        `数据源/数据集：${sourceDisplayName(dataset?.source_key, dataset?.source_display_name)} ${dataset?.dataset_id}\n` +
+        `数据源/数据集：${sourceDisplayName(dataset?.source_key, dataset?.source_display_name)} ${dataset?.display_id ?? dataset?.dataset_id}\n` +
         `预测范围：${dataset?.scope === 'all' ? `全部区域（${dataset?.region_count} 个区域）` : '单区域'}\n` +
         `计划任务数：${12 * (dataset?.scope === 'all' ? dataset?.region_count ?? 1 : 1)}\n` +
         `不可运行模型：${(preflight?.models ?? []).filter((m: any) => !m.runnable).map((m: any) => m.label).join(', ') || '无'}\n\n` +
@@ -261,7 +261,7 @@ export default function Training() {
         model_configs: buildModelConfigs(),
         execution_policy: { sequential: true, continue_on_error: true, skip_unavailable_after_confirmation: true },
       })
-      messageApi.success(`批量任务 ${created.batch_id} 已创建（${created.experiments.length} 个实验计划）`)
+      messageApi.success(`批量任务 ${created.display_id ?? created.batch_id} 已创建（${created.experiments.length} 个实验计划）`)
       const data = await api.get<any>(ENDPOINTS.batchGet(created.batch_id))
       setBatch(data)
       setMonitorTab('batch')
@@ -314,7 +314,7 @@ export default function Training() {
         titleZh={MODULE_META.m4.titleZh}
         titleEn={MODULE_META.m4.titleEn}
         description="12 种真实算法（含 TimesFM / Chronos 零样本预测）与全部模型批量执行"
-        datasetInfo={dataset ? `${dataset.dataset_id} · ${sourceDisplayName(dataset.source_key, dataset.source_display_name)} · L/H/S = ${dataset.L}/${dataset.H}/${dataset.S} · ${dataset.scope === 'all' ? `全部区域（${dataset.region_count}）` : '单区域'}` : '请先构建数据集'}
+        datasetInfo={dataset ? `${dataset.display_id ?? dataset.dataset_id} · ${sourceDisplayName(dataset.source_key, dataset.source_display_name)} · L/H/S = ${dataset.L}/${dataset.H}/${dataset.S} · ${dataset.scope === 'all' ? `全部区域（${dataset.region_count}）` : '单区域'}` : '请先构建数据集'}
       />
       {activeErrors.length > 0 ? (
         <Alert type="error" showIcon style={{ marginBottom: 10 }} message={`${activeErrors.length} 个阻断性错误（错误位于对应输入框下方）`} description={activeErrors.slice(0, 3).map((i) => `${i.path}: ${i.message}`).join('；')} />
@@ -342,7 +342,7 @@ export default function Training() {
                 size="small"
                 value={datasetId || undefined}
                 placeholder="选择一个已构建的数据集"
-                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · ${scopeLabel(d.scope)}` }))}
+                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.display_id ?? d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · ${scopeLabel(d.scope)}` }))}
                 onChange={(value) => setDatasetId(value)}
               />
               {dataset ? (
@@ -580,7 +580,7 @@ export default function Training() {
                   <Button
                     size="small"
                     disabled={!experiment || !['Completed', 'Partial'].includes(experiment?.status)}
-                    onClick={() => messageApi.success(`实验 ${experiment.experiment_id} 的工件已落盘（data/artifacts/experiments/${experiment.experiment_id}）`)}
+                    onClick={() => messageApi.success(`实验 ${experiment.display_id ?? experiment.experiment_id} 的工件已落盘（data/artifacts/experiments/${experiment.experiment_id}）`)}
                   >
                     保存模型
                   </Button>
@@ -614,8 +614,8 @@ export default function Training() {
                         <Card size="small" title={`${experiment.algorithm_label} · ${modeLabel(experiment.mode)}`}>
                           <div className="tn-inline">
                             <StatusTag status={experiment.status} error={experiment.error} />
-                            <Tag>{experiment.experiment_id}</Tag>
-                            {experiment.batch_id ? <Tag color="blue">BATCH {experiment.batch_id}</Tag> : null}
+                            <Tag>{experiment.display_id ?? experiment.experiment_id}</Tag>
+                            {experiment.batch_id ? <Tag color="blue">BATCH {experiment.batch_display_id ?? experiment.batch_id}</Tag> : null}
                             <span className="tn-muted">{scopeLabel(experiment.scope)} · {experiment.region_completed}/{experiment.region_total} 区域完成</span>
                           </div>
                           <Progress percent={Math.round(experiment.progress?.percent ?? 0)} status={experiment.status === 'Failed' ? 'exception' : undefined} style={{ marginTop: 8 }} />
@@ -668,7 +668,7 @@ export default function Training() {
                       </>
                     ) : null}
                     {batch ? (
-                          <Card size="small" title={`全部模型批次 ${batch.batch_id}`}>
+                          <Card size="small" title={`全部模型批次 ${batch.display_id ?? batch.batch_id}`}>
                         <div className="tn-inline">
                           <StatusTag status={batch.status} error={batch.error} />
                           <Tag>总任务 {batch.experiments?.length}</Tag>
@@ -685,7 +685,7 @@ export default function Training() {
                           pagination={false}
                           dataSource={batch.experiments ?? []}
                           columns={[
-                            { title: '实验 ID', dataIndex: 'experiment_id', width: 210 },
+                            { title: '实验 ID', dataIndex: 'display_id', width: 240, render: (value: string, row: any) => value ?? row.experiment_id },
                             { title: '模型', dataIndex: 'algorithm_label', sorter: (a: any, b: any) => a.algorithm_label.localeCompare(b.algorithm_label) },
                             { title: '执行模式', dataIndex: 'mode', width: 100, render: (value: string) => modeLabel(value) },
                             {
@@ -725,7 +725,7 @@ export default function Training() {
                             pagination={{ pageSize: 6, size: 'small' }}
                             dataSource={batch.region_summary}
                             columns={[
-                              { title: '实验 ID', dataIndex: 'experiment_id', width: 190 },
+                              { title: '实验 ID', dataIndex: 'display_id', width: 220, render: (value: string, row: any) => value ?? row.experiment_id },
                               { title: '区域', dataIndex: 'region_id' },
                               { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                               { title: '验证 RMSE', render: (_: unknown, row: any) => row.metrics?.rmse ? Number(row.metrics.rmse).toFixed(1) : '—' },
@@ -754,10 +754,10 @@ export default function Training() {
                   <div className="tn-stack">
                     {experiment ? (
                       <Card size="small" title="当前实验（Experiment）">
-                        <div className="tn-code">{experiment.experiment_id}</div>
+                        <div className="tn-code">{experiment.display_id ?? experiment.experiment_id}</div>
                         <div className="tn-muted" style={{ marginTop: 6 }}>
-                          <div>批量任务：{experiment.batch_id ?? '（单模型运行）'}</div>
-                          <div>数据集：{experiment.dataset_id}</div>
+                          <div>批量任务：{experiment.batch_display_id ?? experiment.batch_id ?? '（单模型运行）'}</div>
+                          <div>数据集：{experiment.dataset?.display_id ?? experiment.dataset_id}</div>
                           <div>算法 / 模式：{experiment.algorithm_label} · {modeLabel(experiment.mode)}</div>
                           <div>预测范围：{scopeLabel(experiment.scope)} · 区域 {experiment.region_completed}/{experiment.region_total}</div>
                           <div>开始：{experiment.started_at ?? '—'} · 结束：{experiment.ended_at ?? '—'}</div>
@@ -771,9 +771,9 @@ export default function Training() {
                     )}
                     {batch ? (
                       <Card size="small" title="当前批量任务（Batch）">
-                        <div className="tn-code">{batch.batch_id}</div>
+                        <div className="tn-code">{batch.display_id ?? batch.batch_id}</div>
                         <div className="tn-muted" style={{ marginTop: 6 }}>
-                          <div>数据集：{batch.dataset_id}</div>
+                          <div>数据集：{batch.dataset_display_id ?? batch.dataset_id}</div>
                           <div>预测范围：{scopeLabel(batch.scope)} · 区域 {batch.region_count}</div>
                           <div>计划任务：{batch.planned_tasks}（12 算法 × {batch.region_count} 区域）</div>
                           <div>策略：顺序执行={batch.policy?.sequential ? '是' : '否'} · 出错后继续={batch.policy?.continue_on_error ? '是' : '否'} · 跳过不可用={batch.policy?.skip_unavailable_after_confirmation ? '是' : '否'}</div>
@@ -789,7 +789,7 @@ export default function Training() {
                 children: (
                   <div className="tn-stack">
                     <div className="tn-inline">
-                      <span className="tn-muted">实验 {experiment?.experiment_id ?? '—'} 的真实后端日志</span>
+                      <span className="tn-muted">实验 {experiment?.display_id ?? experiment?.experiment_id ?? '—'} 的真实后端日志</span>
                       <a href={experiment ? `/api/experiments/${experiment.experiment_id}/logs` : '#'} download={`${experiment?.experiment_id ?? 'logs'}.json`}>
                         <Button size="small" disabled={!experiment}>下载日志</Button>
                       </a>
@@ -821,8 +821,8 @@ export default function Training() {
                       dataSource={batches}
                       pagination={{ pageSize: 4, size: 'small' }}
                       columns={[
-                        { title: '批量任务 ID', dataIndex: 'batch_id', width: 180, render: (value: string) => <span className="tn-code">{value}</span> },
-                        { title: '数据集', dataIndex: 'dataset_id', width: 170, ellipsis: true },
+                        { title: '批量任务 ID', dataIndex: 'display_id', width: 220, render: (value: string, row: any) => <span className="tn-code">{value ?? row.batch_id}</span> },
+                        { title: '数据集', dataIndex: 'dataset_display_id', width: 210, ellipsis: true, render: (value: string, row: any) => value ?? row.dataset_id },
                         { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                         { title: '完成/失败/跳过', render: (_: unknown, row: any) => `${row.task_summary?.completed ?? 0}/${row.task_summary?.failed ?? 0}/${row.task_summary?.skipped ?? 0}` },
                         { title: '创建时间', dataIndex: 'created_at', width: 150 },
@@ -846,10 +846,10 @@ export default function Training() {
                       dataSource={experiments}
                       pagination={{ pageSize: 8, size: 'small' }}
                       columns={[
-                        { title: '实验 ID', dataIndex: 'experiment_id', width: 200, render: (value: string) => <span className="tn-code">{value}</span> },
+                        { title: '实验 ID', dataIndex: 'display_id', width: 240, render: (value: string, row: any) => <span className="tn-code">{value ?? row.experiment_id}</span> },
                         { title: '模型', dataIndex: 'algorithm_label' },
                         { title: '执行模式', dataIndex: 'mode', width: 100, render: (value: string) => modeLabel(value) },
-                        { title: '数据集', dataIndex: 'dataset_id', width: 165, ellipsis: true },
+                        { title: '数据集', dataIndex: 'dataset_display_id', width: 210, ellipsis: true, render: (value: string, row: any) => value ?? row.dataset_id },
                         { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
                         { title: '创建时间', dataIndex: 'created_at', width: 150 },
                         {

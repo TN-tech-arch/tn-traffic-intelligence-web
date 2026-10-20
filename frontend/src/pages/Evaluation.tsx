@@ -47,7 +47,7 @@ export default function Evaluation() {
 
   const schema: FieldSpec[] = useMemo(
     () => [
-      { key: 'experiment_ids', label_zh: '实验（可多选）', type: 'array', enum: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => e.experiment_id), enum_labels: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => `${e.algorithm_label} · ${modeLabel(e.mode)} · ${e.experiment_id}`), default: [], help_zh: '选择 1 到 N 个实验参加同口径比较。', suggestion_zh: '可用批量任务一键载入。' },
+      { key: 'experiment_ids', label_zh: '实验（可多选）', type: 'array', enum: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => e.experiment_id), enum_labels: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => `${e.algorithm_label} · ${modeLabel(e.mode)} · ${e.display_id ?? e.experiment_id}`), default: [], help_zh: '选择 1 到 N 个实验参加同口径比较。', suggestion_zh: '可用批量任务一键载入。' },
       { key: 'scope', label_zh: '评价范围', type: 'enum', enum: ['single', 'all'], enum_labels: ['单区域', '全部区域'], default: 'single', help_zh: '单区域评价一个区域；全部区域只允许来自全区域实验组的模型。', suggestion_zh: '与实验的预测范围保持一致。' },
       { key: 'region_id', label_zh: '区域', type: 'enum', enum: dataset?.region_ids ?? [], default: '', required: false, visible_when: { scope: 'single' }, help_zh: '单区域范围下要评价的区域。', suggestion_zh: '从数据集区域中选择。' },
       { key: 'test_selection', label_zh: '测试范围', type: 'enum', enum: ['full', 'range'], enum_labels: ['完整测试集（正式成绩）', '选定测试范围'], default: 'full', help_zh: '完整测试集用于正式评分；选定范围只是可视化子集，会标注子集来源。', suggestion_zh: '提交成绩请使用完整测试集。' },
@@ -207,7 +207,7 @@ export default function Evaluation() {
             excluded.map((e: any) => `${e.algorithm_label}（${statusLabel(e.status)}）`).join('、'),
         )
       } else {
-        messageApi.success(`已载入批量任务 ${batchId} 的 ${eligible.length} 个成功实验`)
+        messageApi.success(`已载入批量任务 ${data.display_id ?? batchId} 的 ${eligible.length} 个成功实验`)
       }
     } catch (err) {
       messageApi.error(err instanceof ApiError ? err.message : String(err))
@@ -385,7 +385,7 @@ export default function Evaluation() {
                 style={{ width: '100%' }}
                 value={datasetId || undefined}
                 placeholder="选择数据集"
-                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · ${scopeLabel(d.scope)}` }))}
+                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.display_id ?? d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · ${scopeLabel(d.scope)}` }))}
                 onChange={(value) => { setDatasetId(value); setEvaluation(null) }}
               />
             </div>
@@ -396,7 +396,7 @@ export default function Evaluation() {
                 style={{ width: '100%' }}
                 value={batchChoice || undefined}
                 placeholder="按批量任务 ID 一键载入成功实验"
-                options={batches.map((b) => ({ value: b.batch_id, label: `${b.batch_id} · ${statusLabel(b.status)} · 完成 ${b.task_summary?.completed ?? 0}` }))}
+                options={batches.map((b) => ({ value: b.batch_id, label: `${b.display_id ?? b.batch_id} · ${statusLabel(b.status)} · 完成 ${b.task_summary?.completed ?? 0}` }))}
                 onChange={loadFromBatch}
               />
               <div className="tn-muted">失败或被跳过的模型会显示原因，并且不进入排名。</div>
@@ -469,7 +469,7 @@ export default function Evaluation() {
                   <div>允许标准排名：{compatibility.standard_ranking_allowed ? '是' : '否'}</div>
                   {(compatibility.non_eligible ?? []).map((item: any) => (
                     <div key={item.experiment_id} className="tn-warning-text">
-                      ⚠ {item.experiment_id}（{statusLabel(item.status)}）不进入排名
+                      ⚠ {item.display_id ?? item.experiment_id}（{statusLabel(item.status)}）不进入排名
                     </div>
                   ))}
                 </div>
@@ -666,7 +666,7 @@ export default function Evaluation() {
                               RMSE {Number(row.macro.rmse).toFixed(1)} · MAE {Number(row.macro.mae).toFixed(1)} · R²{' '}
                               {row.macro.r2 === null ? '不适用' : Number(row.macro.r2).toFixed(4)}
                             </div>
-                            <div className="tn-code">{row.experiment_id}</div>
+                            <div className="tn-code">{row.display_id ?? row.experiment_id}</div>
                           </div>
                         </div>
                       ))}

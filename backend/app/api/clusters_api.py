@@ -130,11 +130,12 @@ def run(payload: dict[str, Any] = Body(...)) -> dict:
     new_id = make_id(source["key"], coerced["algorithm"])
     get_connection().execute(
         """
-        INSERT INTO clusters (cluster_run_id, source_id, algorithm_key, params_json, features_json,
+        INSERT INTO clusters (cluster_run_id, display_id, source_id, algorithm_key, params_json, features_json,
             frequency, aggregation, region_count, cluster_count, noise_count, status, created_at)
-        VALUES (?,?,?,?,?,?,?,?,0,0,'Queued',?)
+        VALUES (?,?,?,?,?,?,?,?,?,0,0,'Queued',?)
         """,
         (
+            new_id,
             new_id,
             source["source_id"],
             coerced["algorithm"],
@@ -148,7 +149,7 @@ def run(payload: dict[str, Any] = Body(...)) -> dict:
     )
     job = create_job(job_type="clustering", payload={"cluster_run_id": new_id},
                      cluster_run_id=new_id, dataset_id=None)
-    return {"cluster_run_id": new_id, "job_id": job, "status": "Queued", "region_count": region_count,
+    return {"cluster_run_id": new_id, "display_id": new_id, "job_id": job, "status": "Queued", "region_count": region_count,
             "warnings": [i for i in issues if i["severity"] == "warning"]}
 
 
@@ -159,6 +160,8 @@ def list_runs(limit: int = Query(50, ge=1, le=500)) -> dict:
         "runs": [
             {
                 "cluster_run_id": row["cluster_run_id"],
+                "display_id": row["display_id"] or row["cluster_run_id"],
+                "internal_id": row["cluster_run_id"],
                 "source_id": row["source_id"],
                 "algorithm_key": row["algorithm_key"],
                 "algorithm_label": ALGORITHM_LABELS.get(row["algorithm_key"], row["algorithm_key"]),
@@ -176,7 +179,10 @@ def list_runs(limit: int = Query(50, ge=1, le=500)) -> dict:
 
 @router.get("/{run_id}")
 def get_run(run_id: str) -> dict:
-    row = query_one("SELECT * FROM clusters WHERE cluster_run_id = ?", (run_id,))
+    row = query_one(
+        "SELECT * FROM clusters WHERE cluster_run_id = ? OR display_id = ?",
+        (run_id, run_id),
+    )
     if row is None:
         raise NotFound(f"聚类运行 {run_id} 不存在")
     result = json_loads(row["result_json"]) or {}
@@ -184,6 +190,8 @@ def get_run(run_id: str) -> dict:
         result = refresh_cluster_result_names(result)
     return {
         "cluster_run_id": row["cluster_run_id"],
+        "display_id": row["display_id"] or row["cluster_run_id"],
+        "internal_id": row["cluster_run_id"],
         "source_id": row["source_id"],
         "algorithm_key": row["algorithm_key"],
         "algorithm_label": ALGORITHM_LABELS.get(row["algorithm_key"], row["algorithm_key"]),
@@ -199,17 +207,25 @@ def get_run(run_id: str) -> dict:
 
 @router.delete("/{run_id}")
 def delete_run(run_id: str) -> dict:
-    row = query_one("SELECT * FROM clusters WHERE cluster_run_id = ?", (run_id,))
+    row = query_one(
+        "SELECT * FROM clusters WHERE cluster_run_id = ? OR display_id = ?",
+        (run_id, run_id),
+    )
     if row is None:
         raise NotFound(f"聚类运行 {run_id} 不存在")
     if row["status"] in ("Queued", "Running"):
         raise Conflict("运行中的聚类任务请先停止，再执行删除", code="CLUSTER_RUNNING")
     with transaction() as conn:
-        conn.execute("DELETE FROM jobs WHERE cluster_run_id = ?", (run_id,))
+        internal_id = row["cluster_run_id"]
+        conn.execute("DELETE FROM jobs WHERE cluster_run_id = ?", (internal_id,))
         conn.execute(
             "DELETE FROM audit_events WHERE resource_id = ? "
             "AND lower(resource) IN ('cluster','clustering')",
-            (run_id,),
+            (internal_id,),
         )
-        conn.execute("DELETE FROM clusters WHERE cluster_run_id = ?", (run_id,))
-    return {"cluster_run_id": run_id, "deleted": True}
+        conn.execute("DELETE FROM clusters WHERE cluster_run_id = ?", (internal_id,))
+    return {
+        "cluster_run_id": internal_id,
+        "display_id": row["display_id"] or internal_id,
+        "deleted": True,
+    }

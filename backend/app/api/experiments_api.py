@@ -24,12 +24,26 @@ router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 PROTECTED_STATUSES = ("Running", "Queued", "Stopping")
 
 
+def _experiment_row(reference: str):
+    return query_one(
+        "SELECT * FROM experiments WHERE experiment_id=? OR display_id=?",
+        (reference, reference),
+    )
+
+
 def _experiment_public(row, *, include_logs: bool = False) -> dict[str, Any]:
     dataset = query_one("SELECT * FROM dataset_versions WHERE dataset_id=?", (row["dataset_id"],))
+    batch = query_one("SELECT * FROM batches WHERE batch_id=?", (row["batch_id"],)) if row["batch_id"] else None
     payload = {
         "experiment_id": row["experiment_id"],
+        "display_id": row["display_id"] or row["experiment_id"],
+        "internal_id": row["experiment_id"],
         "dataset_id": row["dataset_id"],
+        "dataset_display_id": (
+            (dataset["display_id"] or dataset["dataset_id"]) if dataset else row["dataset_id"]
+        ),
         "batch_id": row["batch_id"],
+        "batch_display_id": (batch["display_id"] or batch["batch_id"]) if batch else None,
         "algorithm_key": row["algorithm_key"],
         "algorithm_label": row["algorithm_label"],
         "category": row["category"],
@@ -50,6 +64,7 @@ def _experiment_public(row, *, include_logs: bool = False) -> dict[str, Any]:
         "ended_at": row["ended_at"],
         "dataset": {
             "dataset_id": dataset["dataset_id"],
+            "display_id": (dataset["display_id"] or dataset["dataset_id"]) if "display_id" in dataset.keys() else dataset["dataset_id"],
             "source_id": dataset["source_id"],
             "scope": dataset["scope"],
             "L": dataset["input_length"],
@@ -63,7 +78,9 @@ def _experiment_public(row, *, include_logs: bool = False) -> dict[str, Any]:
         payload["logs"] = read_logs(row["experiment_id"])
         payload["region_models"] = [
             {
+                "experiment_id": r["experiment_id"],
                 "region_id": r["region_id"],
+                "display_id": r["region_experiment_id"] if "region_experiment_id" in r.keys() else None,
                 "region_experiment_id": r["region_experiment_id"] if "region_experiment_id" in r.keys() else None,
                 "status": r["status"],
                 "metrics": json_loads(r["metrics_json"]),
@@ -238,8 +255,18 @@ def run_experiment(payload: dict[str, Any] = Body(...)) -> dict:
             jobs = query_all(
                 "SELECT * FROM jobs WHERE experiment_id=? ORDER BY sequence_no", (existing["experiment_id"],)
             )
+            existing_batch = (
+                query_one("SELECT * FROM batches WHERE batch_id=?", (existing["batch_id"],))
+                if existing["batch_id"]
+                else None
+            )
             return {
                 "experiment_id": existing["experiment_id"],
+                "display_id": existing["display_id"] or existing["experiment_id"],
+                "batch_id": existing["batch_id"],
+                "batch_display_id": (existing_batch["display_id"] or existing_batch["batch_id"])
+                if existing_batch
+                else None,
                 "status": existing["status"],
                 "idempotent_replay": True,
                 "jobs": [job_public(j) for j in jobs],
@@ -274,12 +301,13 @@ def run_experiment(payload: dict[str, Any] = Body(...)) -> dict:
         if batch_ref:
             conn.execute(
                 """
-                INSERT INTO batches (batch_id, dataset_id, scope, algorithm_count, region_count,
+                INSERT INTO batches (batch_id, display_id, dataset_id, scope, algorithm_count, region_count,
                     planned_tasks, policy_json, params_snapshot_json, task_summary_json, status,
                     created_at, started_at)
-                VALUES (?,?,'all',1,?,?,?,?,?,'Running',?,?)
+                VALUES (?,?,?,'all',1,?,?,?,?,?,'Running',?,?)
                 """,
                 (
+                    batch_ref,
                     batch_ref,
                     bundle.dataset["dataset_id"],
                     len(region_ids),
@@ -294,9 +322,9 @@ def run_experiment(payload: dict[str, Any] = Body(...)) -> dict:
         conn.execute(
             """
             INSERT INTO experiments (experiment_id, dataset_id, batch_id, algorithm_key, algorithm_label,
-                category, mode, scope, params_json, snapshot_json, status, region_total, region_completed,
+                display_id, category, mode, scope, params_json, snapshot_json, status, region_total, region_completed,
                 region_failed, created_at, idempotency_key)
-            VALUES (?,?,?,?,?,?,?,?,?,?,'Queued',?,0,0,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'Queued',?,0,0,?,?)
             """,
             (
                 new_id,
@@ -304,6 +332,7 @@ def run_experiment(payload: dict[str, Any] = Body(...)) -> dict:
                 batch_ref,
                 model["key"],
                 model["label"],
+                new_id,
                 model["category"],
                 prepared["mode"],
                 prepared["scope"],
@@ -337,7 +366,9 @@ def run_experiment(payload: dict[str, Any] = Body(...)) -> dict:
     )
     return {
         "experiment_id": new_id,
+        "display_id": new_id,
         "batch_id": batch_ref,
+        "batch_display_id": batch_ref,
         "status": "Queued",
         "job_id": job,
         "region_count": len(prepared["region_ids"]),
@@ -358,11 +389,23 @@ def list_experiments(
     sql = "SELECT * FROM experiments WHERE 1=1"
     params: list[Any] = []
     if dataset_id:
+        resolved = query_one(
+            "SELECT dataset_id FROM dataset_versions WHERE dataset_id=? OR display_id=?",
+            (dataset_id, dataset_id),
+        )
+        if resolved is None:
+            return {"experiments": [], "count": 0}
         sql += " AND dataset_id=?"
-        params.append(dataset_id)
+        params.append(resolved["dataset_id"])
     if batch_id:
+        resolved = query_one(
+            "SELECT batch_id FROM batches WHERE batch_id=? OR display_id=?",
+            (batch_id, batch_id),
+        )
+        if resolved is None:
+            return {"experiments": [], "count": 0}
         sql += " AND batch_id=?"
-        params.append(batch_id)
+        params.append(resolved["batch_id"])
     if status:
         sql += " AND status=?"
         params.append(status)
@@ -374,7 +417,7 @@ def list_experiments(
 
 @router.get("/{experiment_id}")
 def get_experiment(experiment_id: str, include_logs: bool = Query(True)) -> dict:
-    row = query_one("SELECT * FROM experiments WHERE experiment_id=?", (experiment_id,))
+    row = _experiment_row(experiment_id)
     if row is None:
         raise NotFound(f"实验 {experiment_id} 不存在")
     return _experiment_public(row, include_logs=include_logs)
@@ -383,36 +426,38 @@ def get_experiment(experiment_id: str, include_logs: bool = Query(True)) -> dict
 @router.get("/{experiment_id}/logs")
 def logs(experiment_id: str, limit: int = Query(500, ge=1, le=5000), level: str | None = None,
          region_id: str | None = None) -> dict:
-    row = query_one("SELECT * FROM experiments WHERE experiment_id=?", (experiment_id,))
+    row = _experiment_row(experiment_id)
     if row is None:
         raise NotFound(f"实验 {experiment_id} 不存在")
-    entries = read_logs(experiment_id, limit=limit)
+    entries = read_logs(row["experiment_id"], limit=limit)
     if level:
         entries = [e for e in entries if e.get("level") == level]
     if region_id:
         entries = [e for e in entries if e.get("region_id") == region_id]
-    return {"experiment_id": experiment_id, "logs": entries, "count": len(entries)}
+    return {"experiment_id": row["experiment_id"], "display_id": row["display_id"] or row["experiment_id"], "logs": entries, "count": len(entries)}
 
 
 @router.post("/{experiment_id}/stop")
 def stop(experiment_id: str) -> dict:
-    row = query_one("SELECT * FROM experiments WHERE experiment_id=?", (experiment_id,))
+    row = _experiment_row(experiment_id)
     if row is None:
         raise NotFound(f"实验 {experiment_id} 不存在")
     if row["status"] not in PROTECTED_STATUSES:
         raise Conflict(f"实验当前状态为 {row['status']}，无需停止", code="NOT_RUNNING")
+    internal_id = row["experiment_id"]
     get_connection().execute(
         "UPDATE experiments SET cancel_requested=1, status=CASE WHEN status='Queued' THEN 'Stopped' ELSE status END,"
         " ended_at=CASE WHEN status='Queued' THEN ? ELSE ended_at END WHERE experiment_id=?",
-        (now_utc(), experiment_id),
+        (now_utc(), internal_id),
     )
     get_connection().execute(
         "UPDATE jobs SET cancel_requested=1, state=CASE WHEN state='Queued' THEN 'Skipped' ELSE state END,"
         " ended_at=CASE WHEN state='Queued' THEN ? ELSE ended_at END WHERE experiment_id=?",
-        (now_utc(), experiment_id),
+        (now_utc(), internal_id),
     )
     return {
-        "experiment_id": experiment_id,
+        "experiment_id": internal_id,
+        "display_id": row["display_id"] or internal_id,
         "cancel_requested": True,
         "acknowledged_by": "backend",
         "note": "Worker 在安全检查点确认后状态将变为 Stopped；已完成区域工件保留。",
@@ -421,7 +466,7 @@ def stop(experiment_id: str) -> dict:
 
 @router.post("/{experiment_id}/duplicate")
 def duplicate(experiment_id: str) -> dict:
-    row = query_one("SELECT * FROM experiments WHERE experiment_id=?", (experiment_id,))
+    row = _experiment_row(experiment_id)
     if row is None:
         raise NotFound(f"实验 {experiment_id} 不存在")
     snapshot = json_loads(row["snapshot_json"]) or {}
@@ -435,45 +480,49 @@ def duplicate(experiment_id: str) -> dict:
         "scope": row["scope"],
         "params": json_loads(row["params_json"]),
         "region_ids": snapshot.get("region_ids"),
-        "source_experiment_id": experiment_id,
+        "source_experiment_id": row["experiment_id"],
+        "source_display_id": row["display_id"] or row["experiment_id"],
     }
 
 
 @router.post("/{experiment_id}/archive")
 def archive(experiment_id: str, archived: bool = Query(True)) -> dict:
-    row = query_one("SELECT * FROM experiments WHERE experiment_id=?", (experiment_id,))
+    row = _experiment_row(experiment_id)
     if row is None:
         raise NotFound(f"实验 {experiment_id} 不存在")
     if archived and row["status"] in PROTECTED_STATUSES:
         raise Conflict("运行中的实验请先停止再归档", code="RUNNING")
     get_connection().execute(
         "UPDATE experiments SET status=? WHERE experiment_id=?",
-        ("Archived" if archived else "Completed", experiment_id),
+        ("Archived" if archived else "Completed", row["experiment_id"]),
     )
-    return _experiment_public(query_one("SELECT * FROM experiments WHERE experiment_id=?", (experiment_id,)))
+    return _experiment_public(
+        query_one("SELECT * FROM experiments WHERE experiment_id=?", (row["experiment_id"],))
+    )
 
 
 @router.delete("/{experiment_id}")
 def remove(experiment_id: str) -> dict:
-    row = query_one("SELECT * FROM experiments WHERE experiment_id=?", (experiment_id,))
+    row = _experiment_row(experiment_id)
     if row is None:
         raise NotFound(f"实验 {experiment_id} 不存在")
     if row["status"] in PROTECTED_STATUSES:
         raise Conflict("运行中的实验必须先停止才能删除", code="RUNNING")
+    internal_id = row["experiment_id"]
     referenced = query_one(
-        "SELECT COUNT(*) AS n FROM evaluation_experiments WHERE experiment_id=?", (experiment_id,)
+        "SELECT COUNT(*) AS n FROM evaluation_experiments WHERE experiment_id=?", (internal_id,)
     )
     if referenced and referenced["n"]:
         raise Conflict(
-            f"实验 {experiment_id} 已被 {referenced['n']} 个 Evaluation 引用，只能 Archive，不能删除",
+            f"实验 {row['display_id'] or internal_id} 已被 {referenced['n']} 个 Evaluation 引用，只能 Archive，不能删除",
             code="EXPERIMENT_REFERENCED",
         )
     conn = get_connection()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        conn.execute("DELETE FROM experiment_region_models WHERE experiment_id=?", (experiment_id,))
-        conn.execute("DELETE FROM jobs WHERE experiment_id=?", (experiment_id,))
-        conn.execute("DELETE FROM experiments WHERE experiment_id=?", (experiment_id,))
+        conn.execute("DELETE FROM experiment_region_models WHERE experiment_id=?", (internal_id,))
+        conn.execute("DELETE FROM jobs WHERE experiment_id=?", (internal_id,))
+        conn.execute("DELETE FROM experiments WHERE experiment_id=?", (internal_id,))
     except Exception:
         conn.execute("ROLLBACK")
         raise
@@ -481,11 +530,11 @@ def remove(experiment_id: str) -> dict:
         conn.execute("COMMIT")
     from app.services.artifacts import remove_registered, safe_dir
 
-    remove_registered(safe_dir("experiments", experiment_id))
-    log_file = experiment_log_path(experiment_id)
+    remove_registered(safe_dir("experiments", internal_id))
+    log_file = experiment_log_path(internal_id)
     try:
         if log_file.exists():
             log_file.unlink()
     except OSError:
         pass
-    return {"experiment_id": experiment_id, "deleted": True}
+    return {"experiment_id": internal_id, "display_id": row["display_id"] or internal_id, "deleted": True}

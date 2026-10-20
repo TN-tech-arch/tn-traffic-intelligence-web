@@ -275,14 +275,20 @@ export default function Clustering() {
     setServerIssues([])
     try {
       const created = await api.post<any>(ENDPOINTS.clusterRun, { values: config })
-      messageApi.success(`聚类任务已提交：${created.cluster_run_id}`)
+      messageApi.success(`聚类任务已提交：${created.display_id ?? created.cluster_run_id}`)
       const started = Date.now()
       while (Date.now() - started < 600000) {
         await new Promise((resolve) => setTimeout(resolve, 2500))
         const state = await api.get<any>(ENDPOINTS.clusterGet(created.cluster_run_id))
         if (!['Queued', 'Running'].includes(state.status)) {
           if (state.status === 'Completed') {
-            setResult({ ...state.result, cluster_run_id: state.cluster_run_id, params: state.params, metrics: state.metrics })
+            setResult({
+              ...state.result,
+              cluster_run_id: state.display_id ?? state.cluster_run_id,
+              internal_id: state.cluster_run_id,
+              params: state.params,
+              metrics: state.metrics,
+            })
             setResultKey(configSignature(config))
             messageApi.success('聚类完成（真实计算）')
           } else {
@@ -327,11 +333,17 @@ export default function Clustering() {
         time_end: resultEnd || null,
       }
       skipSourceDateReset.current = String(state.params?.source_key ?? '') !== String(config.source_key ?? '')
-      setResult({ ...state.result, cluster_run_id: runId, params: state.params, metrics: state.metrics })
+      setResult({
+        ...state.result,
+        cluster_run_id: state.display_id ?? runId,
+        internal_id: state.cluster_run_id ?? runId,
+        params: state.params,
+        metrics: state.metrics,
+      })
       pendingHistoryResultKey.current = true
       setDrafts({})
       setConfig((prev) => ({ ...prev, ...nextConfig }))
-      messageApi.success(`已载入历史聚类 ${runId}`)
+      messageApi.success(`已载入历史聚类 ${state.display_id ?? runId}`)
     } catch (err) {
       messageApi.error(String(err))
     }
@@ -718,7 +730,7 @@ export default function Clustering() {
                 <div className="tn-history-row" key={run.cluster_run_id}>
                   <div>
                     <div style={{ fontSize: 12 }}>{run.algorithm_label} · {run.cluster_count} 簇</div>
-                    <div className="tn-muted">{run.cluster_run_id}</div>
+                    <div className="tn-muted">{run.display_id ?? run.cluster_run_id}</div>
                     <div className="tn-muted">{run.created_at}</div>
                   </div>
                   <div className="tn-inline">

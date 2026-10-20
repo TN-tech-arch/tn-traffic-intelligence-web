@@ -114,8 +114,16 @@ if ($dataset_id -notmatch "^DS-MILANO-ADRIANO-\d{4,}$") {
 if ($built.label -ne $dataset_id) {
     throw "installed dataset primary label is not the DS ID"
 }
+if ($built.display_id -ne $dataset_id) {
+    throw "installed dataset display_id is not the persisted DS business ID"
+}
 if ($built.time_start -ne "2013-11-01 00:00:00" -or $built.time_end -ne "2014-01-01 23:50:00") {
     throw "installed dataset did not default to the full Milano range"
+}
+$datasetList = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/datasets?include_archived=true" -TimeoutSec 20
+$installedDataset = $datasetList.datasets | Where-Object { $_.dataset_id -eq $dataset_id } | Select-Object -First 1
+if (-not $installedDataset -or $installedDataset.display_id -ne $dataset_id) {
+    throw "installed dataset list does not expose the persisted DS display ID"
 }
 
 Write-Host "[test] deep verification: Module 4 Random Forest experiment"
@@ -134,6 +142,9 @@ $run = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/experiment
 if ($run.experiment_id -notmatch "^EXP-MILANO-ADRIANO-RANDOM[-_]FOREST-\d{4,}$") {
     throw "installed experiment ID is not readable: $($run.experiment_id)"
 }
+if ($run.display_id -ne $run.experiment_id) {
+    throw "installed experiment response is missing its persisted EXP display ID"
+}
 $experiment = $null
 for ($i = 0; $i -lt 90; $i++) {
     Start-Sleep -Seconds 2
@@ -146,6 +157,9 @@ if ($experiment.status -notin @("Completed", "Partial")) {
 $logs = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/experiments/$($run.experiment_id)/logs" -TimeoutSec 20
 if ($logs.logs.Count -eq 0) {
     throw "installed Module 4 experiment produced no logs"
+}
+if ($experiment.display_id -ne $run.experiment_id -or $experiment.dataset_display_id -ne $dataset_id) {
+    throw "installed experiment detail does not expose DS/EXP display IDs"
 }
 
 Write-Host "[test] deep verification: Module 5 full-test evaluation"
@@ -167,8 +181,54 @@ for ($i = 0; $i -lt 120; $i++) {
 if ($evaluationState.status -ne "Completed" -or $evaluationState.prediction_count -le 0) {
     throw "installed Module 5 evaluation failed or produced no predictions"
 }
+$installedMember = $evaluationState.experiments | Where-Object { $_.experiment_id -eq $run.experiment_id } | Select-Object -First 1
+if (-not $installedMember -or $installedMember.display_id -ne $run.experiment_id) {
+    throw "installed Module 5 evaluation does not expose the EXP display ID"
+}
 Write-Host ("[test] installed core: dataset={0}, experiment={1}, evaluation={2}, predictions={3}" -f `
         $dataset_id, $experiment.experiment_id, $evaluationState.evaluation_id, $evaluationState.prediction_count)
+
+Write-Host "[test] packaged history-ID migration against pre-migration snapshot"
+$legacyBackup = Get-ChildItem -LiteralPath (Join-Path $root "data\backups") `
+    -Filter "tn_traffic-before-history-id-migration-*.db" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($legacyBackup) {
+    $migrationDir = Join-Path $Target "migration-check"
+    New-Item -ItemType Directory -Force -Path $migrationDir | Out-Null
+    $migrationDb = Join-Path $migrationDir "legacy.db"
+    Copy-Item -LiteralPath $legacyBackup.FullName -Destination $migrationDb -Force
+    $oldDbPath = $env:TN_DB_PATH
+    $oldDataDir = $env:TN_DATA_DIR
+    $oldPythonPath = $env:PYTHONPATH
+    try {
+        $env:TN_DB_PATH = $migrationDb
+        $env:TN_DATA_DIR = $migrationDir
+        $env:PYTHONPATH = Join-Path $Target "backend"
+        $migrationJson = & $python -c "from app.db.migrate import run_migrations; from app.db.history_ids import migrate_readable_history_ids; import json; run_migrations(); print(json.dumps(migrate_readable_history_ids()))"
+        if ($LASTEXITCODE -ne 0) { throw "packaged history-ID migration process failed" }
+        $migrationResult = ($migrationJson | Select-Object -Last 1) | ConvertFrom-Json
+        if ($migrationResult.after.issues -ne 0 -or $migrationResult.after.datasets -ne 15 -or `
+            $migrationResult.after.clusters -ne 10 -or $migrationResult.after.experiments -ne 96 -or `
+            $migrationResult.after.batches -ne 6) {
+            throw "packaged history-ID migration counts or issues are unexpected"
+        }
+        Write-Host ("[test] packaged migration: datasets={0}, clusters={1}, experiments={2}, region_experiments={3}, batches={4}, mappings={5}, issues={6}" -f `
+                $migrationResult.after.datasets, $migrationResult.after.clusters, $migrationResult.after.experiments, `
+                $migrationResult.after.region_experiments, $migrationResult.after.batches, `
+                $migrationResult.after.mappings, $migrationResult.after.issues)
+    } finally {
+        $env:TN_DB_PATH = $oldDbPath
+        $env:TN_DATA_DIR = $oldDataDir
+        $env:PYTHONPATH = $oldPythonPath
+        $resolvedMigration = (Resolve-Path -LiteralPath $migrationDir).Path
+        if ((Split-Path -Parent $resolvedMigration) -ne (Resolve-Path -LiteralPath $Target).Path) {
+            throw "refusing to remove migration-check outside install target"
+        }
+        Remove-Item -LiteralPath $resolvedMigration -Recurse -Force
+    }
+} else {
+    throw "pre-migration backup missing; packaged migration could not be verified"
+}
 
 Write-Host "[test] stopping installed services"
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" |

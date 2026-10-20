@@ -24,29 +24,58 @@ def _load_members(experiment_ids: list[str]) -> list[dict[str, Any]]:
         return []
     placeholders = ",".join("?" for _ in experiment_ids)
     rows = query_all(
-        f"SELECT * FROM experiments WHERE experiment_id IN ({placeholders})", tuple(experiment_ids)
+        f"SELECT * FROM experiments WHERE experiment_id IN ({placeholders}) "
+        f"OR display_id IN ({placeholders})",
+        tuple(experiment_ids) + tuple(experiment_ids),
     )
     out = []
     for row in rows:
         snapshot = json_loads(row["snapshot_json"]) or {}
+        dataset = query_one(
+            "SELECT display_id, dataset_id FROM dataset_versions WHERE dataset_id=?",
+            (row["dataset_id"],),
+        )
+        batch = (
+            query_one(
+                "SELECT display_id, batch_id FROM batches WHERE batch_id=?",
+                (row["batch_id"],),
+            )
+            if row["batch_id"]
+            else None
+        )
         out.append(
             {
                 "experiment_id": row["experiment_id"],
+                "display_id": row["display_id"] or row["experiment_id"],
+                "internal_id": row["experiment_id"],
                 "algorithm_key": row["algorithm_key"],
                 "algorithm_label": row["algorithm_label"],
                 "mode": row["mode"],
                 "status": row["status"],
                 "dataset_id": row["dataset_id"],
+                "dataset_display_id": (dataset["display_id"] or dataset["dataset_id"])
+                if dataset
+                else row["dataset_id"],
                 "scope": row["scope"],
                 "batch_id": row["batch_id"],
+                "batch_display_id": (batch["display_id"] or batch["batch_id"])
+                if batch
+                else None,
                 "region_ids": snapshot.get("region_ids") or [],
                 "created_at": row["created_at"],
                 "error": row["error"],
             }
         )
-    found = {m["experiment_id"] for m in out}
+    found = {m["experiment_id"] for m in out} | {m["display_id"] for m in out}
     for missing in set(experiment_ids) - found:
-        out.append({"experiment_id": missing, "status": "Missing", "error": "实验不存在"})
+        out.append(
+            {
+                "experiment_id": missing,
+                "display_id": missing,
+                "status": "Missing",
+                "error": "实验不存在",
+            }
+        )
     return out
 
 
@@ -106,7 +135,12 @@ def _common_protocol(experiments: list[dict[str, Any]], dataset: dict[str, Any] 
     return {
         "eligible_experiments": [e["experiment_id"] for e in comparable],
         "non_eligible": [
-            {"experiment_id": e["experiment_id"], "status": e.get("status"), "reason": e.get("error")}
+            {
+                "experiment_id": e["experiment_id"],
+                "display_id": e.get("display_id") or e["experiment_id"],
+                "status": e.get("status"),
+                "reason": e.get("error"),
+            }
             for e in experiments
             if e.get("status") not in ("Completed", "Partial")
         ],
@@ -192,14 +226,50 @@ def _evaluation_public(row, *, include_predictions: bool = False, limit: int = 4
         "SELECT * FROM evaluation_experiments WHERE evaluation_id=? ORDER BY algorithm_key",
         (row["evaluation_id"],),
     )
+    dataset = query_one(
+        "SELECT display_id, dataset_id FROM dataset_versions WHERE dataset_id=?",
+        (row["dataset_id"],),
+    )
+    experiment_rows = query_all(
+        f"""
+        SELECT experiment_id, display_id, batch_id
+        FROM experiments
+        WHERE experiment_id IN ({",".join("?" for _ in members)})
+        """,
+        tuple(m["experiment_id"] for m in members),
+    ) if members else []
+    experiment_lookup = {item["experiment_id"]: item for item in experiment_rows}
+    batch_ids = sorted({item["batch_id"] for item in experiment_rows if item["batch_id"]})
+    batch_lookup = {
+        item["batch_id"]: item
+        for item in (
+            query_all(
+                f"SELECT batch_id, display_id FROM batches "
+                f"WHERE batch_id IN ({','.join('?' for _ in batch_ids)})",
+                tuple(batch_ids),
+            )
+            if batch_ids
+            else []
+        )
+    }
+    metrics_summary = json_loads(row["metrics_summary_json"])
+    if isinstance(metrics_summary, dict):
+        for key in ("ranking", "experiments"):
+            for item in metrics_summary.get(key) or []:
+                experiment = experiment_lookup.get(item.get("experiment_id"))
+                if experiment:
+                    item["display_id"] = experiment["display_id"] or experiment["experiment_id"]
     payload = {
         "evaluation_id": row["evaluation_id"],
         "dataset_id": row["dataset_id"],
+        "dataset_display_id": (dataset["display_id"] or dataset["dataset_id"])
+        if dataset
+        else row["dataset_id"],
         "scope": row["scope"],
         "region_id": row["region_id"],
         "status": row["status"],
         "protocol": json_loads(row["protocol_json"]),
-        "metrics_summary": json_loads(row["metrics_summary_json"]),
+        "metrics_summary": metrics_summary,
         "progress": json_loads(row["progress_json"]),
         "error": row["error"],
         "created_at": row["created_at"],
@@ -209,6 +279,24 @@ def _evaluation_public(row, *, include_predictions: bool = False, limit: int = 4
         "experiments": [
             {
                 "experiment_id": m["experiment_id"],
+                "display_id": (
+                    experiment_lookup[m["experiment_id"]]["display_id"]
+                    or experiment_lookup[m["experiment_id"]]["experiment_id"]
+                )
+                if m["experiment_id"] in experiment_lookup
+                else m["experiment_id"],
+                "batch_id": experiment_lookup[m["experiment_id"]]["batch_id"]
+                if m["experiment_id"] in experiment_lookup
+                else None,
+                "batch_display_id": (
+                    batch_lookup[
+                        experiment_lookup[m["experiment_id"]]["batch_id"]
+                    ]["display_id"]
+                    or experiment_lookup[m["experiment_id"]]["batch_id"]
+                )
+                if m["experiment_id"] in experiment_lookup
+                and experiment_lookup[m["experiment_id"]]["batch_id"] in batch_lookup
+                else None,
                 "algorithm_key": m["algorithm_key"],
                 "status": m["status"],
                 "coverage_regions": m["coverage_regions"],
@@ -258,11 +346,16 @@ def series(evaluation_id: str, experiment_id: str = Query(...), region_id: str |
     row = query_one("SELECT * FROM evaluations WHERE evaluation_id=?", (evaluation_id,))
     if row is None:
         raise NotFound(f"评价 {evaluation_id} 不存在")
+    experiment = query_one(
+        "SELECT experiment_id, display_id FROM experiments WHERE experiment_id=? OR display_id=?",
+        (experiment_id, experiment_id),
+    )
+    internal_experiment_id = experiment["experiment_id"] if experiment else experiment_id
     sql = (
         "SELECT region_id, window_index, horizon_step, target_at, y_true, y_pred "
         "FROM evaluation_predictions WHERE evaluation_id=? AND experiment_id=?"
     )
-    params: list[Any] = [evaluation_id, experiment_id]
+    params: list[Any] = [evaluation_id, internal_experiment_id]
     if region_id:
         sql += " AND region_id=?"
         params.append(region_id)
@@ -274,6 +367,10 @@ def series(evaluation_id: str, experiment_id: str = Query(...), region_id: str |
     return {
         "evaluation_id": evaluation_id,
         "experiment_id": experiment_id,
+        "internal_experiment_id": internal_experiment_id,
+        "display_id": (experiment["display_id"] or experiment["experiment_id"])
+        if experiment
+        else experiment_id,
         "region_id": region_id,
         "rows": [dict(r) for r in rows],
         "count": len(rows),

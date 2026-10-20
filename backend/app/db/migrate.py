@@ -15,6 +15,22 @@ from app.db.connection import get_connection
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 
+def _ensure_history_display_columns(conn) -> None:
+    """Apply the additive 003 columns idempotently.
+
+    SQLite has no portable ``ADD COLUMN IF NOT EXISTS``.  Keeping these four
+    additive statements here makes a partially interrupted 003 migration safe
+    to retry before the index/table script runs.
+    """
+    for table in ("dataset_versions", "clusters", "experiments", "batches"):
+        columns = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if "display_id" not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN display_id TEXT")
+
+
 def _ensure_table() -> None:
     get_connection().execute(
         """
@@ -49,6 +65,8 @@ def run_migrations() -> list[str]:
         if version in done:
             continue
         sql = path.read_text(encoding="utf-8")
+        if version == "003_history_display_ids":
+            _ensure_history_display_columns(conn)
         # executescript() commits any open transaction itself; every statement in
         # the migration set is written idempotently (IF NOT EXISTS) so a partial
         # run followed by a re-run converges to the same schema.

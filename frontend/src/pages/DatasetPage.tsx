@@ -198,7 +198,7 @@ export default function DatasetPage() {
     setServerIssues([])
     try {
       const data = await api.post<any>(ENDPOINTS.datasetBuild, { values: config })
-      messageApi.success(`数据集已构建：${data.dataset_id}`)
+      messageApi.success(`数据集已构建：${data.display_id ?? data.dataset_id}`)
       previewRequested.current = false
       setPreview(null)
       setPreviewWindowInfo(null)
@@ -246,7 +246,7 @@ export default function DatasetPage() {
       setSelectedDataset(data.dataset)
       setWindowJumpValue((data.window_index ?? 0) + 1)
       if (!options.windowOnly) {
-        messageApi.success(`已打开历史数据集 ${datasetId}`)
+        messageApi.success(`已打开历史数据集 ${data.dataset.display_id ?? datasetId}`)
       }
     } catch (err) {
       if (seq !== historySeq.current) return
@@ -337,7 +337,7 @@ export default function DatasetPage() {
         titleZh={MODULE_META.m3.titleZh}
         titleEn={MODULE_META.m3.titleEn}
         description="滑窗 L/H/S、无泄漏时间切分、因果预处理与数据集 ID 持久化"
-        datasetInfo={selectedDataset ? `当前数据集 ${selectedDataset.dataset_id} · ${statusLabel(selectedDataset.status)}` : '尚未打开已保存数据集'}
+        datasetInfo={selectedDataset ? `当前数据集 ${selectedDataset.display_id ?? selectedDataset.dataset_id} · ${statusLabel(selectedDataset.status)}` : '尚未打开已保存数据集'}
       />
       {errors.length > 0 ? (
         <Alert type="error" showIcon style={{ marginBottom: 10 }} message={`${errors.length} 个参数错误（错误显示在对应输入框下方）`} description={errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join('；')} />
@@ -436,7 +436,7 @@ export default function DatasetPage() {
                 {visibleDatasets.map((row: any) => (
                   <div className="tn-m3-dataset-row" key={row.dataset_id}>
                     <div className="tn-inline" style={{ justifyContent: 'space-between' }}>
-                      <span className="tn-code">{row.dataset_id}</span>
+                      <span className="tn-code">{row.display_id ?? row.dataset_id}</span>
                       <StatusTag status={row.status} />
                     </div>
                     <div className="tn-muted">
@@ -482,7 +482,7 @@ export default function DatasetPage() {
               <div className="tn-stack" data-testid="dataset-overview">
                 {selectedDataset ? (
                   <div className="tn-muted">
-                    <div><strong>数据集 ID：</strong>{selectedDataset.dataset_id}</div>
+                    <div><strong>数据集 ID：</strong>{selectedDataset.display_id ?? selectedDataset.dataset_id}</div>
                     <div>
                       <strong>数据源：</strong>{selectedDataset.source_display_name ?? selectedDataset.source_key}
                       {' · '}<strong>预测范围：</strong>{scopeLabel(selectedDataset.scope)}

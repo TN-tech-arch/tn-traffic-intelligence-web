@@ -653,13 +653,14 @@ def create_dataset(payload: dict[str, Any]) -> dict[str, Any]:
         conn.execute(
             """
             INSERT INTO dataset_versions (
-                dataset_id, source_id, label, scope, region_ids_json, frequency, frequency_minutes,
+                dataset_id, display_id, source_id, label, scope, region_ids_json, frequency, frequency_minutes,
                 aggregation, input_length, output_length, step, train_ratio, val_ratio, test_ratio,
                 split_boundaries_json, preprocess_json, scaler_ref, artifact_ref, window_counts_json,
                 region_window_summary_json, quality_json, status, hash, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
+                new_id,
                 new_id,
                 computed["source"]["source_id"],
                 new_id,
@@ -703,7 +704,10 @@ def create_dataset(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def dataset_row(dataset_id: str):
-    row = query_one("SELECT * FROM dataset_versions WHERE dataset_id = ?", (dataset_id,))
+    row = query_one(
+        "SELECT * FROM dataset_versions WHERE dataset_id = ? OR display_id = ?",
+        (dataset_id, dataset_id),
+    )
     if row is None:
         raise NotFound(f"Dataset {dataset_id} 不存在", code="DATASET_NOT_FOUND")
     return row
@@ -716,6 +720,8 @@ def dataset_summary(row) -> dict[str, Any]:
     time_end = boundaries[-1].get("end_at") if boundaries else None
     return {
         "dataset_id": row["dataset_id"],
+        "display_id": row["display_id"] or row["dataset_id"],
+        "internal_id": row["dataset_id"],
         "label": row["label"],
         "source_id": row["source_id"],
         "source_key": source["key"] if source else None,
@@ -769,15 +775,15 @@ def list_datasets(*, include_archived: bool = False) -> list[dict[str, Any]]:
 
 def delete_dataset(dataset_id: str) -> dict[str, Any]:
     row = dataset_row(dataset_id)
-    if _is_referenced(dataset_id):
+    if _is_referenced(row["dataset_id"]):
         raise Conflict(
-            f"Dataset {dataset_id} 已被 Experiment / Evaluation 引用，不能删除",
+            f"Dataset {row['display_id'] or row['dataset_id']} 已被 Experiment / Evaluation 引用，不能删除",
             code="DATASET_REFERENCED",
         )
     conn = get_connection()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        conn.execute("DELETE FROM dataset_versions WHERE dataset_id = ?", (dataset_id,))
+        conn.execute("DELETE FROM dataset_versions WHERE dataset_id = ?", (row["dataset_id"],))
     except Exception:
         conn.execute("ROLLBACK")
         raise
@@ -791,7 +797,7 @@ def delete_dataset(dataset_id: str) -> dict[str, Any]:
             shutil.rmtree(resolved)
     except OSError:
         pass
-    return {"dataset_id": dataset_id, "deleted": True}
+    return {"dataset_id": row["dataset_id"], "display_id": row["display_id"] or row["dataset_id"], "deleted": True}
 
 
 def load_dataset(dataset_id: str) -> DatasetBundle:

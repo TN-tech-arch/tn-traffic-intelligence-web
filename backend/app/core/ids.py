@@ -46,26 +46,41 @@ def slug(text: str, fallback: str = "SRC") -> str:
     return cleaned[:24] or fallback
 
 
-def _next_sequence(key: str) -> int:
+def _normalized_parts(parts: list[str]) -> list[str]:
+    return [slug(part, "NA") for part in parts if part not in (None, "")]
+
+
+def _sequence_key(prefix: str, parts: list[str]) -> str:
+    return "|".join([prefix, *_normalized_parts(parts)])
+
+
+def _ensure_sequence_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS readable_id_sequences (
+            sequence_key TEXT PRIMARY KEY,
+            next_value   INTEGER NOT NULL,
+            updated_at   TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _next_sequence(key: str, conn: sqlite3.Connection | None = None) -> int:
     """Allocate the next sequence for ``key`` without reusing deleted numbers.
 
-    A short-lived autocommit connection is deliberate: if the surrounding
-    business transaction rolls back, the consumed sequence is not rolled back
-    and can never be reassigned to a different record.
+    Normal API calls use a short-lived autocommit connection.  Data migrations
+    may pass their existing transaction connection so sequence allocation and
+    history updates commit or roll back together without taking a second write
+    lock.
     """
-    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(settings.db_path), timeout=30.0, isolation_level=None)
+    owns_connection = conn is None
+    if conn is None:
+        settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(settings.db_path), timeout=30.0, isolation_level=None)
     try:
         conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS readable_id_sequences (
-                sequence_key TEXT PRIMARY KEY,
-                next_value   INTEGER NOT NULL,
-                updated_at   TEXT NOT NULL
-            )
-            """
-        )
+        _ensure_sequence_table(conn)
         row = conn.execute(
             """
             INSERT INTO readable_id_sequences (sequence_key, next_value, updated_at)
@@ -81,14 +96,57 @@ def _next_sequence(key: str) -> int:
             raise RuntimeError(f"无法分配 ID 序号: {key}")
         return int(row[0])
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
 
 
 def readable_id(prefix: str, parts: list[str]) -> str:
-    normalized = [slug(part, "NA") for part in parts if part not in (None, "")]
-    key = "|".join([prefix, *normalized])
+    normalized = _normalized_parts(parts)
+    key = _sequence_key(prefix, parts)
     sequence = _next_sequence(key)
     return "-".join([prefix, *normalized, f"{sequence:04d}"])
+
+
+def readable_id_on_connection(
+    conn: sqlite3.Connection,
+    prefix: str,
+    parts: list[str],
+) -> str:
+    """Allocate a readable ID inside an existing write transaction."""
+    normalized = _normalized_parts(parts)
+    key = _sequence_key(prefix, parts)
+    sequence = _next_sequence(key, conn=conn)
+    return "-".join([prefix, *normalized, f"{sequence:04d}"])
+
+
+def reserve_sequence_on_connection(
+    conn: sqlite3.Connection,
+    prefix: str,
+    parts: list[str],
+    display_id: str | None,
+) -> None:
+    """Raise the persisted sequence watermark for an existing readable ID."""
+    if not display_id:
+        return
+    normalized = _normalized_parts(parts)
+    stem = "-".join([prefix, *normalized])
+    if not display_id.startswith(f"{stem}-"):
+        return
+    suffix = display_id[len(stem) + 1 :]
+    if not suffix.isdigit():
+        return
+    next_value = int(suffix) + 1
+    _ensure_sequence_table(conn)
+    conn.execute(
+        """
+        INSERT INTO readable_id_sequences (sequence_key, next_value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(sequence_key) DO UPDATE SET
+            next_value = MAX(readable_id_sequences.next_value, excluded.next_value),
+            updated_at = excluded.updated_at
+        """,
+        (_sequence_key(prefix, parts), next_value, now_utc()),
+    )
 
 
 def readable_ids(prefix: str, parts_list: list[list[str]]) -> list[str]:
@@ -99,20 +157,12 @@ def readable_ids(prefix: str, parts_list: list[list[str]]) -> list[str]:
     conn = sqlite3.connect(str(settings.db_path), timeout=30.0, isolation_level=None)
     try:
         conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS readable_id_sequences (
-                sequence_key TEXT PRIMARY KEY,
-                next_value   INTEGER NOT NULL,
-                updated_at   TEXT NOT NULL
-            )
-            """
-        )
+        _ensure_sequence_table(conn)
         conn.execute("BEGIN IMMEDIATE")
         output: list[str] = []
         for parts in parts_list:
-            normalized = [slug(part, "NA") for part in parts if part not in (None, "")]
-            key = "|".join([prefix, *normalized])
+            normalized = _normalized_parts(parts)
+            key = _sequence_key(prefix, parts)
             row = conn.execute(
                 """
                 INSERT INTO readable_id_sequences (sequence_key, next_value, updated_at)

@@ -13,6 +13,7 @@ data/processed/
 data/artifacts/
 data/logs/
 data/screenshots/
+data/backups/
 data/tn_traffic.db*
 
 # Model weights (multi-GB, never commit)

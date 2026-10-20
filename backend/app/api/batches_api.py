@@ -95,12 +95,13 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
     try:
         conn.execute(
             """
-            INSERT INTO batches (batch_id, dataset_id, scope, algorithm_count, region_count, planned_tasks,
+            INSERT INTO batches (batch_id, display_id, dataset_id, scope, algorithm_count, region_count, planned_tasks,
                 policy_json, params_snapshot_json, task_summary_json, status, created_at, idempotency_key,
                 started_at)
-            VALUES (?,?,?,12,?,?,?,?,?, 'Running', ?, ?, ?)
+            VALUES (?,?,?,?,12,?,?,?,?,?, 'Running', ?, ?, ?)
             """,
             (
+                new_batch,
                 new_batch,
                 bundle.dataset["dataset_id"],
                 scope,
@@ -149,9 +150,9 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
             conn.execute(
                 """
                 INSERT INTO experiments (experiment_id, dataset_id, batch_id, algorithm_key, algorithm_label,
-                    category, mode, scope, params_json, snapshot_json, status, region_total, region_completed,
+                    display_id, category, mode, scope, params_json, snapshot_json, status, region_total, region_completed,
                     region_failed, error, created_at, ended_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?)
                 """,
                 (
                     new_experiment,
@@ -159,6 +160,7 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
                     new_batch,
                     model["key"],
                     model["label"],
+                    new_experiment,
                     model["category"],
                     config["mode"],
                     scope,
@@ -188,6 +190,7 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
             created.append(
                 {
                     "experiment_id": new_experiment,
+                    "display_id": new_experiment,
                     "region_experiment_ids": region_exp_ids,
                     "algorithm_key": model["key"],
                     "algorithm_label": model["label"],
@@ -218,6 +221,7 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
         )
     return {
         "batch_id": new_batch,
+        "display_id": new_batch,
         "dataset_id": bundle.dataset["dataset_id"],
         "scope": scope,
         "status": "Running",
@@ -233,6 +237,7 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
 
 
 def _batch_public(row, *, include_members: bool = False) -> dict[str, Any]:
+    dataset = query_one("SELECT * FROM dataset_versions WHERE dataset_id=?", (row["dataset_id"],))
     experiments = query_all(
         "SELECT * FROM experiments WHERE batch_id=? ORDER BY created_at, algorithm_key", (row["batch_id"],)
     )
@@ -242,7 +247,10 @@ def _batch_public(row, *, include_members: bool = False) -> dict[str, Any]:
         by_status[exp["status"]] = by_status.get(exp["status"], 0) + 1
     payload = {
         "batch_id": row["batch_id"],
+        "display_id": row["display_id"] or row["batch_id"],
+        "internal_id": row["batch_id"],
         "dataset_id": row["dataset_id"],
+        "dataset_display_id": (dataset["display_id"] or dataset["dataset_id"]) if dataset else row["dataset_id"],
         "scope": row["scope"],
         "status": row["status"],
         "algorithm_count": row["algorithm_count"],
@@ -262,6 +270,8 @@ def _batch_public(row, *, include_members: bool = False) -> dict[str, Any]:
         payload["experiments"] = [
             {
                 "experiment_id": exp["experiment_id"],
+                "display_id": exp["display_id"] or exp["experiment_id"],
+                "internal_id": exp["experiment_id"],
                 "algorithm_key": exp["algorithm_key"],
                 "algorithm_label": exp["algorithm_label"],
                 "mode": exp["mode"],
@@ -293,9 +303,20 @@ def _region_summary(experiment_ids: list[str]) -> list[dict[str, Any]]:
         """,
         tuple(experiment_ids),
     )
+    parent_displays = {
+        item["experiment_id"]: item["display_id"]
+        for item in query_all(
+            f"SELECT experiment_id, display_id FROM experiments "
+            f"WHERE experiment_id IN ({placeholders})",
+            tuple(experiment_ids),
+        )
+    }
     return [
         {
             "experiment_id": r["experiment_id"],
+            "display_id": r["region_experiment_id"] or parent_displays.get(r["experiment_id"]),
+            "parent_experiment_id": r["experiment_id"],
+            "parent_display_id": parent_displays.get(r["experiment_id"]),
             "region_id": r["region_id"],
             "region_experiment_id": r["region_experiment_id"],
             "status": r["status"],
@@ -314,7 +335,10 @@ def list_batches(limit: int = Query(50, ge=1, le=200)) -> dict:
 
 @router.get("/{batch_id}")
 def get_batch(batch_id: str, include_members: bool = Query(True)) -> dict:
-    row = query_one("SELECT * FROM batches WHERE batch_id=?", (batch_id,))
+    row = query_one(
+        "SELECT * FROM batches WHERE batch_id=? OR display_id=?",
+        (batch_id, batch_id),
+    )
     if row is None:
         raise NotFound(f"批次 {batch_id} 不存在")
     return _batch_public(row, include_members=include_members)
@@ -322,14 +346,18 @@ def get_batch(batch_id: str, include_members: bool = Query(True)) -> dict:
 
 @router.post("/{batch_id}/stop")
 def stop_batch(batch_id: str) -> dict:
-    row = query_one("SELECT * FROM batches WHERE batch_id=?", (batch_id,))
+    row = query_one(
+        "SELECT * FROM batches WHERE batch_id=? OR display_id=?",
+        (batch_id, batch_id),
+    )
     if row is None:
         raise NotFound(f"批次 {batch_id} 不存在")
     if row["status"] not in ("Running", "Created", "Stopping"):
         raise Conflict(f"批次当前状态为 {row['status']}，无需停止", code="NOT_RUNNING")
+    internal_id = row["batch_id"]
     conn = get_connection()
-    conn.execute("UPDATE batches SET cancel_requested=1, status='Stopping' WHERE batch_id=?", (batch_id,))
-    skipped = query_all("SELECT experiment_id FROM experiments WHERE batch_id=? AND status='Queued'", (batch_id,))
+    conn.execute("UPDATE batches SET cancel_requested=1, status='Stopping' WHERE batch_id=?", (internal_id,))
+    skipped = query_all("SELECT experiment_id FROM experiments WHERE batch_id=? AND status='Queued'", (internal_id,))
     for exp in skipped:
         conn.execute(
             "UPDATE experiments SET status='Stopped', cancel_requested=1, ended_at=?, "
@@ -338,15 +366,16 @@ def stop_batch(batch_id: str) -> dict:
         )
     conn.execute(
         "UPDATE experiments SET cancel_requested=1 WHERE batch_id=? AND status IN ('Running','Queued')",
-        (batch_id,),
+        (internal_id,),
     )
     conn.execute(
         "UPDATE jobs SET cancel_requested=1, state=CASE WHEN state='Queued' THEN 'Skipped' ELSE state END, "
         "ended_at=CASE WHEN state='Queued' THEN ? ELSE ended_at END WHERE parent_batch_id=?",
-        (now_utc(), batch_id),
+        (now_utc(), internal_id),
     )
     return {
-        "batch_id": batch_id,
+        "batch_id": internal_id,
+        "display_id": row["display_id"] or internal_id,
         "cancel_requested": True,
         "acknowledged_by": "backend",
         "queued_experiments_stopped": len(skipped),
@@ -356,7 +385,10 @@ def stop_batch(batch_id: str) -> dict:
 
 @router.delete("/{batch_id}")
 def delete_batch(batch_id: str) -> dict:
-    row = query_one("SELECT * FROM batches WHERE batch_id=?", (batch_id,))
+    row = query_one(
+        "SELECT * FROM batches WHERE batch_id=? OR display_id=?",
+        (batch_id, batch_id),
+    )
     if row is None:
         raise NotFound(f"批次 {batch_id} 不存在")
     if row["status"] in ("Running", "Stopping"):
@@ -367,12 +399,12 @@ def delete_batch(batch_id: str) -> dict:
         JOIN experiments e ON e.experiment_id = ee.experiment_id
         WHERE e.batch_id = ?
         """,
-        (batch_id,),
+        (row["batch_id"],),
     )
     if referenced and referenced["n"]:
         raise Conflict(
             f"该批次的实验已被 {referenced['n']} 个评价引用，不能删除批次（可归档实验）",
             code="BATCH_REFERENCED",
         )
-    return {"batch_id": batch_id, "deleted": False,
+    return {"batch_id": row["batch_id"], "display_id": row["display_id"] or row["batch_id"], "deleted": False,
             "note": "批次历史为不可变快照，如需隐藏请在实验历史中归档其成员实验。"}
