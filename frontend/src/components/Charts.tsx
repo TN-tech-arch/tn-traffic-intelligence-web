@@ -50,12 +50,12 @@ export function LineChart({
   const labelFormatter = timeLabelFormatter(x)
   const option = {
     tooltip: { trigger: 'axis' },
-    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    legend: { type: 'scroll', bottom: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
     grid: {
       left: 58,
       right: labelFormatter ? 46 : 24,
-      top: 44,
-      bottom: 94,
+      top: 18,
+      bottom: 86,
       containLabel: false,
     },
     xAxis: {
@@ -63,7 +63,7 @@ export function LineChart({
       data: x,
       name: xName,
       nameLocation: 'middle',
-      nameGap: 40,
+      nameGap: 34,
       nameTextStyle: { fontSize: 10, color: '#5b7095' },
       axisLabel: {
         ...autoAxisLabel(x, xLabelInterval),
@@ -83,7 +83,7 @@ export function LineChart({
     },
     dataZoom: [
       { type: 'inside', throttle: 60 },
-      { type: 'slider', height: 18, bottom: 8, showDetail: false },
+      { type: 'slider', height: 16, bottom: 26, showDetail: false },
     ],
     series: series.map((item: any) => ({
       name: item.name,
@@ -177,13 +177,13 @@ export function ScatterChart({
         )
       },
     },
-    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
-    grid: { left: 58, right: 18, top: 44, bottom: 58, containLabel: false },
+    legend: { type: 'scroll', bottom: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: { left: 58, right: 18, top: 18, bottom: 62, containLabel: false },
     xAxis: {
       type: 'value',
       name: xName ?? '特征值',
       nameLocation: 'middle',
-      nameGap: 32,
+      nameGap: 30,
       nameTextStyle: { fontSize: 10 },
       axisLabel: { fontSize: 10, hideOverlap: true },
     },
@@ -274,7 +274,7 @@ export function HorizontalRankChart({
   if (!items.length) return <Empty description="当前时间截面没有有效区域" />
   const option = {
     animationDuration: 300,
-    grid: { left: 6, right: 62, top: 6, bottom: 8, containLabel: true },
+    grid: { left: 8, right: 70, top: 8, bottom: 34, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -302,17 +302,27 @@ export function HorizontalRankChart({
     xAxis: {
       type: 'value',
       name: '流量值',
+      nameLocation: 'middle',
+      nameGap: 26,
       nameTextStyle: { fontSize: 10 },
-      axisLabel: { fontSize: 10, formatter: (value: number) => compactNumber(value) },
+      axisLabel: {
+        fontSize: 10,
+        hideOverlap: true,
+        margin: 8,
+        formatter: (value: number) => compactNumber(value),
+      },
       splitLine: { lineStyle: { color: '#eef3fa' } },
     },
     yAxis: {
       type: 'category',
       inverse: true,
       data: items.map((item) => item.display_name || item.region_id),
-      name: '区域',
-      nameTextStyle: { fontSize: 10 },
-      axisLabel: { fontSize: 10, width: 118, overflow: 'truncate' },
+      axisLabel: {
+        fontSize: 10,
+        width: 150,
+        overflow: 'break',
+        lineHeight: 12,
+      },
       axisTick: { show: false },
     },
     series: [
@@ -356,7 +366,7 @@ export function HistogramChart({
   if (!bins.length) return <Empty description="当前时间截面没有有效区域" />
   const labels = bins.map((bin) => `${compactNumber(bin.start)}–${compactNumber(bin.end)}`)
   const option = {
-    grid: { left: 8, right: 16, top: 20, bottom: 56, containLabel: true },
+    grid: { left: 52, right: 24, top: 18, bottom: 74, containLabel: false },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -377,7 +387,7 @@ export function HistogramChart({
       data: labels,
       name: '流量值区间',
       nameLocation: 'middle',
-      nameGap: 44,
+      nameGap: 48,
       nameTextStyle: { fontSize: 10 },
       axisLabel: {
         fontSize: 9,
@@ -392,6 +402,9 @@ export function HistogramChart({
     yAxis: {
       type: 'value',
       name: '区域数量',
+      nameLocation: 'middle',
+      nameGap: 40,
+      nameRotate: 90,
       nameTextStyle: { fontSize: 10 },
       minInterval: 1,
       axisLabel: { fontSize: 10 },
@@ -446,15 +459,15 @@ export function MultiCityZChart({
         )
       },
     },
-    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { fontSize: 10 } },
-    grid: { left: 64, right: 20, top: 44, bottom: 62, containLabel: false },
+    legend: { type: 'scroll', bottom: 0, left: 8, right: 8, textStyle: { fontSize: 10 } },
+    grid: { left: 64, right: 20, top: 18, bottom: 64, containLabel: false },
     xAxis: {
       type: 'category',
       data: x,
       boundaryGap: false,
       name: '小时（0–23）',
       nameLocation: 'middle',
-      nameGap: 36,
+      nameGap: 32,
       nameTextStyle: { fontSize: 10, color: '#5b7095' },
       axisLabel: {
         fontSize: 9,
@@ -539,8 +552,8 @@ export function HourlyChart({
         return `<div style="font-size:12px"><b>${x[params[0]?.dataIndex ?? 0]} 时段</b>${rows.join('')}</div>`
       },
     },
-    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
-    grid: { left: 58, right: 18, top: 44, bottom: 60, containLabel: false },
+    legend: { type: 'scroll', bottom: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: { left: 58, right: 18, top: 18, bottom: 62, containLabel: false },
     yAxis: {
       type: 'value',
       name: yName,
@@ -555,7 +568,7 @@ export function HourlyChart({
       data: x,
       name: '小时',
       nameLocation: 'middle',
-      nameGap: 34,
+      nameGap: 30,
       nameTextStyle: { fontSize: 10 },
       axisLabel: {
         fontSize: 10,
@@ -610,14 +623,14 @@ export function WeekdayChart({
           })
           .join('')}</div>`,
     },
-    legend: { top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
-    grid: { left: 58, right: 18, top: 44, bottom: 60, containLabel: false },
+    legend: { bottom: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: { left: 58, right: 18, top: 18, bottom: 62, containLabel: false },
     xAxis: {
       type: 'category',
       data: x,
       name: '小时',
       nameLocation: 'middle',
-      nameGap: 34,
+      nameGap: 30,
       nameTextStyle: { fontSize: 10 },
       axisLabel: {
         fontSize: 10,
@@ -693,8 +706,8 @@ export function AcfChart({
         }<br/><span style="color:#8a99b5">±95% 白噪声带：${ci[index]?.toFixed(3) ?? '—'}</span></div>`
       },
     },
-    legend: { top: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
-    grid: { left: 58, right: 18, top: 44, bottom: 60, containLabel: false },
+    legend: { bottom: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
+    grid: { left: 58, right: 18, top: 18, bottom: 62, containLabel: false },
     xAxis: {
       type: 'category',
       data: lags.map(String),
@@ -707,7 +720,7 @@ export function AcfChart({
       },
       name: '滞后步数（Lag）',
       nameLocation: 'middle',
-      nameGap: 34,
+      nameGap: 30,
       nameTextStyle: { fontSize: 10 },
     },
     yAxis: {

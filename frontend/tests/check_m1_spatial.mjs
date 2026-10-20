@@ -100,7 +100,11 @@ const beforeSlice = await panel.locator('section[aria-label="Top 12 Regions"] .t
 const slider = page.locator('input[type="range"]').first()
 await slider.focus()
 await slider.press('End')
-await page.waitForTimeout(4000)
+await panel.getByText('当前截面 2014-01-01 23:50:00', { exact: false }).first().waitFor({
+  state: 'visible',
+  timeout: 30000,
+})
+await page.waitForTimeout(600)
 const afterSlice = await panel.locator('section[aria-label="Top 12 Regions"] .tn-insight-card').innerText()
 check('8 时间截面改变后排名与 Insights 更新', beforeSlice !== afterSlice, `${beforeSlice.split('\n')[2]?.slice(0, 50)} → ${afterSlice.split('\n')[2]?.slice(0, 50)}`)
 

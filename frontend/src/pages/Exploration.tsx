@@ -1216,7 +1216,7 @@ export default function Exploration() {
                           </div>
                           <HorizontalRankChart
                             items={spatial?.top ?? []}
-                            height={340}
+                            height={380}
                             timeAt={spatial?.time_at}
                             unit={unitDisplayLabel(spatial?.source?.unit_label)}
                             onSelect={setFocusRegion}
@@ -1253,7 +1253,7 @@ export default function Exploration() {
                           </div>
                           <HorizontalRankChart
                             items={spatial?.bottom ?? []}
-                            height={260}
+                            height={300}
                             color="#D98F00"
                             timeAt={spatial?.time_at}
                             unit={unitDisplayLabel(spatial?.source?.unit_label)}
@@ -1294,7 +1294,7 @@ export default function Exploration() {
                           </div>
                           <HistogramChart
                             bins={spatial?.distribution?.bins ?? []}
-                            height={260}
+                            height={300}
                             unit={unitDisplayLabel(spatial?.source?.unit_label)}
                           />
                         </Card>
