@@ -77,6 +77,12 @@ await page.getByText('各簇平均日内模式', { exact: false }).first().waitF
 })
 await page.waitForTimeout(900)
 await shot(clusterInfo.locator('.ant-tabs-tabpane-active'), 'm2-typical-weekly')
+const weeklyCard = clusterInfo.locator('.ant-card').filter({ hasText: '周内差异' }).first()
+if (await weeklyCard.locator('.ant-switch').count()) {
+  await weeklyCard.locator('.ant-switch').click()
+  await page.waitForTimeout(700)
+  await shot(weeklyCard, 'm2-weekly-raw')
+}
 
 await page.setViewportSize({ width: 1200, height: 1000 })
 await page.waitForTimeout(900)

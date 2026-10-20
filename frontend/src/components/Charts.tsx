@@ -35,6 +35,7 @@ export function LineChart({
   yName,
   loading,
   empty,
+  tooltipFormatter,
 }: {
   series: Array<{ name: string; data: Array<number | null>; color?: string; type?: 'line' | 'bar' }>
   x: string[]
@@ -44,12 +45,16 @@ export function LineChart({
   yName?: string
   loading?: boolean
   empty?: boolean
+  tooltipFormatter?: (params: any[]) => string
 }) {
   if (loading) return <Spin />
   if (empty || series.length === 0) return <Empty description="暂无真实数据" />
   const labelFormatter = timeLabelFormatter(x)
   const option = {
-    tooltip: { trigger: 'axis' },
+    tooltip: {
+      trigger: 'axis',
+      ...(tooltipFormatter ? { formatter: tooltipFormatter } : {}),
+    },
     legend: { type: 'scroll', bottom: 0, left: 8, right: 8, textStyle: { fontSize: 11 } },
     grid: {
       left: 58,

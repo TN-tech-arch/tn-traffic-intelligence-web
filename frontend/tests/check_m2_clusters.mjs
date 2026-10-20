@@ -188,6 +188,62 @@ check(
   patternText.split('\n').slice(0, 6).join(' | '),
 )
 
+const weeklyCard = infoPane.locator('.ant-card').filter({ hasText: '周内差异' }).first()
+const weeklyChart = weeklyCard.locator('[data-testid="cluster-weekly-pattern-chart"]')
+await weeklyChart.waitFor({ state: 'visible', timeout: 30000 })
+const weeklySeries = JSON.parse(await weeklyChart.getAttribute('data-weekly-series'))
+const normalizedMeansOk = weeklySeries.every((item) => {
+  const finite = (item.normalized ?? []).filter((value) => value !== null && Number.isFinite(value))
+  if (!finite.length) return (item.raw ?? []).every((value) => value === null)
+  const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length
+  return Math.abs(mean - 1) < 1e-9
+})
+check(
+  '9b 周内图默认开启归一化且每簇有效周平均为 1',
+  (await weeklyChart.getAttribute('data-normalized')) === 'true' &&
+    (await weeklyChart.getAttribute('data-y-axis-title')) === '相对水平（各簇周均值＝1）' &&
+    normalizedMeansOk,
+  JSON.stringify(weeklySeries.map((item) => item.mean)),
+)
+
+await weeklyChart.scrollIntoViewIfNeeded()
+const weeklyBox = await weeklyChart.locator('.echarts-for-react').boundingBox()
+await page.mouse.move(weeklyBox.x + weeklyBox.width * 0.52, weeklyBox.y + weeklyBox.height * 0.4)
+await page.waitForTimeout(600)
+const weeklyTooltip = await weeklyChart.evaluate((root) =>
+  Array.from(root.querySelectorAll('div'))
+    .filter(
+      (node) =>
+        getComputedStyle(node).position === 'absolute' &&
+        node.textContent?.includes('归一化＝原始周均值'),
+    )
+    .at(-1)?.textContent ?? '',
+)
+check(
+  '9c 周内 Tooltip 同时显示原始平均流量与归一化值',
+  weeklyTooltip.includes('原始平均') &&
+    weeklyTooltip.includes('归一化') &&
+    /\d/.test(weeklyTooltip),
+  weeklyTooltip.replace(/\s+/g, ' ').slice(0, 120),
+)
+
+await weeklyCard.locator('.ant-switch').click()
+await page.waitForFunction(
+  () =>
+    document
+      .querySelector('[data-testid="cluster-weekly-pattern-chart"]')
+      ?.getAttribute('data-normalized') === 'false',
+  undefined,
+  { timeout: 10000 },
+)
+const displayedOff = JSON.parse(await weeklyChart.getAttribute('data-displayed-series'))
+check(
+  '9d 关闭归一化后恢复原始流量、纵轴标题和原始数据序列',
+  (await weeklyChart.getAttribute('data-y-axis-title')) === '平均流量值' &&
+    JSON.stringify(displayedOff) === JSON.stringify(weeklySeries.map((item) => item.raw)),
+  (await weeklyChart.getAttribute('data-y-axis-title')) ?? 'missing',
+)
+
 await infoPane.locator('.ant-tabs-tab').filter({ hasText: '质量评估' }).click()
 await page.waitForTimeout(700)
 const qualityText = await infoPane.innerText()

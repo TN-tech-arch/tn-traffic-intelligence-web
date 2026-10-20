@@ -30,6 +30,19 @@ const DEFAULT_FEATURES = [
   'daily_seasonality',
 ]
 
+const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+function normalizeWeeklyProfile(profile: Array<number | null>) {
+  const finite = profile.filter((value): value is number => value !== null && Number.isFinite(value))
+  const mean = finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null
+  const normalized = profile.map((value) =>
+    value !== null && Number.isFinite(value) && mean !== null && Math.abs(mean) > 1e-12
+      ? value / mean
+      : null,
+  )
+  return { mean, normalized }
+}
+
 const DEFAULT_CONFIG: Record<string, unknown> = {
   source_key: 'milano',
   frequency: 'native',
@@ -84,6 +97,7 @@ export default function Clustering() {
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null)
   const [focusRegion, setFocusRegion] = useState<string | null>(null)
   const [normalizedPatterns, setNormalizedPatterns] = useState(false)
+  const [normalizedWeekly, setNormalizedWeekly] = useState(true)
   const [regionSearch, setRegionSearch] = useState('')
   const [clusterFilter, setClusterFilter] = useState('all')
   const [tab, setTab] = useState('overview')
@@ -236,6 +250,7 @@ export default function Clustering() {
     setSelectedRegion(null)
     setFocusRegion(null)
     setNormalizedPatterns(false)
+    setNormalizedWeekly(true)
     setRegionSearch('')
     setClusterFilter('all')
     setTab('overview')
@@ -368,6 +383,47 @@ export default function Clustering() {
   const normalClusters = [...(result?.clusters ?? [])].sort(
     (left: any, right: any) => Number(left.cluster_id) - Number(right.cluster_id),
   )
+  const weeklyPatternData = normalClusters.map((cluster: any) => {
+    const rawProfile = WEEKDAY_LABELS.map((_, index) => {
+      const value = cluster.weekly_profile?.[index]
+      return typeof value === 'number' && Number.isFinite(value) ? value : null
+    })
+    const normalized = normalizeWeeklyProfile(rawProfile)
+    return {
+      cluster,
+      raw: rawProfile,
+      mean: normalized.mean,
+      normalized: normalized.normalized,
+    }
+  })
+  const weeklyYAxisTitle = normalizedWeekly
+    ? '相对水平（各簇周均值＝1）'
+    : '平均流量值'
+  const weeklyTooltipFormatter = (params: any[]) => {
+    const index = params[0]?.dataIndex ?? 0
+    const rows = params.map((entry) => {
+      const item = weeklyPatternData[entry.seriesIndex]
+      const raw = item?.raw[index]
+      const normalized = item?.normalized[index]
+      const rawText = raw === null || raw === undefined
+        ? '无数据'
+        : Number(raw).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+      const normalizedText = normalized === null || normalized === undefined
+        ? '不可计算（周均值为 0 或无有效数据）'
+        : Number(normalized).toFixed(3)
+      return (
+        `<div>${entry.marker}${entry.seriesName}: ` +
+        `原始平均 ${rawText} · 归一化 ${normalizedText}</div>`
+      )
+    })
+    return (
+      `<div style="font-size:12px;line-height:1.75">` +
+      `<div><b>${WEEKDAY_LABELS[index] ?? '—'}</b></div>` +
+      rows.join('') +
+      `<div style="color:#c3cadb;margin-top:3px">归一化＝原始周均值 / 该簇有效周平均；缺失值不补 0</div>` +
+      `</div>`
+    )
+  }
   const featureAxes = result?.pca?.available
     ? [
         { key: 'pc1', label: `PC1（${(Number(result.pca.explained_variance_ratio?.[0] ?? 0) * 100).toFixed(1)}%）` },
@@ -947,18 +1003,50 @@ export default function Clustering() {
                           : '曲线来自该簇全部成员区域逐小时真实均值的平均；不同簇的原始流量规模可能不同。'}
                       </div>
                     </Card>
-                    <Card size="small" title={bilingual('周内差异', 'Weekly Pattern')}>
-                      <LineChart
-                        height={200}
-                        x={['周一', '周二', '周三', '周四', '周五', '周六', '周日']}
-                        xName="星期"
-                        yName="流量值"
-                        series={normalClusters.map((cluster: any) => ({
-                          name: `${clusterDisplayName(cluster.cluster_id)} · ${cluster.region_count} 区`,
-                          data: cluster.weekly_profile,
-                          color: clusterColor(cluster.cluster_id),
-                        }))}
-                      />
+                    <Card
+                      size="small"
+                      title={bilingual('周内差异', 'Weekly Pattern')}
+                      extra={(
+                        <span className="tn-inline" style={{ gap: 5 }}>
+                          <Switch size="small" checked={normalizedWeekly} onChange={setNormalizedWeekly} />
+                          <span className="tn-muted">归一化形状</span>
+                        </span>
+                      )}
+                    >
+                      <div
+                        data-testid="cluster-weekly-pattern-chart"
+                        data-normalized={String(normalizedWeekly)}
+                        data-y-axis-title={weeklyYAxisTitle}
+                        data-displayed-series={JSON.stringify(
+                          weeklyPatternData.map((item) => normalizedWeekly ? item.normalized : item.raw),
+                        )}
+                        data-weekly-series={JSON.stringify(
+                          weeklyPatternData.map((item) => ({
+                            cluster_id: item.cluster.cluster_id,
+                            mean: item.mean,
+                            raw: item.raw,
+                            normalized: item.normalized,
+                          })),
+                        )}
+                      >
+                        <LineChart
+                          height={240}
+                          x={WEEKDAY_LABELS}
+                          xName="星期"
+                          yName={weeklyYAxisTitle}
+                          tooltipFormatter={weeklyTooltipFormatter}
+                          series={weeklyPatternData.map((item) => ({
+                            name: `${clusterDisplayName(item.cluster.cluster_id)} · ${item.cluster.region_count} 区`,
+                            data: normalizedWeekly ? item.normalized : item.raw,
+                            color: clusterColor(item.cluster.cluster_id),
+                          }))}
+                        />
+                      </div>
+                      <div className="tn-muted">
+                        {normalizedWeekly
+                          ? '周内归一化把每个簇周一至周日的有效平均值除以其自身周平均；缺失值保持缺失，不补 0。'
+                          : '显示各簇周一至周日的原始平均流量，保留不同簇的实际流量规模差异。'}
+                      </div>
                     </Card>
                     <InsightCard
                       title="聚类模式分析（Cluster Pattern Insights）"
