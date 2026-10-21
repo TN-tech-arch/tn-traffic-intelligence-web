@@ -583,7 +583,7 @@ export default function Training() {
           <Card
             size="small"
             className="tn-m4-card"
-            title="1 · 配置区（Configuration）"
+            title="配置区（Configuration）"
             extra={
               <Tooltip title="只重置当前可编辑参数，不影响已保存实验。">
                 <Button
@@ -831,7 +831,7 @@ export default function Training() {
           <Card
             size="small"
             className="tn-m4-card"
-            title="4 · 实验历史（Experiment History）"
+            title="实验历史（Experiment History）"
           >
             <div className="tn-m4-history-filters">
               <Select
@@ -909,7 +909,7 @@ export default function Training() {
           <Card
             size="small"
             className="tn-m4-card"
-            title="3 · 当前实验详情（Current Experiment Details）"
+            title="1 · 当前实验详情（Current Experiment Details）"
           >
             {activeRun ? (
               <div className="tn-m4-detail-grid" data-testid="m4-current-details">

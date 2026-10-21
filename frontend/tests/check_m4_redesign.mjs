@@ -42,10 +42,12 @@ check(
 const pageText = await page.locator('body').innerText()
 check(
   '3.1 标题采用模块三格式',
-  pageText.includes('1 · 配置区（Configuration）') &&
+  pageText.includes('配置区（Configuration）') &&
+    !pageText.includes('1 · 配置区（Configuration）') &&
     pageText.includes('2 · 训练监控（Training Monitor）') &&
-    pageText.includes('3 · 当前实验详情（Current Experiment Details）') &&
-    pageText.includes('4 · 实验历史（Experiment History）'),
+    pageText.includes('1 · 当前实验详情（Current Experiment Details）') &&
+    pageText.includes('实验历史（Experiment History）') &&
+    !pageText.includes('4 · 实验历史（Experiment History）'),
 )
 
 const firstHistory = page.locator('.tn-m4-history-item').first()
