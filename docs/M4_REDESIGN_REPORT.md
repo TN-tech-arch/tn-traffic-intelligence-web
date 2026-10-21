@@ -1,6 +1,6 @@
 # Module 4 预测模型训练重构报告
 
-功能提交：`afc48c6`
+功能提交：`8a03ef9`
 日期：2026-10-21
 页面：<http://127.0.0.1:8077/training>
 
@@ -10,6 +10,7 @@
 - 两栏比例与模块三一致：左侧 `32%`，中央 `68%`。
 - 左侧标题不编号：`配置区（Configuration）`、`实验历史（Experiment History）`。
 - 中央标题按顺序编号：`1 · 当前实验详情（Current Experiment Details）`、`2 · 训练监控（Training Monitor）`。
+- 左侧配置参数不编号，统一使用与模块三相同的 `ParamField` 标签、字体、间距、控件高度和 ⓘ 注释样式。
 - 删除右侧独立区域及其中的重复历史、日志和详情面板。
 - 实验历史支持数据集、算法、状态筛选和分页。
 - 每条实验历史只保留“打开”和“删除记录”两个操作。
@@ -53,8 +54,8 @@
 | 完整后端 pytest | 161 passed，2 条既有 ARIMA 数值警告 |
 | 前端 TypeScript 类型检查 | passed |
 | 前端生产构建 | passed |
-| 开发站 Playwright | 15/15 passed |
-| 安装版 Playwright | 15/15 passed |
+| 开发站 Playwright | 16/16 passed |
+| 安装版 Playwright | 16/16 passed |
 | 真实单算法训练 | `EXP-ZTE-370102001-ARIMA-0012` 完成，区域开始/结束时间和日志正确 |
 | All Regions | `EXP-MILANO-REGIONS-LIGHTGBM-0001`，88/88 区域独立完成 |
 | 失败任务 | `EXP-MILANO-ADRIANO-TIMESFM-0002`，正确显示失败状态 |
@@ -79,8 +80,8 @@ E:\codex\codex10.16\packaging\dist\TN-Traffic-Intelligence-Setup-3.2.0.exe
 ```
 
 - 版本：`3.2.0`
-- 大小：267,851,531 bytes
-- SHA256：`F2CB99B8A676F174CEDCE2ADFBEB4DC767CEEA6E2DEAAB0E51894E4C203F9D90`
+- 大小：267,851,799 bytes
+- SHA256：`3C9E4BE9279844EB3773DAF318AD0F8F00CE87D9B3FE3EFC227AF6E552566D31`
 
 安装验收实际完成安装、启动、模块三预览、模块四训练、模块五评估、安装版模块四
 Playwright 回归、迁移快照重放和卸载。
