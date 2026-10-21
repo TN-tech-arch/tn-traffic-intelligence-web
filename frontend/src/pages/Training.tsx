@@ -9,7 +9,6 @@ import {
   Progress,
   Select,
   Table,
-  Tabs,
   Tag,
   Tooltip,
   message,
@@ -18,7 +17,6 @@ import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
-import BiLabel from '../components/BiLabel'
 import { LineChart } from '../components/Charts'
 import { useGroupValidation, useSchema } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type Values } from '../validation/engine'
@@ -78,7 +76,6 @@ export default function Training() {
   const [experiment, setExperiment] = useState<any>(null)
   const [experiments, setExperiments] = useState<any[]>([])
   const [logs, setLogs] = useState<any[]>([])
-  const [monitorTab, setMonitorTab] = useState('process')
   const [busy, setBusy] = useState(false)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -402,7 +399,6 @@ export default function Training() {
       const data = await api.get<any>(ENDPOINTS.experimentGet(created.experiment_id))
       setExperiment(data)
       setBatch(null)
-      setMonitorTab('process')
       loadHistory()
       messageApi.success(`实验 ${created.display_id ?? created.experiment_id} 已提交。`)
     } catch (error) {
@@ -445,7 +441,6 @@ export default function Training() {
       const data = await api.get<any>(ENDPOINTS.batchGet(created.batch_id))
       setBatch(data)
       setExperiment(null)
-      setMonitorTab('process')
       loadHistory()
       messageApi.success(`批量任务 ${created.display_id ?? created.batch_id} 已创建。`)
     } catch (error) {
@@ -485,7 +480,6 @@ export default function Training() {
       const data = await api.get<any>(ENDPOINTS.experimentGet(experimentId))
       setExperiment(data)
       setBatch(null)
-      setMonitorTab('process')
     } catch (error) {
       messageApi.error(error instanceof ApiError ? error.message : String(error))
     } finally {
@@ -589,7 +583,7 @@ export default function Training() {
           <Card
             size="small"
             className="tn-m4-card"
-            title={<BiLabel zh="① 配置区" en="Configuration" />}
+            title="1 · 配置区（Configuration）"
             extra={
               <Tooltip title="只重置当前可编辑参数，不影响已保存实验。">
                 <Button
@@ -837,7 +831,7 @@ export default function Training() {
           <Card
             size="small"
             className="tn-m4-card"
-            title={<BiLabel zh="④ 实验历史" en="Experiment History" />}
+            title="4 · 实验历史（Experiment History）"
           >
             <div className="tn-m4-history-filters">
               <Select
@@ -915,7 +909,7 @@ export default function Training() {
           <Card
             size="small"
             className="tn-m4-card"
-            title={<BiLabel zh="③ 当前实验详情" en="Current Experiment Details" />}
+            title="3 · 当前实验详情（Current Experiment Details）"
           >
             {activeRun ? (
               <div className="tn-m4-detail-grid" data-testid="m4-current-details">
@@ -948,7 +942,7 @@ export default function Training() {
           <Card
             size="small"
             className="tn-m4-card"
-            title={<BiLabel zh="② 训练监控" en="Training Monitor" />}
+            title="2 · 训练监控（Training Monitor）"
             extra={
               activeRun ? (
                 <span className="tn-muted">
@@ -1078,83 +1072,71 @@ export default function Training() {
                   </>
                 )}
 
-                <Tabs
-                  className="tn-m4-monitor-tabs"
-                  activeKey={monitorTab}
-                  onChange={setMonitorTab}
-                  items={[
-                    {
-                      key: 'process',
-                      label: <BiLabel zh="训练过程" en="Training Process" />,
-                      children: activeIsBatch ? (
-                        <div className="tn-m4-process-note">
-                          批量任务按模型和区域独立执行。选择左侧任一实验记录可查看其真实训练过程与日志。
+                <div className="tn-m4-monitor-section">
+                  <div className="tn-m4-monitor-section-title">训练过程（Training Process）</div>
+                  {activeIsBatch ? (
+                    <div className="tn-m4-process-note">
+                      批量任务按模型和区域独立执行。选择左侧任一实验记录可查看其真实训练过程与日志。
+                    </div>
+                  ) : epochHistory ? (
+                    <div>
+                      <div className="tn-m4-process-title">真实训练与验证 Loss</div>
+                      <LineChart
+                        height={280}
+                        x={epochHistory.epoch.map((epoch: number) => `第 ${epoch} 轮`)}
+                        xName="迭代轮次"
+                        yName="Loss"
+                        series={[
+                          {
+                            name: '训练 Loss',
+                            data: epochHistory.train_loss,
+                            color: '#2467E8',
+                          },
+                          {
+                            name: '验证 Loss',
+                            data: epochHistory.validation_loss,
+                            color: '#F08C00',
+                          },
+                        ]}
+                      />
+                    </div>
+                  ) : (
+                    <div className="tn-m4-process-note">
+                      当前算法不提供标准 epoch 训练过程。此处展示的是真实拟合状态、耗时与后端日志，不生成模拟 Loss 曲线。
+                    </div>
+                  )}
+                </div>
+
+                <div className="tn-m4-monitor-section">
+                  <div className="tn-m4-monitor-section-title">训练日志（Training Logs）</div>
+                  <div className="tn-m4-log-toolbar">
+                    <span className="tn-muted">
+                      {activeIsBatch
+                        ? `批量任务 ${batch?.display_id ?? batch?.batch_id} 的成员实验日志`
+                        : `实验 ${experiment?.display_id ?? experiment?.experiment_id} 的真实后端日志`}
+                    </span>
+                    <Button size="small" onClick={downloadLogs} disabled={!logs.length}>
+                      下载日志
+                    </Button>
+                  </div>
+                  {logs.length ? (
+                    <div className="tn-m4-log-console" data-testid="m4-training-logs">
+                      {logs.map((entry, index) => (
+                        <div key={`${entry.at}-${index}`}>
+                          <span className="tn-m4-log-time">[{entry.at ?? '—'}]</span>{' '}
+                          <span className="tn-m4-log-level">
+                            {String(entry.level ?? 'info').toUpperCase()}
+                          </span>{' '}
+                          {entry.experiment_display_id ? `[${entry.experiment_display_id}] ` : ''}
+                          {entry.region_id ? `(${entry.region_id}) ` : ''}
+                          {entry.message}
                         </div>
-                      ) : epochHistory ? (
-                        <div>
-                          <div className="tn-m4-process-title">真实训练与验证 Loss</div>
-                          <LineChart
-                            height={280}
-                            x={epochHistory.epoch.map((epoch: number) => `第 ${epoch} 轮`)}
-                            xName="迭代轮次"
-                            yName="Loss"
-                            series={[
-                              {
-                                name: '训练 Loss',
-                                data: epochHistory.train_loss,
-                                color: '#2467E8',
-                              },
-                              {
-                                name: '验证 Loss',
-                                data: epochHistory.validation_loss,
-                                color: '#F08C00',
-                              },
-                            ]}
-                          />
-                        </div>
-                      ) : (
-                        <div className="tn-m4-process-note">
-                          当前算法不提供标准 epoch 训练过程。此处展示的是真实拟合状态、耗时与后端日志，不生成模拟 Loss 曲线。
-                        </div>
-                      ),
-                    },
-                    {
-                      key: 'logs',
-                      label: <BiLabel zh="训练日志" en="Training Logs" />,
-                      children: (
-                        <div>
-                          <div className="tn-m4-log-toolbar">
-                            <span className="tn-muted">
-                              {activeIsBatch
-                                ? `批量任务 ${batch?.display_id ?? batch?.batch_id} 的成员实验日志`
-                                : `实验 ${experiment?.display_id ?? experiment?.experiment_id} 的真实后端日志`}
-                            </span>
-                            <Button size="small" onClick={downloadLogs} disabled={!logs.length}>
-                              下载日志
-                            </Button>
-                          </div>
-                          {logs.length ? (
-                            <div className="tn-m4-log-console" data-testid="m4-training-logs">
-                              {logs.map((entry, index) => (
-                                <div key={`${entry.at}-${index}`}>
-                                  <span className="tn-m4-log-time">[{entry.at ?? '—'}]</span>{' '}
-                                  <span className="tn-m4-log-level">
-                                    {String(entry.level ?? 'info').toUpperCase()}
-                                  </span>{' '}
-                                  {entry.experiment_display_id ? `[${entry.experiment_display_id}] ` : ''}
-                                  {entry.region_id ? `(${entry.region_id}) ` : ''}
-                                  {entry.message}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <EmptyState text="当前任务没有可用日志；任务可能仍在排队或尚未开始。" />
-                          )}
-                        </div>
-                      ),
-                    },
-                  ]}
-                />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState text="当前任务没有可用日志；任务可能仍在排队或尚未开始。" />
+                  )}
+                </div>
               </div>
             ) : (
               <EmptyState text="训练监控将显示真实任务进度、区域状态、训练过程与日志。" />

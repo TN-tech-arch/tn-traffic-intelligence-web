@@ -189,7 +189,7 @@ body {
 /* Module 4: configuration/history and experiment detail/monitor */
 .tn-m4-layout {
   display: grid;
-  grid-template-columns: minmax(390px, 31fr) minmax(0, 69fr);
+  grid-template-columns: minmax(300px, 32fr) minmax(0, 68fr);
   gap: 14px;
   align-items: start;
 }
@@ -387,8 +387,17 @@ body {
   font-size: 10.5px;
 }
 
-.tn-m4-monitor-tabs {
+.tn-m4-monitor-section {
   min-width: 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--tn-line);
+}
+
+.tn-m4-monitor-section-title {
+  margin-bottom: 9px;
+  color: var(--tn-text);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .tn-m4-process-title {
@@ -442,7 +451,7 @@ body {
 
 @media (max-width: 1200px) {
   .tn-m4-layout {
-    grid-template-columns: minmax(360px, 38fr) minmax(0, 62fr);
+    grid-template-columns: minmax(300px, 32fr) minmax(0, 68fr);
   }
 
   .tn-m4-detail-grid {

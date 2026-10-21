@@ -29,13 +29,23 @@ const columns = await layout.evaluate((node) => getComputedStyle(node).gridTempl
 const widths = columns.split(' ').map((value) => Number.parseFloat(value))
 check(
   '1 页面为严格两栏布局',
-  widths.length === 2 && widths[0] > 350 && widths[1] > widths[0],
+  widths.length === 2 &&
+    Math.abs(widths[0] / (widths[0] + widths[1]) - 0.32) <= 0.01 &&
+    Math.abs(widths[1] / (widths[0] + widths[1]) - 0.68) <= 0.01,
   columns,
 )
 check('2 右侧独立面板已删除', (await page.locator('.tn-pane-info').count()) === 0)
 check(
   '3 左侧包含配置区和实验历史',
   (await page.locator('.tn-m4-column').nth(0).locator('.tn-m4-card').count()) === 2,
+)
+const pageText = await page.locator('body').innerText()
+check(
+  '3.1 标题采用模块三格式',
+  pageText.includes('1 · 配置区（Configuration）') &&
+    pageText.includes('2 · 训练监控（Training Monitor）') &&
+    pageText.includes('3 · 当前实验详情（Current Experiment Details）') &&
+    pageText.includes('4 · 实验历史（Experiment History）'),
 )
 
 const firstHistory = page.locator('.tn-m4-history-item').first()
@@ -103,14 +113,15 @@ check(
 const monitorTable = page.locator('.tn-m4-monitor .ant-table')
 check('11 显示真实区域级训练状态', (await monitorTable.count()) >= 1 && (await monitorTable.first().locator('tbody tr').count()) >= 1)
 
-const logsTab = page.locator('.tn-m4-monitor-tabs .ant-tabs-tab').filter({ hasText: 'Training Logs' }).first()
-await logsTab.click()
 await page.getByTestId('m4-training-logs').waitFor({ state: 'visible', timeout: 30000 })
 const logsText = await page.getByTestId('m4-training-logs').innerText()
 check(
-  '12 训练日志来自后端且可查看下载',
+  '12 训练过程与训练日志同页上下显示',
   logsText.length > 0 &&
     logsText.includes('experiment') &&
+    (await page.locator('.tn-m4-monitor-tabs').count()) === 0 &&
+    (await page.locator('.tn-m4-monitor-section-title').allInnerTexts()).join('|').includes('Training Process') &&
+    (await page.locator('.tn-m4-monitor-section-title').allInnerTexts()).join('|').includes('Training Logs') &&
     (await page.getByRole('button', { name: '下载日志' }).count()) === 1,
 )
 
