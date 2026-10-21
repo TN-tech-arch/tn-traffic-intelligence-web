@@ -468,14 +468,9 @@ M3_SCHEMA: list[dict[str, Any]] = [
     {"key": "source_key", "label": "Data Source", "label_zh": "数据源", "type": "enum", "default": "milano",
      "enum": ["milano", "trentino", "zte"], "help_zh": "选择数据集所在的地点来源。",
      "suggestion_zh": "一个数据集只能属于一个地点。"},
-    {"key": "scope", "label": "Prediction Scope", "label_zh": "预测范围", "type": "enum", "default": "single",
-     "enum": ["single", "all"], "enum_labels": ["Single Region", "All Regions"],
-     "help_zh": "Single Region 只建模一个区域；All Regions 对当前地点全部有效区域分别建模（区域独立）。",
-     "suggestion_zh": "课程演示建议先用 Single Region。"},
     {"key": "region_id", "label": "Region", "label_zh": "区域", "type": "string", "default": "",
-     "help_zh": "Single Region 时必须选择一个有数据的区域。",
-     "suggestion_zh": "从区域列表中选择；No Data 区域不可选。", "required": False,
-     "visible_when": {"scope": "single"}},
+     "help_zh": "选择数据集唯一对应的具体区域。",
+     "suggestion_zh": "从区域列表中选择；No Data 区域不可选。"},
     {"key": "time_start", "label": "Start Date & Time", "label_zh": "开始日期时间", "type": "string",
      "default": "", "required": False,
      "help_zh": "数据集构建时间范围的起点（含边界）。默认使用所选数据源完整有效范围。",
@@ -520,13 +515,8 @@ M3_SCHEMA: list[dict[str, Any]] = [
 M5_SCHEMA: list[dict[str, Any]] = [
     {"key": "dataset_id", "label": "Dataset", "label_zh": "数据集", "type": "string", "default": "",
      "help_zh": "Module 3 已成功构建的数据集，测试集由该数据集冻结。", "suggestion_zh": "选择一个 Built 状态的数据集。"},
-    {"key": "scope", "label": "Evaluation Scope", "label_zh": "评价范围", "type": "enum", "default": "single",
-     "enum": ["single", "all"], "enum_labels": ["Single Region", "All Regions"],
-     "help_zh": "Single 评价单个区域；All 仅允许来自全区域实验组的模型。",
-     "suggestion_zh": "与实验的 Scope 保持一致。"},
     {"key": "region_id", "label": "Region", "label_zh": "区域", "type": "string", "default": "",
-     "help_zh": "Single 范围下要评价的区域。", "suggestion_zh": "从数据集区域中选择。",
-     "required": False, "visible_when": {"scope": "single"}},
+     "help_zh": "要评估的具体区域。", "suggestion_zh": "从数据集区域中选择。"},
     {"key": "experiment_ids", "label": "Experiments", "label_zh": "实验", "type": "array", "default": [],
      "help_zh": "选择 1..N 个实验进行同口径比较。", "suggestion_zh": "可用 Batch ID 一键载入。"},
     {"key": "test_selection", "label": "Test Selection", "label_zh": "测试范围", "type": "enum",
@@ -569,6 +559,17 @@ def check_module(kind: str, values: dict[str, Any]) -> tuple[list[Issue], dict[s
         # on the server so an old client cannot produce a different result.
         coerced["frequency"] = "native"
         coerced["aggregation"] = "mean"
+    if kind in ("m3", "m5"):
+        requested_scope = values.get("scope")
+        if requested_scope not in (None, "single"):
+            issues.append(error(
+                f"{kind}.scope",
+                "MULTI_REGION_REMOVED",
+                "全区域工作流已取消，仅支持单区域。",
+                "请选择一个具体区域后重新提交。",
+                requested_scope,
+            ))
+        coerced["scope"] = "single"
     return issues, coerced
 
 
@@ -588,9 +589,9 @@ def validate_m3(values: dict[str, Any], *, dataset_context: dict[str, Any] | Non
         if L + H < 2:
             issues.append(error("m3.output_length", "WINDOW_TOO_SHORT",
                                 f"L+H 至少需要 2 个点，当前为 {L + H}。", "请增大 L 或 H。", H))
-    if values.get("scope") == "single" and not values.get("region_id"):
+    if not coerced.get("region_id"):
         issues.append(error("m3.region_id", "REGION_REQUIRED",
-                            "Single Region 必须选择一个区域。", "请在地图或列表中选择一个有效区域。", None))
+                            "单区域数据集必须选择一个具体区域。", "请在地图或列表中选择一个有效区域。", None))
     source_key = coerced.get("source_key")
     if source_key:
         try:
@@ -787,14 +788,22 @@ def validate_m5(
     dataset: dict[str, Any] | None = None,
 ) -> list[Issue]:
     issues, coerced = check_module("m5", values)
+    if dataset and dataset.get("scope") != "single":
+        issues.append(error(
+            "m5.dataset_id",
+            "MULTI_REGION_REMOVED",
+            "全区域数据集已不再支持评估。",
+            "请选择单区域数据集。",
+            dataset.get("scope"),
+        ))
     experiment_ids = values.get("experiment_ids") or []
     if not experiment_ids:
         issues.append(error("m5.experiment_ids", "REQUIRED",
                             "至少需要选择一个 Experiment 才能运行评价。",
                             "请从实验列表中选择，或使用 Batch ID 一键载入。", None))
-    if values.get("scope") == "single" and not values.get("region_id"):
+    if not coerced.get("region_id"):
         issues.append(error("m5.region_id", "REGION_REQUIRED",
-                            "Single Region 评价必须指定区域。", "请选择要评价的区域。", None))
+                            "单区域评估必须指定区域。", "请选择要评估的区域。", None))
     if values.get("test_selection") == "range" and not (
         values.get("range_start_at") and values.get("range_end_at")
     ):
@@ -819,17 +828,21 @@ def validate_m5(
                     f"实验 {exp['experiment_id']} 使用数据集 {exp.get('dataset_id')}，"
                     f"与当前数据集 {dataset.get('dataset_id')} 不同，测试目标时间不可比。",
                     "请在相同 Dataset 下重新训练后再比较。", exp.get("dataset_id")))
-            if exp.get("scope") == "single" and exp.get("region_ids") and values.get("scope") == "single":
+            if exp.get("scope") != "single":
+                issues.append(error(
+                    f"m5.experiment_ids.{exp['experiment_id']}",
+                    "MULTI_REGION_REMOVED",
+                    "全区域实验已不再支持评估。",
+                    "请选择单区域实验。",
+                    exp.get("scope"),
+                ))
+                continue
+            if exp.get("region_ids"):
                 if values.get("region_id") and values["region_id"] not in exp["region_ids"]:
                     issues.append(error(
                         f"m5.experiment_ids.{exp['experiment_id']}", "REGION_MISMATCH",
                         f"实验 {exp['experiment_id']} 未覆盖区域 {values['region_id']}。",
                         "请选择与该实验匹配的区域，或选择其它实验。", values["region_id"]))
-        if values.get("scope") == "all" and any(e.get("scope") == "single" for e in experiments):
-            issues.append(error(
-                "m5.experiment_ids", "SCOPE_MISMATCH",
-                "All Regions 评价只允许来自全区域实验组的 Experiment，不能用单个区域实验临时拼装。",
-                "请选择 All Regions 训练得到的实验。", None))
     return issues
 
 

@@ -487,7 +487,7 @@ try {
   const centerTabs = (await page.locator('.tn-three-pane section').nth(1).locator('.ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
   record(
     'T29 M5 中央四个视图齐全',
-    ['Prediction Comparison', 'Error Analysis', 'Forecast Horizon Analysis', 'Spatial Evaluation'].every((t) =>
+    ['Prediction Comparison', 'Error Analysis', 'Forecast Horizon Analysis'].every((t) =>
       centerTabs.some((text) => text.includes(t)),
     ),
     centerTabs.join('|'),

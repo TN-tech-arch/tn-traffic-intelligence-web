@@ -12,7 +12,6 @@ from app.core.ids import (
     batch_id as make_batch_id,
     experiment_id as make_id,
     now_utc,
-    region_experiment_ids as make_region_experiment_ids,
 )
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.forecast.registry import MODELS, MODEL_BY_KEY, default_params
@@ -34,10 +33,15 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
     if not dataset_id:
         raise Conflict("必须提供 dataset_id", code="DATASET_REQUIRED")
     bundle = load_dataset(dataset_id)
-    scope = payload.get("scope") or bundle.dataset["scope"]
-    region_ids = payload.get("region_ids") or list(bundle.region_ids)
-    if scope == "single":
-        region_ids = region_ids[:1]
+    if payload.get("scope") not in (None, "single"):
+        raise Conflict("全区域批量训练已取消，仅支持单区域数据集。", code="MULTI_REGION_REMOVED")
+    if bundle.dataset["scope"] != "single" or len(bundle.region_ids) != 1:
+        raise Conflict("所选数据集不是单区域数据集，不能用于批量训练。", code="MULTI_REGION_REMOVED")
+    scope = "single"
+    requested_regions = payload.get("region_ids")
+    if requested_regions and list(requested_regions) != list(bundle.region_ids):
+        raise Conflict("批量训练区域必须与数据集冻结区域一致。", code="REGION_MISMATCH")
+    region_ids = list(bundle.region_ids)
     policy = {
         "sequential": True,
         "continue_on_error": bool((payload.get("execution_policy") or {}).get("continue_on_error", True)),
@@ -119,11 +123,7 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
             entry = per_model[model["key"]]
             config = frozen[model["key"]]
             new_experiment = make_id(source_key, scope, model["key"], primary_region)
-            region_exp_ids = (
-                {region_ids[0]: new_experiment}
-                if scope == "single" and len(region_ids) == 1
-                else make_region_experiment_ids(source_key, model["key"], region_ids)
-            )
+            region_exp_ids = {region_ids[0]: new_experiment}
             errors = entry["errors"]
             status = "Queued"
             error_text = None
@@ -332,7 +332,10 @@ def _region_summary(experiment_ids: list[str]) -> list[dict[str, Any]]:
 
 @router.get("")
 def list_batches(limit: int = Query(50, ge=1, le=200)) -> dict:
-    rows = query_all("SELECT * FROM batches ORDER BY created_at DESC LIMIT ?", (limit,))
+    rows = query_all(
+        "SELECT * FROM batches WHERE scope='single' ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    )
     return {"batches": [_batch_public(row) for row in rows], "count": len(rows)}
 
 

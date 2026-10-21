@@ -8,10 +8,8 @@ from fastapi import APIRouter, Body, Query
 from app.api.deps import create_job, job_public, raise_if_invalid
 from app.core.errors import Conflict, NotFound
 from app.core.ids import (
-    batch_id as make_batch_id,
     experiment_id as make_id,
     now_utc,
-    region_experiment_ids as make_region_experiment_ids,
 )
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.forecast.registry import MODEL_BY_KEY, default_params
@@ -122,12 +120,28 @@ def _prepare_run(payload: dict[str, Any]) -> dict[str, Any]:
     if algorithm_key not in MODEL_BY_KEY:
         raise NotFound(f"未知算法 {algorithm_key}", code="UNKNOWN_ALGORITHM")
     model = MODEL_BY_KEY[algorithm_key]
-    scope = payload.get("scope") or bundle.dataset["scope"]
-    region_ids = payload.get("region_ids") or list(bundle.region_ids)
-    if scope == "single" and len(region_ids) > 1:
-        region_ids = region_ids[:1]
-    if scope == "single" and not region_ids:
-        raise Conflict("Single Region 运行必须指定区域", code="REGION_REQUIRED")
+    if payload.get("scope") not in (None, "single"):
+        raise Conflict("全区域训练已取消，仅支持单区域数据集。", code="MULTI_REGION_REMOVED")
+    if bundle.dataset["scope"] != "single" or len(bundle.region_ids) != 1:
+        raise Conflict("所选数据集不是单区域数据集，不能用于训练。", code="MULTI_REGION_REMOVED")
+    scope = "single"
+    requested_regions = payload.get("region_ids")
+    if requested_regions and list(requested_regions) != list(bundle.region_ids):
+        raise Conflict(
+            "训练区域必须与数据集冻结区域一致。",
+            code="REGION_MISMATCH",
+            issues=[
+                {
+                    "path": "region_ids",
+                    "code": "REGION_MISMATCH",
+                    "severity": "error",
+                    "message": "训练区域必须与数据集冻结区域一致。",
+                    "suggestion": "请使用该单区域数据集对应的区域。",
+                    "received_value": requested_regions,
+                }
+            ],
+        )
+    region_ids = list(bundle.region_ids)
     missing = [r for r in region_ids if r not in bundle.region_ids]
     if missing:
         raise Conflict(
@@ -278,17 +292,11 @@ def run_experiment(payload: dict[str, Any] = Body(...)) -> dict:
     model = prepared["model"]
     source_key = bundle.dataset["source_key"]
     scope = prepared["scope"]
-    primary_region = prepared["region_ids"][0] if scope == "single" else None
+    primary_region = prepared["region_ids"][0]
     new_id = make_id(source_key, scope, model["key"], primary_region)
     region_ids = prepared["region_ids"]
-    region_exp_ids = (
-        {region_ids[0]: new_id}
-        if scope == "single" and len(region_ids) == 1
-        else make_region_experiment_ids(source_key, model["key"], region_ids)
-    )
+    region_exp_ids = {region_ids[0]: new_id}
     batch_ref = None
-    if scope == "all":
-        batch_ref = make_batch_id(source_key, "all", model_key=model["key"])
     snapshot = _snapshot(
         bundle.dataset,
         prepared["params"],
@@ -388,7 +396,7 @@ def list_experiments(
     status: str | None = None,
     limit: int = Query(100, ge=1, le=500),
 ) -> dict:
-    sql = "SELECT * FROM experiments WHERE 1=1"
+    sql = "SELECT * FROM experiments WHERE scope='single'"
     params: list[Any] = []
     if dataset_id:
         resolved = query_one(

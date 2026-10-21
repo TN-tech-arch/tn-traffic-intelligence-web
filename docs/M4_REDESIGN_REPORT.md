@@ -21,7 +21,7 @@
 - 顶部只显示实验 ID、算法、状态、开始时间和运行时长。
 - 删除参数快照、实验概览、评估指标和独立数据集信息卡片。
 - 显示真实总体进度和区域级状态。
-- 支持 All Regions 的独立区域状态和分页。
+- 仅支持单区域训练；同一区域的 12 模型批次使用分页展示成员状态。
 - 仅对实际提供 epoch 历史的算法绘制训练/验证 Loss。
 - ARIMA、Prophet 等算法明确显示无标准 epoch 过程，不生成模拟曲线。
 - 训练日志直接读取后端日志，并支持下载。
@@ -57,7 +57,6 @@
 | 开发站 Playwright | 16/16 passed |
 | 安装版 Playwright | 16/16 passed |
 | 真实单算法训练 | `EXP-ZTE-370102001-ARIMA-0012` 完成，区域开始/结束时间和日志正确 |
-| All Regions | `EXP-MILANO-REGIONS-LIGHTGBM-0001`，88/88 区域独立完成 |
 | 失败任务 | `EXP-MILANO-ADRIANO-TIMESFM-0002`，正确显示失败状态 |
 | 全部模型批次 | `BATCH-ZTE-370102001-MODELS-0004`，Completed，12 个成员 |
 | 模块五关联 | 使用 M4 可读 EXP ID 验证通过 |
@@ -69,7 +68,6 @@
 
 - [新版完成实验页面](../data/screenshots/module4-redesign-final.png)
 - [新版历史打开与日志](../data/screenshots/module4-redesign-selected.png)
-- [All Regions 独立区域](../data/screenshots/module4-redesign-all-regions.png)
 - [失败任务状态](../data/screenshots/module4-redesign-failed.png)
 - [窄屏单栏响应式](../data/screenshots/module4-redesign-responsive.png)
 

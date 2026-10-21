@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Collapse, InputNumber, Popconfirm, Select, Spin, Tooltip, message } from 'antd'
+import { Alert, Button, Card, Collapse, InputNumber, Popconfirm, Spin, Tooltip, message } from 'antd'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
@@ -9,7 +9,7 @@ import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
   ACTION_LABELS, MODULE_META, bilingual,
-  missingModeLabel, regionDisplayLabel, scalingLabel, scopeLabel, sourceDisplayName, splitLabel, statusLabel,
+  missingModeLabel, regionDisplayLabel, scalingLabel, sourceDisplayName, splitLabel, statusLabel,
 } from '../i18n/terms'
 
 const DEFAULT_CONFIG: Record<string, unknown> = {
@@ -56,8 +56,7 @@ export default function DatasetPage() {
   const schema: FieldSpec[] = useMemo(
     () => [
       { key: 'source_key', label_zh: '数据源', type: 'enum', enum: ['milano', 'trentino', 'zte'], enum_labels: ['Milano', 'Trentino', 'ZTE 4G Downlink'], default: 'milano', help_zh: '选择数据集所在的数据源，一个数据集只能属于一个数据源。', suggestion_zh: '三个来源的时间范围与单位不同，请分别建模。' },
-      { key: 'scope', label_zh: '预测范围', type: 'enum', enum: ['single', 'all'], enum_labels: ['单区域', '全部区域'], default: 'single', help_zh: '单区域只建模一个区域；全部区域对当前数据源全部有效区域分别建模（区域独立，不做联合空间建模）。', suggestion_zh: '先用单区域验证流程。' },
-      { key: 'region_id', label_zh: '区域', type: 'enum', enum: regions.filter((r) => r.has_timeseries).map((r) => r.region_id), enum_labels: regions.filter((r) => r.has_timeseries).map((r) => regionDisplayLabel(r.region_id, r.display_name)), default: '', required: false, visible_when: { scope: 'single' }, help_zh: '单区域范围下必须选择一个有数据的区域。', suggestion_zh: '无数据区域不可选。' },
+      { key: 'region_id', label_zh: '区域', type: 'enum', enum: regions.filter((r) => r.has_timeseries).map((r) => r.region_id), enum_labels: regions.filter((r) => r.has_timeseries).map((r) => regionDisplayLabel(r.region_id, r.display_name)), default: '', help_zh: '选择数据集唯一对应的具体区域。', suggestion_zh: '无数据区域不可选。' },
       { key: 'input_length', label_zh: '输入长度（L）', type: 'integer', min: 1, max: 5000, default: 24, unit_zh: '点', help_zh: '每个样本的历史输入点数（按重采样后的点计）。', suggestion_zh: '10 分钟频率下 144 点 ≈ 1 天。' },
       { key: 'output_length', label_zh: '输出长度（H）', type: 'integer', min: 1, max: 5000, default: 6, unit_zh: '点', help_zh: '预测目标点数；Module 4/5 继承该值且不可修改。', suggestion_zh: '先用 6-24 验证流程。' },
       { key: 'step', label_zh: '滑动步长（S）', type: 'integer', min: 1, max: 5000, default: 1, unit_zh: '点', help_zh: '相邻窗口起点的间隔。', suggestion_zh: 'S 越大窗口越少、训练越快。' },
@@ -440,7 +439,7 @@ export default function DatasetPage() {
                       <StatusTag status={row.status} />
                     </div>
                     <div className="tn-muted">
-                      {scopeLabel(row.scope)} · {row.region_count} 个区域 · L/H/S = {row.L}/{row.H}/{row.S}
+                      单区域 · {row.region_count} 个区域 · L/H/S = {row.L}/{row.H}/{row.S}
                     </div>
                     <div className="tn-muted">{row.created_at}</div>
                     <div className="tn-inline" style={{ marginTop: 5 }}>
@@ -485,12 +484,10 @@ export default function DatasetPage() {
                     <div><strong>数据集 ID：</strong>{selectedDataset.display_id ?? selectedDataset.dataset_id}</div>
                     <div>
                       <strong>数据源：</strong>{selectedDataset.source_display_name ?? selectedDataset.source_key}
-                      {' · '}<strong>预测范围：</strong>{scopeLabel(selectedDataset.scope)}
+                      {' · '}<strong>预测范围：</strong>单区域
                     </div>
                     <div>
-                      <strong>区域：</strong>{selectedDataset.scope === 'all'
-                        ? `全部有效区域（${selectedDataset.region_count}）`
-                        : (selectedDataset.region_ids ?? []).join('、') || '—'}
+                      <strong>区域：</strong>{(selectedDataset.region_ids ?? []).join('、') || '—'}
                     </div>
                     <div>
                       <strong>时间范围：</strong>{selectedDataset.time_start ?? '—'} ～ {selectedDataset.time_end ?? '—'}
@@ -523,7 +520,7 @@ export default function DatasetPage() {
                     <div className="tn-muted">
                       <div>
                         当前配置：{sourceDisplayName(String(config.source_key), String(config.source_key))}
-                        {' · '}{config.scope === 'all' ? `全部区域（${regions.filter((r) => r.has_timeseries).length}）` : `单区域（${regionDisplayLabel(String(config.region_id), regions.find((r) => r.region_id === config.region_id)?.display_name)}）`}
+                        {' · '}区域（{regionDisplayLabel(String(config.region_id), regions.find((r) => r.region_id === config.region_id)?.display_name)}）
                         {' · '}L/H/S = {String(config.input_length)}/{String(config.output_length)}/{String(config.step)}
                       </div>
                       <div>
@@ -563,25 +560,6 @@ export default function DatasetPage() {
             <Card size="small" title="3 · 滑动窗口预览（Sliding Window Preview）">
               {displayWindow ? (
                 <>
-                  {historyView && (historyView.dataset.region_ids?.length ?? 0) > 1 ? (
-                    <div className="tn-inline" style={{ marginBottom: 8 }}>
-                      <span className="tn-muted">预览区域：</span>
-                      <Select
-                        size="small"
-                        value={displayRegion}
-                        style={{ minWidth: 180 }}
-                        options={(historyView.dataset.region_ids ?? []).map((region: string) => ({
-                          value: region,
-                          label: regionDisplayLabel(
-                            region,
-                            regions.find((item) => item.region_id === region)?.display_name,
-                          ),
-                        }))}
-                        disabled={historyWindowBusy}
-                        onChange={(region) => loadSelectedWindow(displaySplit, 0, region)}
-                      />
-                    </div>
-                  ) : null}
                   <div className="tn-inline" style={{ marginBottom: 8 }}>
                     <span className="tn-muted">数据集划分：</span>
                     {['train', 'validation', 'test'].map((split) => {

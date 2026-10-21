@@ -24,8 +24,8 @@ def _load_members(experiment_ids: list[str]) -> list[dict[str, Any]]:
         return []
     placeholders = ",".join("?" for _ in experiment_ids)
     rows = query_all(
-        f"SELECT * FROM experiments WHERE experiment_id IN ({placeholders}) "
-        f"OR display_id IN ({placeholders})",
+        f"SELECT * FROM experiments WHERE scope='single' AND "
+        f"(experiment_id IN ({placeholders}) OR display_id IN ({placeholders}))",
         tuple(experiment_ids) + tuple(experiment_ids),
     )
     out = []
@@ -84,12 +84,22 @@ def _prepare(payload: dict[str, Any]) -> dict[str, Any]:
     if not dataset_id:
         raise Conflict("必须提供 dataset_id", code="DATASET_REQUIRED")
     dataset = get_dataset(dataset_id)
+    if payload.get("scope") not in (None, "single"):
+        raise Conflict("全区域评估已取消，仅支持单区域。", code="MULTI_REGION_REMOVED")
+    if dataset["scope"] != "single" or len(dataset["region_ids"]) != 1:
+        raise Conflict("所选数据集不是单区域数据集，不能用于评估。", code="MULTI_REGION_REMOVED")
+    region_id = payload.get("region_id") or dataset["region_ids"][0]
+    if region_id != dataset["region_ids"][0]:
+        raise Conflict(
+            f"评估区域 {region_id} 与数据集冻结区域 {dataset['region_ids'][0]} 不一致。",
+            code="REGION_MISMATCH",
+        )
     experiment_ids = payload.get("experiment_ids") or []
     experiments = _load_members(experiment_ids)
     values = {
         "dataset_id": dataset_id,
-        "scope": payload.get("scope", dataset["scope"]),
-        "region_id": payload.get("region_id"),
+        "scope": "single",
+        "region_id": region_id,
         "experiment_ids": experiment_ids,
         "test_selection": payload.get("test_selection", "full"),
         "range_start_at": payload.get("range_start_at"),
@@ -98,11 +108,7 @@ def _prepare(payload: dict[str, Any]) -> dict[str, Any]:
     }
     issues = validate_m5(values, experiments=experiments, dataset=dataset)
     raise_if_invalid(issues, message="评价配置校验未通过")
-    scope = values["scope"]
-    if scope == "single":
-        regions = [payload.get("region_id")]
-    else:
-        regions = list(dataset["region_ids"])
+    regions = [region_id]
     if not regions or not regions[0]:
         raise Conflict("Single Region 评价必须指定区域", code="REGION_REQUIRED")
     bundle = load_dataset(dataset_id)
@@ -327,7 +333,10 @@ def _evaluation_public(row, *, include_predictions: bool = False, limit: int = 4
 
 @router.get("")
 def list_evaluations(limit: int = Query(50, ge=1, le=200)) -> dict:
-    rows = query_all("SELECT * FROM evaluations ORDER BY created_at DESC LIMIT ?", (limit,))
+    rows = query_all(
+        "SELECT * FROM evaluations WHERE scope='single' ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    )
     return {"evaluations": [_evaluation_public(row) for row in rows], "count": len(rows)}
 
 

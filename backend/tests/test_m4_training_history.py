@@ -31,21 +31,76 @@ def test_experiment_detail_contains_real_monitoring_fields():
         assert "ended_at" in region
 
 
-def test_all_regions_experiment_keeps_independent_region_models():
-    all_region = next(
-        item
-        for item in _experiments()
-        if item["scope"] == "all"
-        and item["region_total"] > 1
-        and item["status"] == "Completed"
+def test_training_is_single_region_only():
+    assert all(item["scope"] == "single" for item in _experiments())
+    assert all(
+        item["scope"] == "single"
+        for item in client.get("/api/batches?limit=200").json()["batches"]
     )
-    detail = client.get(
-        f"/api/experiments/{all_region['experiment_id']}?include_logs=true"
-    ).json()
-    regions = detail["region_models"]
-    assert len(regions) == all_region["region_total"]
-    assert len({row["region_id"] for row in regions}) == len(regions)
-    assert all(row["region_experiment_id"].startswith("EXP-") for row in regions)
+    datasets = client.get("/api/datasets?include_archived=true").json()["datasets"]
+    dataset = next(item for item in datasets if item["scope"] == "single")
+    rejected = client.post(
+        "/api/experiments/run",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "algorithm_key": "arima",
+            "scope": "all",
+            "params": {},
+        },
+    )
+    assert rejected.status_code == 409
+    assert rejected.json()["code"] == "MULTI_REGION_REMOVED"
+    rejected_batch = client.post(
+        "/api/batches/run",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "scope": "all",
+            "model_configs": {},
+        },
+    )
+    assert rejected_batch.status_code == 409
+    assert rejected_batch.json()["code"] == "MULTI_REGION_REMOVED"
+
+
+def test_module_three_and_five_reject_removed_all_region_scope():
+    dataset = client.get("/api/datasets?include_archived=true").json()["datasets"][0]
+    rejected_dataset = client.post(
+        "/api/datasets/preview",
+        json={
+            "values": {
+                "source_key": dataset["source_key"],
+                "scope": "all",
+                "region_id": dataset["region_ids"][0],
+                "input_length": 24,
+                "output_length": 6,
+                "step": 1,
+                "train_ratio": 0.7,
+                "val_ratio": 0.15,
+                "test_ratio": 0.15,
+            }
+        },
+    )
+    assert rejected_dataset.status_code in (409, 422)
+    assert any(
+        item["code"] == "MULTI_REGION_REMOVED"
+        for item in rejected_dataset.json()["issues"]
+    )
+
+    rejected_evaluation = client.post(
+        "/api/evaluations/validate",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "scope": "all",
+            "region_id": dataset["region_ids"][0],
+            "experiment_ids": [],
+        },
+    )
+    assert rejected_evaluation.status_code == 200
+    assert rejected_evaluation.json()["valid"] is False
+    assert any(
+        item["code"] == "MULTI_REGION_REMOVED"
+        for item in rejected_evaluation.json()["issues"]
+    )
 
 
 def test_failed_and_batch_records_are_not_reported_as_success():

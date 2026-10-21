@@ -2,6 +2,7 @@
 
 from app.services.validation import (
     all_models_summary,
+    check_module,
     check_model_params,
     validate_m1,
     validate_m2,
@@ -48,7 +49,8 @@ def test_l_zero_and_s_zero_are_errors():
 def test_ratio_sum_must_be_one():
     issues = validate_m3({"train_ratio": 0.7, "val_ratio": 0.2, "test_ratio": 0.2})
     assert ("RATIO_SUM", "error") in severity(issues)
-    clean = validate_m3({"train_ratio": 0.7, "val_ratio": 0.15, "test_ratio": 0.15,
+    clean = validate_m3({"source_key": "milano", "region_id": "ADRIANO",
+                         "train_ratio": 0.7, "val_ratio": 0.15, "test_ratio": 0.15,
                          "input_length": 24, "output_length": 6, "step": 1})
     assert not [i for i in clean if i["severity"] == "error"]
 
@@ -115,13 +117,32 @@ def test_m1_region_limit_and_unknown_region():
     assert ("UNKNOWN_REGION", "error") in severity(issues2)
 
 
-def test_m5_blocks_all_regions_scope_with_single_region_experiments():
-    dataset = {"dataset_id": "DS-1", "H": 6}
+def test_m5_rejects_removed_all_regions_scope():
+    dataset = {"dataset_id": "DS-1", "H": 6, "scope": "single"}
     experiments = [{"experiment_id": "EXP-1", "status": "Completed", "dataset_id": "DS-1",
                     "scope": "single", "region_ids": ["R1"], "algorithm_label": "ARIMA"}]
     issues = validate_m5({"experiment_ids": ["EXP-1"], "scope": "all", "region_id": "R1",
                           "test_selection": "full"}, experiments=experiments, dataset=dataset)
-    assert ("SCOPE_MISMATCH", "error") in severity(issues)
+    assert ("MULTI_REGION_REMOVED", "error") in severity(issues)
+
+
+def test_m3_rejects_removed_all_regions_scope():
+    issues, coerced = check_module(
+        "m3",
+        {
+            "source_key": "milano",
+            "scope": "all",
+            "region_id": "ADRIANO",
+            "input_length": 24,
+            "output_length": 6,
+            "step": 1,
+            "train_ratio": 0.7,
+            "val_ratio": 0.15,
+            "test_ratio": 0.15,
+        },
+    )
+    assert coerced["scope"] == "single"
+    assert ("MULTI_REGION_REMOVED", "error") in severity(issues)
 
 
 def test_all_models_reports_every_algorithm_individually():

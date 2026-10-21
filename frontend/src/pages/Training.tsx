@@ -26,7 +26,6 @@ import {
   missingModeLabel,
   modeLabel,
   scalingLabel,
-  scopeLabel,
   sourceDisplayName,
   statusLabel,
   unitDisplayLabel,
@@ -114,7 +113,9 @@ export default function Training() {
     api
       .get<any>(ENDPOINTS.datasetList)
       .then((data) => {
-        const built = data.datasets.filter((item: any) => item.status !== 'Archived')
+        const built = data.datasets.filter(
+          (item: any) => item.status !== 'Archived' && item.scope === 'single',
+        )
         setDatasets(built)
         setDatasetId((previous) => {
           if (previous && built.some((item: any) => item.dataset_id === previous)) return previous
@@ -127,7 +128,11 @@ export default function Training() {
   const loadHistory = useCallback(() => {
     api
       .get<any>(`${ENDPOINTS.experimentList}?limit=500`)
-      .then((data) => setExperiments(data.experiments))
+      .then((data) =>
+        setExperiments(
+          data.experiments.filter((item: any) => item.scope === 'single'),
+        ),
+      )
       .catch(() => undefined)
   }, [])
 
@@ -275,7 +280,7 @@ export default function Training() {
           `${item.display_id ?? item.dataset_id} · ${sourceDisplayName(
             item.source_key,
             item.source_display_name,
-          )} · ${scopeLabel(item.scope)}`,
+          )} · 单区域`,
       ),
       help_zh: '选择已构建并冻结的数据集；数据集参数只读，训练不会修改原始数据集。',
       suggestion_zh: '模块三构建完成后，在训练模块中选择该 DS ID。',
@@ -456,8 +461,8 @@ export default function Training() {
     const confirmed = window.confirm(
       `将按顺序运行 12 种算法。\n` +
         `数据集：${dataset?.display_id ?? datasetId}\n` +
-        `范围：${dataset?.scope === 'all' ? `全部区域 ${dataset?.region_count} 个` : '单区域'}\n` +
-        `计划区域模型任务：${12 * (dataset?.scope === 'all' ? dataset?.region_count ?? 1 : 1)}\n\n` +
+        `区域：${dataset?.region_ids?.[0] ?? '—'}\n` +
+        `计划模型任务：12\n\n` +
         `运行期间可在页面停止。确定开始吗？`,
     )
     if (!confirmed) return
@@ -587,7 +592,7 @@ export default function Training() {
             ? `${dataset.display_id ?? dataset.dataset_id} · ${sourceDisplayName(
                 dataset.source_key,
                 dataset.source_display_name,
-              )} · ${scopeLabel(dataset.scope)}`
+              )} · 单区域`
             : '请先选择已构建数据集'
         }
       />
@@ -648,7 +653,7 @@ export default function Training() {
             {dataset ? (
               <div className="tn-m4-dataset-summary" data-testid="m4-dataset-summary">
                 <div><span>来源</span><strong>{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</strong></div>
-                <div><span>区域范围</span><strong>{dataset.scope === 'all' ? `全部区域 ${dataset.region_count} 个` : `单区域 ${dataset.region_ids?.[0] ?? '—'}`}</strong></div>
+                <div><span>区域范围</span><strong>单区域 {dataset.region_ids?.[0] ?? '—'}</strong></div>
                 <div><span>采样频率</span><strong>{frequencyLabel(String(dataset.frequency))} · {dataset.frequency_minutes} 分钟</strong></div>
                 <div><span>时间范围</span><strong>{dataset.time_start ?? '—'} → {dataset.time_end ?? '—'}</strong></div>
                 <div><span>L / H / S</span><strong>{dataset.L} / {dataset.H} / {dataset.S}</strong></div>
@@ -675,7 +680,7 @@ export default function Training() {
             />
             {isAllModels ? (
               <div className="tn-muted" style={{ marginTop: -6, marginBottom: 10 }}>
-                批量编排会依次运行 12 种算法；全部区域仍按区域独立建模。
+                批量编排会在当前区域依次运行 12 种算法。
               </div>
             ) : activeModel ? (
               <div className="tn-inline" style={{ marginTop: -6, marginBottom: 10 }}>
@@ -1054,14 +1059,6 @@ export default function Training() {
                   </>
                 ) : (
                   <>
-                    {experiment?.scope === 'all' &&
-                    regionRows.length < (experiment?.region_total ?? 0) ? (
-                      <Alert
-                        type="warning"
-                        showIcon
-                        message={`该历史任务仅保存了实际进入执行的 ${regionRows.length} 个区域记录，任务总区域数为 ${experiment?.region_total ?? 0}。未落库区域不推断状态。`}
-                      />
-                    ) : null}
                     <Table
                       className="tn-m4-monitor-table"
                       size="small"

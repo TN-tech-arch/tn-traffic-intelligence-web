@@ -99,7 +99,7 @@ codex10.16/
 | 重启服务 | `powershell -File scripts\restart_dev.ps1` |
 | 后端单元/集成测试 | `.\.venv\Scripts\python.exe -m pytest backend\tests -q` |
 | 端到端真实链路 | `.\.venv\Scripts\python.exe backend\tests\e2e_smoke.py` |
-| 全域建模/批次计划验证 | `.\.venv\Scripts\python.exe backend\tests\verify_all_regions.py` |
+| 单区域工作流验证 | `.\.venv\Scripts\python.exe backend\tests\verify_single_region_workflow.py` |
 | 浏览器交互测试 | `cd frontend; node tests\ui_check.mjs` |
 | 构建安装包 | `powershell -File packaging\build_package.ps1` |
 | 安装/运行/卸载验证 | `powershell -File packaging\test_install.ps1` |
@@ -108,7 +108,7 @@ codex10.16/
 
 * **不造假**：没有权重的模型标记 `Unavailable`；失败的训练保留真实错误；初始化阶段没有任何 Recent Activity。
 * **无泄漏**：先按时间切分，再构造目标完全落在同一 split 的窗口；插值只在预测起点之前可用（见 `services/windows.py`）。
-* **区域独立**：`All Regions` 是同一地点全部有效区域**逐个独立建模**，不是联合空间模型，也不跨地点合并。
+* **单区域工作流**：模块三至模块五统一使用一个具体区域；“全部模型”表示在同一区域运行 12 种算法，不跨区域训练。
 * **单位谨慎**：Milano/Trentino 的物理单位未证实，ZTE 为 4G 下行流量；跨地点比较只使用归一化形状并显示免责声明。
 * **真实指标**：MAE / RMSE / sMAPE / R² 全部来自逆标准化后的真实样本；sMAPE 的 0/0 记 0 贡献，常量真值的 R² 显示 N/A。
 * **校验不可绕过**：任何 Save / Build / Run / Batch / Evaluation 请求都会在服务端重新校验，失败返回 422/409 与字段级 issue，且不产生任何作业或工件。

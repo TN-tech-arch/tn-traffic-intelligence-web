@@ -125,6 +125,11 @@ def _resolve_regions(payload: dict[str, Any], source: Any) -> list[str]:
 
 
 def _compute(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("scope") != "single":
+        raise Conflict(
+            "全区域数据集构建已取消，仅支持单区域工作流。",
+            code="MULTI_REGION_REMOVED",
+        )
     source = source_row(payload["source_key"])
     region_ids = _resolve_regions(payload, source)
     if not region_ids:
@@ -766,9 +771,9 @@ def get_dataset(dataset_id: str) -> dict[str, Any]:
 
 
 def list_datasets(*, include_archived: bool = False) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM dataset_versions"
+    sql = "SELECT * FROM dataset_versions WHERE scope='single'"
     if not include_archived:
-        sql += " WHERE status != 'Archived'"
+        sql += " AND status != 'Archived'"
     sql += " ORDER BY created_at DESC"
     return [dataset_summary(row) for row in query_all(sql)]
 

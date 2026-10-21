@@ -109,8 +109,8 @@ Foundation 能力（是否安装、有哪些 checkpoint、是否已缓存、设�
 * `jobs` 表是唯一的任务真相：`Queued → Running → Completed/Failed/Stopped/Skipped`，
   记录 `worker_id`、`heartbeat_at`、`progress_json`、`cancel_requested`。
 * Worker 启动时把心跳过期的 `Running` 任务改判为 `Interrupted/Failed`，绝不留“假 Running”。
-* `All Models` 批次：1 个 `batches` 行 + 12 个 `experiments` 行 + 12 个顺序 job；
-  `All Regions` 时每个 experiment 下再产生 N 个 `experiment_region_models` 子记录。
+* `All Models` 批次：1 个 `batches` 行 + 同一区域 12 个 `experiments` 行 + 12 个顺序 job；
+  每个单区域 experiment 对应 1 个 `experiment_region_models` 记录。
 * Stop：后端先落库 `cancel_requested`，未开始的任务立即置 `Skipped/Stopped`，
   正在运行的任务在安全检查点结束并把状态改为 `Stopped`，已完成工件保留。
 

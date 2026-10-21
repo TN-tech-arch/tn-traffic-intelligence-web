@@ -7,12 +7,12 @@ import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
 import BiLabel from '../components/BiLabel'
 import { BarChart, LineChart } from '../components/Charts'
-import MapView, { BLUE_PALETTE, colorScale, type MapEntry } from '../components/MapView'
+import { BLUE_PALETTE } from '../components/MapView'
 import { useGroupValidation } from '../validation/useValidation'
-import { fieldDisabledReason, isVisible, visibleFields, type FieldSpec } from '../validation/engine'
+import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
   ACTION_LABELS, MODULE_META, bilingual, frequencyLabel, missingModeLabel, modeLabel,
-  scalingLabel, scopeLabel, sourceDisplayName, statusLabel, unitDisplayLabel,
+  scalingLabel, sourceDisplayName, statusLabel, unitDisplayLabel,
 } from '../i18n/terms'
 
 export default function Evaluation() {
@@ -27,7 +27,6 @@ export default function Evaluation() {
   )
   const [batches, setBatches] = useState<any[]>([])
   const [batchChoice, setBatchChoice] = useState<string>('')
-  const [scope, setScope] = useState<'single' | 'all'>('single')
   const [regionId, setRegionId] = useState<string>('')
   const [testSelection, setTestSelection] = useState<'full' | 'range'>('full')
   const [rangeStart, setRangeStart] = useState('')
@@ -35,21 +34,18 @@ export default function Evaluation() {
   const [compatibility, setCompatibility] = useState<any>(null)
   const [evaluation, setEvaluation] = useState<any>(null)
   const [evaluations, setEvaluations] = useState<any[]>([])
-  const [predictions, setPredictions] = useState<any[]>([])
   const [seriesByExperiment, setSeriesByExperiment] = useState<Record<string, any[]>>({})
   const [centerTab, setCenterTab] = useState('comparison')
   const [rightTab, setRightTab] = useState('metrics')
   const [busy, setBusy] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
-  const [geojson, setGeojson] = useState<any>(null)
   const [horizonStep, setHorizonStep] = useState(1)
-  const [spatialLayer, setSpatialLayer] = useState<'actual' | 'predicted' | 'absolute_error' | 'relative_error'>('actual')
+  const scope = 'single' as const
 
   const schema: FieldSpec[] = useMemo(
     () => [
       { key: 'experiment_ids', label_zh: '实验（可多选）', type: 'array', enum: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => e.experiment_id), enum_labels: experiments.filter((e) => ['Completed', 'Partial'].includes(e.status)).map((e) => `${e.algorithm_label} · ${modeLabel(e.mode)} · ${e.display_id ?? e.experiment_id}`), default: [], help_zh: '选择 1 到 N 个实验参加同口径比较。', suggestion_zh: '可用批量任务一键载入。' },
-      { key: 'scope', label_zh: '评价范围', type: 'enum', enum: ['single', 'all'], enum_labels: ['单区域', '全部区域'], default: 'single', help_zh: '单区域评价一个区域；全部区域只允许来自全区域实验组的模型。', suggestion_zh: '与实验的预测范围保持一致。' },
-      { key: 'region_id', label_zh: '区域', type: 'enum', enum: dataset?.region_ids ?? [], default: '', required: false, visible_when: { scope: 'single' }, help_zh: '单区域范围下要评价的区域。', suggestion_zh: '从数据集区域中选择。' },
+      { key: 'region_id', label_zh: '区域', type: 'enum', enum: dataset?.region_ids ?? [], default: '', help_zh: '要评估的具体区域。', suggestion_zh: '从数据集区域中选择。' },
       { key: 'test_selection', label_zh: '测试范围', type: 'enum', enum: ['full', 'range'], enum_labels: ['完整测试集（正式成绩）', '选定测试范围'], default: 'full', help_zh: '完整测试集用于正式评分；选定范围只是可视化子集，会标注子集来源。', suggestion_zh: '提交成绩请使用完整测试集。' },
       { key: 'horizon_step', label_zh: '显示预测步长', type: 'integer', min: 1, max: 100, default: 1, help_zh: '图表默认展示的预测步长，不改变 H，也不影响指标口径。', suggestion_zh: '默认 1。' },
     ],
@@ -79,7 +75,9 @@ export default function Evaluation() {
 
   const loadDatasets = useCallback(() => {
     api.get<any>(ENDPOINTS.datasetList).then((data) => {
-      const built = data.datasets.filter((d: any) => d.status !== 'Archived')
+      const built = data.datasets.filter(
+        (d: any) => d.status !== 'Archived' && d.scope === 'single',
+      )
       setDatasets(built)
       setDatasetId((prev) => (prev && built.some((d: any) => d.dataset_id === prev) ? prev : built[0]?.dataset_id ?? ''))
     })
@@ -87,7 +85,9 @@ export default function Evaluation() {
 
   const loadHistory = useCallback(() => {
     api.get<any>(ENDPOINTS.evaluationList).then((data) => setEvaluations(data.evaluations)).catch(() => undefined)
-    api.get<any>(ENDPOINTS.batchList).then((data) => setBatches(data.batches)).catch(() => undefined)
+    api.get<any>(ENDPOINTS.batchList).then((data) =>
+      setBatches(data.batches.filter((batch: any) => batch.scope === 'single')),
+    ).catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -101,7 +101,6 @@ export default function Evaluation() {
       .get<any>(ENDPOINTS.datasetGet(datasetId))
       .then((data) => {
         setDataset(data)
-        setScope(data.scope === 'all' ? 'all' : 'single')
         setRegionId((prev) => (prev && data.region_ids.includes(prev) ? prev : data.region_ids[0]))
       })
       .catch(() => undefined)
@@ -109,14 +108,10 @@ export default function Evaluation() {
 
   useEffect(() => {
     if (!datasetId) return
-    api.get<any>(`${ENDPOINTS.experimentList}?dataset_id=${datasetId}`).then((data) => setExperiments(data.experiments)).catch(() => undefined)
+    api.get<any>(`${ENDPOINTS.experimentList}?dataset_id=${datasetId}`).then((data) =>
+      setExperiments(data.experiments.filter((item: any) => item.scope === 'single')),
+    ).catch(() => undefined)
   }, [datasetId])
-
-  useEffect(() => {
-    if (!datasetId) return
-    api.get<any>(ENDPOINTS.geometry(dataset?.source_key ?? 'milano')).then(setGeojson).catch(() => undefined)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataset?.source_key])
 
   useEffect(() => {
     if (!datasetId || !selectedExperiments.length) return
@@ -134,7 +129,6 @@ export default function Evaluation() {
       try {
         const data = await api.get<any>(ENDPOINTS.evaluationGet(evaluation.evaluation_id))
         setEvaluation(data)
-        setPredictions(data.predictions ?? [])
         if (!['Queued', 'Running', 'Stopping'].includes(data.status)) {
           loadHistory()
           messageApi.success(`评价 ${data.evaluation_id} 状态：${statusLabel(data.status)}`)
@@ -165,7 +159,7 @@ export default function Evaluation() {
   useEffect(() => {
     if (!evaluation || evaluation.status !== 'Completed') return
     const ids = (evaluation.experiments ?? []).filter((e: any) => e.coverage_regions > 0).map((e: any) => e.experiment_id)
-    loadSeries(evaluation.evaluation_id, ids, scope === 'single' ? regionId : undefined)
+    loadSeries(evaluation.evaluation_id, ids, regionId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [evaluation?.evaluation_id, evaluation?.status, regionId, scope])
 
@@ -181,7 +175,6 @@ export default function Evaluation() {
       messageApi.success(`评价 ${created.evaluation_id} 已创建（${created.experiment_count} 个实验，${created.region_count} 个区域）`)
       const data = await api.get<any>(ENDPOINTS.evaluationGet(created.evaluation_id))
       setEvaluation(data)
-      setPredictions(data.predictions ?? [])
       loadHistory()
     } catch (err) {
       if (err instanceof ApiError) {
@@ -218,17 +211,15 @@ export default function Evaluation() {
     try {
       const data = await api.get<any>(ENDPOINTS.evaluationGet(evaluationId))
       setEvaluation(data)
-      setPredictions(data.predictions ?? [])
       setDatasetId(data.dataset_id)
       setSelectedExperiments((data.experiments ?? []).map((e: any) => e.experiment_id))
-      setScope(data.scope)
       if (data.region_id) setRegionId(data.region_id)
       // refresh the compatibility panel for the restored selection instead of
       // leaving stale/undefined values from a previous configuration
       const experimentIds = (data.experiments ?? []).map((e: any) => e.experiment_id)
       const compatibilityPayload = {
         dataset_id: data.dataset_id,
-        scope: data.scope,
+        scope: 'single',
         region_id: data.region_id ?? undefined,
         experiment_ids: experimentIds,
         test_selection: 'full',
@@ -302,55 +293,6 @@ export default function Evaluation() {
     }
   }, [seriesByExperiment, experimentReports, dataset])
 
-  const spatialEntries: MapEntry[] = useMemo(() => {
-    const report = experimentReports[0]
-    if (!report) return []
-    const perRegion = report.macro?.n_regions ? report.macro : null
-    const regionMetrics: Record<string, any> = {}
-    ;(report.per_region ?? []).forEach((row: any) => {
-      regionMetrics[row.region_id] = row
-    })
-    return (dataset?.region_ids ?? []).map((id: string) => {
-      const metrics = regionMetrics[id]
-      let value: number | null = null
-      if (metrics) {
-        if (spatialLayer === 'actual') value = null
-        if (spatialLayer === 'absolute_error') value = metrics.mae ?? null
-        if (spatialLayer === 'relative_error') value = metrics.smape ?? null
-        if (spatialLayer === 'predicted') value = null
-      }
-      return { region_id: id, value, has_timeseries: true }
-    })
-  }, [experimentReports, dataset, spatialLayer])
-
-  const predictionRegionValues = useMemo(() => {
-    if (spatialLayer !== 'actual' && spatialLayer !== 'predicted') return spatialEntries
-    const rows = predictions
-    const grouped: Record<string, { actual: number[]; predicted: number[] }> = {}
-    rows.forEach((row) => {
-      grouped[row.region_id] = grouped[row.region_id] ?? { actual: [], predicted: [] }
-      if (row.y_true !== null) grouped[row.region_id].actual.push(row.y_true)
-      if (row.y_pred !== null) grouped[row.region_id].predicted.push(row.y_pred)
-    })
-    return (dataset?.region_ids ?? []).map((id: string) => {
-      const bucket = grouped[id]
-      const value = bucket
-        ? spatialLayer === 'actual'
-          ? bucket.actual.reduce((a, b) => a + b, 0) / Math.max(1, bucket.actual.length)
-          : bucket.predicted.reduce((a, b) => a + b, 0) / Math.max(1, bucket.predicted.length)
-        : null
-      return { region_id: id, value, has_timeseries: true }
-    })
-  }, [predictions, dataset, spatialLayer, spatialEntries])
-
-  const colorBounds = useMemo(() => {
-    const values = predictionRegionValues
-      .map((entry: MapEntry) => entry.value)
-      .filter((value: number | null | undefined): value is number => value !== null && value !== undefined)
-    if (!values.length) return { min: 0, max: 1 }
-    return { min: Math.min(...values), max: Math.max(...values) }
-  }, [predictionRegionValues])
-
   return (
     <div>
       {contextHolder}
@@ -373,7 +315,7 @@ export default function Evaluation() {
             <PaneHead
               title={bilingual('评价设置', 'Evaluation Setup')}
               extra={
-                <Button size="small" onClick={() => { setSelectedExperiments([]); setBatchChoice(''); setTestSelection('full'); setRangeStart(''); setRangeEnd(''); setEvaluation(null); setPredictions([]); setSeriesByExperiment({}) }}>
+                <Button size="small" onClick={() => { setSelectedExperiments([]); setBatchChoice(''); setTestSelection('full'); setRangeStart(''); setRangeEnd(''); setEvaluation(null); setSeriesByExperiment({}) }}>
                   重置选择
                 </Button>
               }
@@ -385,7 +327,7 @@ export default function Evaluation() {
                 style={{ width: '100%' }}
                 value={datasetId || undefined}
                 placeholder="选择数据集"
-                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.display_id ?? d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · ${scopeLabel(d.scope)}` }))}
+                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.display_id ?? d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · 单区域 ${d.region_ids?.[0] ?? '—'}` }))}
                 onChange={(value) => { setDatasetId(value); setEvaluation(null) }}
               />
             </div>
@@ -409,8 +351,7 @@ export default function Evaluation() {
                 issues={fieldIssues(spec.key)}
                 path={`m5.${spec.key}`}
                 onChange={(key, value) => {
-                  if (key === 'scope') setScope(value as 'single' | 'all')
-                  else if (key === 'region_id') setRegionId(String(value ?? ''))
+                  if (key === 'region_id') setRegionId(String(value ?? ''))
                   else if (key === 'experiment_ids') setSelectedExperiments((value as string[]) ?? [])
                   else if (key === 'test_selection') setTestSelection(value as 'full' | 'range')
                   else if (key === 'horizon_step') setHorizonStep(Number(value) || 1)
@@ -449,7 +390,7 @@ export default function Evaluation() {
                 {dataset ? (
                   <>
                     <div>来源：{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</div>
-                    <div>预测范围：{scopeLabel(dataset.scope)} · 区域 {dataset.region_count}</div>
+                    <div>预测范围：单区域 · 区域 {dataset.region_ids?.[0] ?? '—'}</div>
                     <div>L/H/S：{dataset.L}/{dataset.H}/{dataset.S} · {frequencyLabel(dataset.frequency)}</div>
                     <div>预处理：{missingModeLabel(dataset.preprocess?.missing_mode)} / {scalingLabel(dataset.preprocess?.scaling)}</div>
                     <div>测试窗口：{dataset.window_counts?.test}</div>
@@ -526,7 +467,7 @@ export default function Evaluation() {
                       empty={!comparisonSeries.series.length}
                     />
                     <div className="tn-muted">
-                      真实值为留出测试集的真实观测（源单位）；全部区域默认显示区域平均曲线，可切换区域下钻。
+                      真实值为该单区域留出测试集的真实观测（源单位）。
                     </div>
                   </div>
                 ),
@@ -571,47 +512,7 @@ export default function Evaluation() {
                     <Card size="small" title={bilingual('各预测步长的 MAE 曲线', 'MAE by Horizon Step')}>
                       <LineChart height={250} x={horizonCurves.x} series={horizonCurves.series} xName="预测步长" yName="平均绝对误差（MAE）" empty={!horizonCurves.series.length} />
                     </Card>
-                    <div className="tn-muted">按预测步长汇总；全部区域时按有效样本数加权。</div>
-                  </div>
-                ),
-              },
-              {
-                key: 'spatial',
-                label: <BiLabel zh="空间评估" en="Spatial Evaluation" />,
-                children: (
-                  <div className="tn-stack">
-                    {scope === 'all' ? (
-                      <>
-                        <div className="tn-inline">
-                          {(['actual', 'predicted', 'absolute_error', 'relative_error'] as const).map((layer) => (
-                            <Button key={layer} size="small" type={spatialLayer === layer ? 'primary' : 'default'} onClick={() => setSpatialLayer(layer)}>
-                              {layer === 'actual' ? '真实值' : layer === 'predicted' ? '预测值' : layer === 'absolute_error' ? '绝对误差' : '相对误差'}
-                            </Button>
-                          ))}
-                        </div>
-                        <MapView
-                          geojson={geojson}
-                          entries={predictionRegionValues}
-                          selected={[]}
-                          onToggle={() => undefined}
-                          height={380}
-                          colorFor={(entry) => colorScale(entry?.value ?? null, colorBounds.min, colorBounds.max, BLUE_PALETTE)}
-                          formatTooltip={(entry, regionId) => `${regionId}: ${entry?.value === null || entry?.value === undefined ? '无数据 / 无预测' : entry.value.toFixed(2)}`}
-                          legend={
-                            <>
-                              <span>低</span>
-                              {BLUE_PALETTE.map((color) => (
-                                <span key={color} className="tn-legend-swatch" style={{ background: color }} />
-                              ))}
-                              <span>高</span>
-                              <span className="tn-legend-swatch" style={{ background: '#c9d3e2' }} />无数据 / 失败
-                            </>
-                          }
-                        />
-                      </>
-                    ) : (
-                      <EmptyState text="空间评估仅对全部区域评价可用；单区域评价不绘制空间图层。" />
-                    )}
+                    <div className="tn-muted">按预测步长汇总当前单区域测试结果。</div>
                   </div>
                 ),
               },
@@ -713,7 +614,7 @@ export default function Evaluation() {
                         <div>
                           <div className="tn-code">{item.evaluation_id}</div>
                           <div className="tn-muted">
-                            {item.scope === 'all' ? '全部区域' : `单区域（${item.region_id ?? '—'}）`} · {item.experiments?.length ?? 0} 个实验 ·{' '}
+                            {`单区域（${item.region_id ?? '—'}）`} · {item.experiments?.length ?? 0} 个实验 ·{' '}
                             {item.created_at}
                           </div>
                         </div>
@@ -748,7 +649,7 @@ export default function Evaluation() {
                 },
               ]}
             />
-            <Button size="small" onClick={() => { setSelectedExperiments([]); setEvaluation(null); setPredictions([]); setSeriesByExperiment({}) }}>
+            <Button size="small" onClick={() => { setSelectedExperiments([]); setEvaluation(null); setSeriesByExperiment({}) }}>
               重置选择
             </Button>
           </div>

@@ -119,7 +119,7 @@ Temporal 内部**不再有二级 Tab**，而是按顺序纵向排列：
 
 ## 4. Module 3 · Dataset
 
-1. 左侧选择：`数据源` → `预测范围`（单区域 / 全部区域）→ `区域` → `L / H / S` → Train/Val/Test 比例。
+1. 左侧选择：`数据源` → `区域` → `L / H / S` → Train/Val/Test 比例。数据集固定为单区域。
    构建范围固定采用数据源完整有效时间范围；不显示开始/结束日期控件、频率或聚合控件。
 2. 中央从上到下为：数据集概览 → 时间顺序划分预览 → 滑动窗口预览 → 数据质量摘要。
 3. 点击 `构建数据集`：全量校验通过后原子构建，成功后由后端生成可读 `DS-{DATASET}-{REGION|REGIONS}-{序号}`（状态 `Built`）；失败不会产生半成品 ID。
@@ -132,17 +132,17 @@ Temporal 内部**不再有二级 Tab**，而是按顺序纵向排列：
 2. 选择算法：列表顶部是 `All Models (12)`，下方按 Statistical / Machine Learning / Deep Learning / Foundation 分组。
 3. `Model Parameters`：仅显示核心参数；高级参数由后端统一默认值和校验管理。All Models 为 12 个独立折叠参数组，支持单独恢复默认与 Reset All。
 4. `Check Compatibility` 做真实预检（数据、样本数、checkpoint、依赖、资源），逐算法列出问题。
-5. `Run Training` / `Run All Models`；All Models 会先弹出确认对话框（地点、Scope、12 个模型、区域数、任务数、不可运行项）。
+5. `Run Training` / `Run All Models`；All Models 会在当前区域依次运行 12 个模型，并允许执行中停止。
 6. 中央监控显示真实阶段与进度（DL 为真实 epoch 损失，Boosting 为真实迭代指标，ARIMA/Prophet/Zero-shot 明确没有 epoch）。
-7. 右侧：`Training Overview`、`Training Logs`、`Experiment History`（Open / Duplicate / Archive / Delete / Stop）。
+7. 实验历史位于左侧配置区下方，只保留打开与删除；中央显示训练监控、过程与日志。
 
 ## 6. Module 5 · Evaluation
 
-1. 选择数据集与 Scope；可用 `Batch ID` 一键载入该批次成功实验（失败/跳过项会列原因）。
+1. 选择单区域数据集；可用 `Batch ID` 一键载入该批次成功实验（失败/跳过项会列原因）。
 2. 勾选 Experiment，查看只读快照与兼容性检查。
 3. `Test Range` 默认 `Full Test`；`Selected Test Range` 只用于可视化子集。
 4. `Run Prediction` 生成 `Evaluation ID`。
-5. 中央四视图：`Prediction Comparison`、`Error Analysis`、`Forecast Horizon Analysis`、`Spatial Evaluation`。
+5. 中央三视图：`Prediction Comparison`、`Error Analysis`、`Forecast Horizon Analysis`。
 6. 右侧：`Metrics Overview`、`Model Ranking`、`Regional Performance`，底部 `Evaluation History / Management`。
 
 ## 7. 常见错误与处理

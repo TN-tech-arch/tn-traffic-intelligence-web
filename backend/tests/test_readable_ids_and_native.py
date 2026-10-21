@@ -19,18 +19,11 @@ def test_readable_ids_follow_the_required_patterns_and_never_repeat():
     assert dataset_id("milano", "single", "ADRIANO") != ds
 
     assert re.fullmatch(
-        r"DS-MILANO-REGIONS-\d{4,}", dataset_id("milano", "all")
-    )
-    assert re.fullmatch(
         r"CLUS-MILANO-KMEANS-\d{4,}", cluster_run_id("milano", "kmeans")
     )
     assert re.fullmatch(
         r"EXP-MILANO-ADRIANO-LSTM-\d{4,}",
         experiment_id("milano", "single", "lstm", "ADRIANO"),
-    )
-    assert re.fullmatch(
-        r"BATCH-MILANO-REGIONS-LSTM-\d{4,}",
-        batch_id("milano", "all", model_key="lstm"),
     )
     assert re.fullmatch(
         r"BATCH-MILANO-ADRIANO-MODELS-\d{4,}",
