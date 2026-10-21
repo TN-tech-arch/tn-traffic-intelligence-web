@@ -7,6 +7,8 @@
 ## 页面结构
 
 - 严格两栏布局：左侧配置区与实验历史，中央当前实验详情与训练监控。
+- 两栏比例与模块三一致：左侧 `32%`，中央 `68%`。
+- 标题格式与模块三一致：`1 · 配置区（Configuration）`、`2 · 训练监控（Training Monitor）`、`3 · 当前实验详情（Current Experiment Details）`、`4 · 实验历史（Experiment History）`。
 - 删除右侧独立区域及其中的重复历史、日志和详情面板。
 - 实验历史支持数据集、算法、状态筛选和分页。
 - 每条实验历史只保留“打开”和“删除记录”两个操作。
@@ -21,6 +23,7 @@
 - 仅对实际提供 epoch 历史的算法绘制训练/验证 Loss。
 - ARIMA、Prophet 等算法明确显示无标准 epoch 过程，不生成模拟曲线。
 - 训练日志直接读取后端日志，并支持下载。
+- 训练过程与训练日志不再使用二级标签页，在同一页面从上到下排列。
 - 训练监控不展示 MAE、RMSE、sMAPE、R² 或测试集预测结果。
 
 ## 后端与行为
@@ -49,8 +52,8 @@
 | 完整后端 pytest | 161 passed，2 条既有 ARIMA 数值警告 |
 | 前端 TypeScript 类型检查 | passed |
 | 前端生产构建 | passed |
-| 开发站 Playwright | 14/14 passed |
-| 安装版 Playwright | 14/14 passed |
+| 开发站 Playwright | 15/15 passed |
+| 安装版 Playwright | 15/15 passed |
 | 真实单算法训练 | `EXP-ZTE-370102001-ARIMA-0012` 完成，区域开始/结束时间和日志正确 |
 | All Regions | `EXP-MILANO-REGIONS-LIGHTGBM-0001`，88/88 区域独立完成 |
 | 失败任务 | `EXP-MILANO-ADRIANO-TIMESFM-0002`，正确显示失败状态 |
@@ -75,8 +78,8 @@ E:\codex\codex10.16\packaging\dist\TN-Traffic-Intelligence-Setup-3.2.0.exe
 ```
 
 - 版本：`3.2.0`
-- 大小：267,850,018 bytes
-- SHA256：`B218EB61E81E58EF435FE98A945086E5D36B05F36820D0120890460EE1CA1AEC`
+- 大小：267,851,059 bytes
+- SHA256：`B918316CDA1B5170383E5CDA8875D3AB3E314BA23CCACB8AF0CB688FF20DA558`
 
 安装验收实际完成安装、启动、模块三预览、模块四训练、模块五评估、安装版模块四
 Playwright 回归、迁移快照重放和卸载。
