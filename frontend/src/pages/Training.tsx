@@ -19,7 +19,7 @@ import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
 import { LineChart } from '../components/Charts'
 import { useGroupValidation, useSchema } from '../validation/useValidation'
-import { fieldDisabledReason, visibleFields, type Values } from '../validation/engine'
+import { fieldDisabledReason, visibleFields, type FieldSpec, type Values } from '../validation/engine'
 import {
   MODULE_META,
   frequencyLabel,
@@ -262,6 +262,41 @@ export default function Training() {
       label: `${model.label} · ${model.category_label_zh}`,
     })),
   ]
+
+  const datasetField = useMemo<FieldSpec>(
+    () => ({
+      key: 'dataset_id',
+      label: 'Dataset Selection',
+      label_zh: '数据集选择（只读快照）',
+      type: 'enum',
+      enum: datasets.map((item) => item.dataset_id),
+      enum_labels: datasets.map(
+        (item) =>
+          `${item.display_id ?? item.dataset_id} · ${sourceDisplayName(
+            item.source_key,
+            item.source_display_name,
+          )} · ${scopeLabel(item.scope)}`,
+      ),
+      help_zh: '选择已构建并冻结的数据集；数据集参数只读，训练不会修改原始数据集。',
+      suggestion_zh: '模块三构建完成后，在训练模块中选择该 DS ID。',
+    }),
+    [datasets],
+  )
+
+  const algorithmField = useMemo<FieldSpec>(
+    () => ({
+      key: 'algorithm_key',
+      label: 'Prediction Algorithm',
+      label_zh: '预测算法',
+      type: 'enum',
+      enum: algorithmOptions.map((item) => item.value),
+      enum_labels: algorithmOptions.map((item) => item.label),
+      default: 'arima',
+      help_zh: '选择单个算法，或使用全部模型执行 12 种算法的批量编排。',
+      suggestion_zh: '单模型调试优先选择 ARIMA；完整对比使用全部模型。',
+    }),
+    [models],
+  )
 
   const historyDatasetOptions = useMemo(
     () =>
@@ -599,68 +634,57 @@ export default function Training() {
               </Tooltip>
             }
           >
-            <div className="tn-field">
-              <label className="tn-field-label">1 · 数据集选择（只读快照）</label>
-              <Select
-                style={{ width: '100%' }}
-                size="small"
-                value={datasetId || undefined}
-                placeholder="选择已构建数据集"
-                options={datasets.map((item) => ({
-                  value: item.dataset_id,
-                  label: `${item.display_id ?? item.dataset_id} · ${sourceDisplayName(
-                    item.source_key,
-                    item.source_display_name,
-                  )} · ${scopeLabel(item.scope)}`,
-                }))}
-                onChange={(value) => {
-                  setDatasetId(value)
-                  setPreflight(null)
-                }}
-              />
-              {dataset ? (
-                <div className="tn-m4-dataset-summary" data-testid="m4-dataset-summary">
-                  <div><span>来源</span><strong>{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</strong></div>
-                  <div><span>区域范围</span><strong>{dataset.scope === 'all' ? `全部区域 ${dataset.region_count} 个` : `单区域 ${dataset.region_ids?.[0] ?? '—'}`}</strong></div>
-                  <div><span>采样频率</span><strong>{frequencyLabel(String(dataset.frequency))} · {dataset.frequency_minutes} 分钟</strong></div>
-                  <div><span>时间范围</span><strong>{dataset.time_start ?? '—'} → {dataset.time_end ?? '—'}</strong></div>
-                  <div><span>L / H / S</span><strong>{dataset.L} / {dataset.H} / {dataset.S}</strong></div>
-                  <div><span>划分比例</span><strong>{dataset.ratios?.train} / {dataset.ratios?.validation} / {dataset.ratios?.test}</strong></div>
-                  <div><span>窗口数</span><strong>训练 {dataset.window_counts?.train ?? 0} · 验证 {dataset.window_counts?.validation ?? 0} · 测试 {dataset.window_counts?.test ?? 0}</strong></div>
-                  <div><span>预处理</span><strong>{missingModeLabel(dataset.preprocess?.missing_mode)} · {scalingLabel(dataset.preprocess?.scaling)}</strong></div>
-                </div>
-              ) : null}
-            </div>
+            <ParamField
+              spec={datasetField}
+              value={datasetId || undefined}
+              issues={[]}
+              path="m4.dataset_id"
+              onChange={(_, value) => {
+                setDatasetId(String(value ?? ''))
+                setPreflight(null)
+              }}
+              compact
+            />
+            {dataset ? (
+              <div className="tn-m4-dataset-summary" data-testid="m4-dataset-summary">
+                <div><span>来源</span><strong>{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</strong></div>
+                <div><span>区域范围</span><strong>{dataset.scope === 'all' ? `全部区域 ${dataset.region_count} 个` : `单区域 ${dataset.region_ids?.[0] ?? '—'}`}</strong></div>
+                <div><span>采样频率</span><strong>{frequencyLabel(String(dataset.frequency))} · {dataset.frequency_minutes} 分钟</strong></div>
+                <div><span>时间范围</span><strong>{dataset.time_start ?? '—'} → {dataset.time_end ?? '—'}</strong></div>
+                <div><span>L / H / S</span><strong>{dataset.L} / {dataset.H} / {dataset.S}</strong></div>
+                <div><span>划分比例</span><strong>{dataset.ratios?.train} / {dataset.ratios?.validation} / {dataset.ratios?.test}</strong></div>
+                <div><span>窗口数</span><strong>训练 {dataset.window_counts?.train ?? 0} · 验证 {dataset.window_counts?.validation ?? 0} · 测试 {dataset.window_counts?.test ?? 0}</strong></div>
+                <div><span>预处理</span><strong>{missingModeLabel(dataset.preprocess?.missing_mode)} · {scalingLabel(dataset.preprocess?.scaling)}</strong></div>
+              </div>
+            ) : null}
+
+            <ParamField
+              spec={algorithmField}
+              value={algorithm}
+              issues={[]}
+              path="m4.algorithm_key"
+              onChange={(_, value) => {
+                const nextAlgorithm = String(value ?? '')
+                setAlgorithm(nextAlgorithm)
+                setPreflight(null)
+                if (nextAlgorithm !== ALL_MODELS) {
+                  setParams(allParams[nextAlgorithm] ?? defaultsFor(nextAlgorithm))
+                }
+              }}
+              compact
+            />
+            {isAllModels ? (
+              <div className="tn-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+                批量编排会依次运行 12 种算法；全部区域仍按区域独立建模。
+              </div>
+            ) : activeModel ? (
+              <div className="tn-inline" style={{ marginTop: -6, marginBottom: 10 }}>
+                <Tag>{modeLabel(activeModel.default_mode)}</Tag>
+                <span className="tn-muted">{activeModel.category_label_zh}</span>
+              </div>
+            ) : null}
 
             <div className="tn-field">
-              <label className="tn-field-label">2 · 预测算法</label>
-              <Select
-                data-testid="m4-algorithm-select"
-                style={{ width: '100%' }}
-                value={algorithm}
-                options={algorithmOptions}
-                onChange={(value) => {
-                  setAlgorithm(value)
-                  setPreflight(null)
-                  if (value !== ALL_MODELS) {
-                    setParams(allParams[value] ?? defaultsFor(value))
-                  }
-                }}
-              />
-              {isAllModels ? (
-                <div className="tn-muted" style={{ marginTop: 6 }}>
-                  批量编排会依次运行下方 12 种算法；全部区域仍按区域独立建模。
-                </div>
-              ) : activeModel ? (
-                <div className="tn-inline" style={{ marginTop: 6 }}>
-                  <Tag>{modeLabel(activeModel.default_mode)}</Tag>
-                  <span className="tn-muted">{activeModel.category_label_zh}</span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="tn-field">
-              <label className="tn-field-label">3 · 模型参数</label>
               {isAllModels ? (
                 <>
                   <Collapse
@@ -772,7 +796,7 @@ export default function Training() {
             </div>
 
             <div className="tn-field">
-              <label className="tn-field-label">4 · 运行前检查</label>
+              <div className="tn-section-title">运行前检查（Preflight Summary）</div>
               <div className="tn-inline" style={{ marginBottom: 6 }}>
                 <Button size="small" onClick={runPreflight} loading={busy} disabled={!datasetId}>
                   重新检查
@@ -810,7 +834,7 @@ export default function Training() {
             </div>
 
             <div className="tn-field" style={{ marginBottom: 0 }}>
-              <label className="tn-field-label">5 · 操作</label>
+              <div className="tn-section-title">操作（Actions）</div>
               <div className="tn-m4-actions">
                 <Button
                   type="primary"

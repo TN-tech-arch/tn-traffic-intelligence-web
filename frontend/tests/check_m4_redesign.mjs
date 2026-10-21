@@ -49,6 +49,20 @@ check(
     pageText.includes('实验历史（Experiment History）') &&
     !pageText.includes('4 · 实验历史（Experiment History）'),
 )
+const configText = await page
+  .locator('.tn-m4-column')
+  .nth(0)
+  .locator('.tn-m4-card')
+  .nth(0)
+  .innerText()
+check(
+  '3.2 配置参数与模块三一致且不编号',
+  configText.includes('数据集选择（只读快照）') &&
+    configText.includes('预测算法') &&
+    !/[1-5]\s*·\s*(数据集选择|预测算法|模型参数|运行前检查|操作)/.test(configText) &&
+    (await page.locator('[data-field="m4.dataset_id"]').count()) === 1 &&
+    (await page.locator('[data-field="m4.algorithm_key"]').count()) === 1,
+)
 
 const firstHistory = page.locator('.tn-m4-history-item').first()
 await firstHistory.waitFor({ state: 'visible', timeout: 30000 })
