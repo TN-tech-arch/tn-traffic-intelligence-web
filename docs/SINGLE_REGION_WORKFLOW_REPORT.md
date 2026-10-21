@@ -1,100 +1,137 @@
-# 模块三至五单区域工作流与全区域清理报告
+# 模块三至模块五单区域工作流交付报告
 
 日期：2026-10-21
+
 开发网站：<http://127.0.0.1:8077>
 
-## 单区域规则
+安装包版本：3.2.0
 
-- 模块三只构建一个具体区域的数据集，不再提供预测范围设置。
-- 模块四只接受单区域数据集；单模型和“全部模型”均作用于该数据集唯一区域。
-- “全部模型”批次固定为同一区域的 12 个模型实验。
-- 模块五只支持单区域评估与比较，可从 Batch 加载同一区域的成功实验。
-- 模块五空间评估 Tab 和全区域汇总入口已删除。
-- 后端对旧客户端提交的 `scope=all` 请求返回 `MULTI_REGION_REMOVED`，不能仅靠隐藏前端绕过。
+功能实现提交：`c193b6f098a8450a9104fc2716cc81f521c6764a`
 
-## 清理前范围
+批次事务与最终安装验收提交：`a10e94524a5bd102938ce8cf7ccd89445be59338`
 
-| 类型 | 总数 | 单区域 | 全区域 |
-|---|---:|---:|---:|
-| 数据集 | 15 | 14 | 1 |
-| 实验 | 65 | 64 | 1 |
-| 批量任务 | 6 | 5 | 1 |
-| 评价 | 5 | 4 | 1 |
-| 区域模型 | 152 | 64 | 88 |
-| 评价成员 | 47 | 46 | 1 |
-| 预测记录 | 19,080 | 13,800 | 5,280 |
+## 最终工作流
 
-全区域记录：
+- 模块三只允许一个真实区域，保留 L/H/S、时间顺序划分、滑动窗口预览、数据质量、数据集管理和历史记录。
+- 模块四只接受模块三构建的单区域数据集；单模型和“全部模型”都作用于当前区域。
+- “全部模型”固定在同一区域规划 12 个独立实验，不表示训练全部区域。
+- 模块五只支持单区域评估与比较，可从历史批次加载所选区域的成功实验。
+- 全区域评估、空间评估、空间聚合和相关入口已删除。
+- 旧客户端提交 `scope=all` 会被模块三、四、五的后端拒绝；历史列表 API 只返回 `scope=single` 记录。
 
-- Dataset：`DS-MILANO-ALL-01M5293ETPAY`（显示 ID `DS-MILANO-REGIONS-0006`）
-- Experiment：`EXP-LIGHTGBM-01M5293EXECJ`（显示 ID `EXP-MILANO-REGIONS-LIGHTGBM-0001`）
-- Batch：`BATCH-01M5293TQDB2G75Z`
-- Evaluation：`EVAL-01M5EKNJF7BCCSD2`
+## 全区域历史清理
 
-清理前数据库备份：
+清理以数据库 `scope` 和真实关联关系为依据，不使用 ID 字符串猜测范围。
+
+数据库备份：
 
 ```text
 E:\codex\codex10.16\data\backups\tn_traffic-before-all-region-cleanup-20261021T124242962609Z.db
 ```
 
-## 实际删除
+清理前全区域记录：
 
-| 数据 | 删除数 |
+- Dataset：`DS-MILANO-ALL-01M5293ETPAY`
+- Experiment：`EXP-LIGHTGBM-01M5293EXECJ`
+- Batch：`BATCH-01M5293TQDB2G75Z`
+- Evaluation：`EVAL-01M5EKNJF7BCCSD2`
+
+清理数量：
+
+| 对象 | 删除数 |
 |---|---:|
-| 数据集 | 1 |
-| 实验 | 1 |
+| 全区域数据集 | 1 |
+| 全区域实验 | 1 |
 | 区域模型 | 88 |
-| 批量任务 | 1 |
-| 评价 | 1 |
+| 全区域批次 | 1 |
+| 全区域评价 | 1 |
 | 评价成员 | 1 |
-| 预测记录 | 5,280 |
+| 预测 | 5,280 |
 | 任务 | 2 |
 | 历史 ID 映射 | 91 |
 | 审计事件 | 2 |
 | 专属文件/目录 | 91 |
 
-清理了数据集工件目录、LightGBM 模型目录、88 个区域模型文件、训练日志和模型缓存相关路径。
+清理后保留并可继续使用：
 
-## 清理后状态
-
-| 类型 | 保留数 |
+| 对象 | 保留数 |
 |---|---:|
-| 数据集 | 14 |
-| 实验 | 64 |
-| 批量任务 | 5 |
-| 评价 | 4 |
+| 单区域数据集 | 14 |
+| 单区域实验 | 64 |
+| 单区域批次 | 5 |
+| 单区域评价 | 4 |
 | 区域模型 | 64 |
 | 评价成员 | 46 |
-| 预测记录 | 13,800 |
+| 预测 | 13,800 |
 
-验证结果：
+完整性审计结果：
 
-- 所有历史 `scope` 均为 `single`。
-- 全区域数据集、实验、批次、评价数量均为 0。
+- 14 个数据集目录、64 个模型文件和 64 份训练日志与数据库逐一对应。
+- 4 个评价的预测均属于单区域，未发现跨区域引用。
 - `PRAGMA foreign_key_check` 返回 0 行。
-- 区域模型、评价成员均无孤立记录。
-- 全区域专属数据集目录、模型目录和日志文件均不存在。
-- 所有单区域历史、模型文件和评价记录均保留。
+- 当前数据库的非 `single` 数据集、实验、批次和评价均为 0。
+- 单区域历史记录、模型、日志和评价未删除。
 
-## 测试结果
+## 本轮发现并修复的问题
+
+安装版执行“全部模型”时曾返回 `database is locked`。根因是批次事务已经持有 SQLite 写锁，却在新连接中逐个分配 EXP ID，形成同一批次内的自锁。
+
+修复方式：在同一批次事务连接内调用 `readable_id_on_connection` 分配 12 个 EXP ID，保留可读 ID 持久化序列和删除后不复用规则。新增 `test_batch_single_region_transaction.py` 防止回归。
+
+## 自动化测试结果
 
 | 测试 | 结果 |
 |---|---|
-| 完整后端 pytest | 165 passed，2 条既有 ARIMA 警告 |
-| 前端类型检查 | passed |
-| 前端生产构建 | passed |
-| 单区域工作流 Playwright | 8/8 passed |
-| 模块四页面 Playwright | 16/16 passed |
-| 单区域 ARIMA 实际训练 | Completed，1 个区域、3 条真实日志；验收后已清理测试记录 |
-| 单区域 12 模型批次 | `BATCH-ZTE-370102001-MODELS-0004`，12 个成员 |
-| 单区域多模型评估 | `EVAL-01M5EK6NFGA273NE`，10 个实验成员 |
+| 完整后端 pytest | 166 passed，2 条既有 ARIMA 数值警告 |
+| 前端 TypeScript + Vite 生产构建 | passed |
+| 开发站模块四 Playwright | 16/16 passed |
+| 开发站单区域工作流 Playwright | 8/8 passed |
+| 单区域 API 验证脚本 | passed |
+| 开发站 12 模型历史批次 | 12 个成员 |
+| 开发站单区域多模型评价 | 10 个成员 |
 
-## 修改文件
+安装包完整验收最终结果：
 
+| 场景 | 实际结果 |
+|---|---|
+| 静默安装、迁移、启动 | passed |
+| 真实数据基线 | 3 个数据源、459 个有效时序区域、473 个 GIS 区域 |
+| 模块三 7 天真实范围预览 | 147 个有效测试窗口，X/Y = 24/6 |
+| 模块三数据集构建 | `DS-MILANO-ADRIANO-0001` |
+| 模块四单模型训练 | Random Forest Completed，日志和模型文件已保存 |
+| 模块五单模型评价 | 882 条真实预测 |
+| 模块四单区域全部模型批次 | `BATCH-MILANO-ADRIANO-MODELS-0001`，12/12 Completed |
+| 模块五单区域多模型评价 | 12 个成员、10,584 条真实预测 |
+| 模块四安装版 Playwright | 16/16 passed |
+| 单区域安装版 Playwright | 8/8 passed |
+| 安装版数据库审计 | 非单区域记录 0，外键异常 0 |
+| 打包后历史 ID 迁移 | 数据集 15、聚类 10、实验 96、批次 6、问题 0 |
+| 安装版卸载 | 自动卸载成功，安装目录无残留 |
+
+安装验收最终输出：
+
+```text
+INSTALL / RUN / UNINSTALL VERIFICATION PASSED
+```
+
+## Windows 安装包
+
+```text
+E:\codex\codex10.16\packaging\dist\TN-Traffic-Intelligence-Setup-3.2.0.exe
+```
+
+- 版本：3.2.0
+- 大小：1,151,953,782 字节（约 1,098.6 MB）
+- SHA256：`1D9CEA2C596ACEACB65F2257233E608990FAEFA0F52B327C2FFA03805173AEA1`
+- 安装包已包含 Python 运行时、应用依赖及已验证的 Chronos/TimesFM 默认权重。
+- 安装暂存目录中的 `frontend/dist`、批次事务修复和新增回归测试与源码哈希一致。
+
+## 主要修改文件
+
+- `backend/app/api/batches_api.py`
 - `backend/app/services/validation.py`
 - `backend/app/services/datasets.py`
 - `backend/app/api/experiments_api.py`
-- `backend/app/api/batches_api.py`
 - `backend/app/api/evaluations_api.py`
 - `backend/app/db/maintenance.py`
 - `backend/app/main.py`
@@ -102,17 +139,21 @@ E:\codex\codex10.16\data\backups\tn_traffic-before-all-region-cleanup-20261021T1
 - `frontend/src/pages/Training.tsx`
 - `frontend/src/pages/Evaluation.tsx`
 - `frontend/tests/check_single_region_workflow.mjs`
-- `frontend/tests/ui_check.mjs`
-- `backend/tests/test_m4_training_history.py`
-- `backend/tests/test_validation.py`
-- `backend/tests/test_readable_ids_and_native.py`
+- `backend/tests/test_batch_single_region_transaction.py`
 - `backend/tests/test_single_region_cleanup.py`
 - `backend/tests/verify_single_region_workflow.py`
-- `README.md`
-- `docs/USER_GUIDE.md`
-- `docs/ARCHITECTURE.md`
-- `AGENTS.md`
+- `packaging/build_package.ps1`
+- `packaging/test_install.ps1`
+- `scripts/audit_single_region_db.py`
+- `docs/FULL_REGION_CLEANUP_PLAN.md`
+- `docs/SINGLE_REGION_WORKFLOW_REPORT.md`
+
+## 开发站最终状态
+
+- `http://127.0.0.1:8077/api/health` 返回 `status=ok`、版本 3.2.0、数据库正常。
+- 当前数据库为 14 个数据集、64 个实验、5 个批次、4 个评价，全部为单区域。
+- 模块四页面检查 16/16、单区域工作流检查 8/8 再次通过。
 
 ## 未完成事项
 
-本轮要求范围内没有未完成功能。最终安装包信息将在安装验收完成后更新到本报告。
+本轮要求范围内没有未完成或未验证功能。工作区仅保留了与本任务无关、且不属于本次提交的 Word 临时文件删除状态。
