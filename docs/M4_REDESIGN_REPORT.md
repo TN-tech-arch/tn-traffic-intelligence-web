@@ -1,6 +1,6 @@
 # Module 4 预测模型训练重构报告
 
-功能提交：`2520293`
+功能提交：`afc48c6`
 日期：2026-10-21
 页面：<http://127.0.0.1:8077/training>
 
@@ -8,7 +8,8 @@
 
 - 严格两栏布局：左侧配置区与实验历史，中央当前实验详情与训练监控。
 - 两栏比例与模块三一致：左侧 `32%`，中央 `68%`。
-- 标题格式与模块三一致：`1 · 配置区（Configuration）`、`2 · 训练监控（Training Monitor）`、`3 · 当前实验详情（Current Experiment Details）`、`4 · 实验历史（Experiment History）`。
+- 左侧标题不编号：`配置区（Configuration）`、`实验历史（Experiment History）`。
+- 中央标题按顺序编号：`1 · 当前实验详情（Current Experiment Details）`、`2 · 训练监控（Training Monitor）`。
 - 删除右侧独立区域及其中的重复历史、日志和详情面板。
 - 实验历史支持数据集、算法、状态筛选和分页。
 - 每条实验历史只保留“打开”和“删除记录”两个操作。
@@ -78,8 +79,8 @@ E:\codex\codex10.16\packaging\dist\TN-Traffic-Intelligence-Setup-3.2.0.exe
 ```
 
 - 版本：`3.2.0`
-- 大小：267,851,059 bytes
-- SHA256：`B918316CDA1B5170383E5CDA8875D3AB3E314BA23CCACB8AF0CB688FF20DA558`
+- 大小：267,851,531 bytes
+- SHA256：`F2CB99B8A676F174CEDCE2ADFBEB4DC767CEEA6E2DEAAB0E51894E4C203F9D90`
 
 安装验收实际完成安装、启动、模块三预览、模块四训练、模块五评估、安装版模块四
 Playwright 回归、迁移快照重放和卸载。
