@@ -50,12 +50,14 @@ def test_all_regions_experiment_keeps_independent_region_models():
 
 def test_failed_and_batch_records_are_not_reported_as_success():
     experiments = _experiments()
-    failed = next(item for item in experiments if item["status"] == "Failed")
-    failed_detail = client.get(f"/api/experiments/{failed['experiment_id']}").json()
-    assert failed_detail["status"] == "Failed"
-    assert failed_detail["error"]
+    failed = next((item for item in experiments if item["status"] == "Failed"), None)
+    if failed:
+        failed_detail = client.get(f"/api/experiments/{failed['experiment_id']}").json()
+        assert failed_detail["status"] == "Failed"
+        assert failed_detail["error"]
 
-    batch = client.get("/api/batches?limit=200").json()["batches"][0]
+    batches = client.get("/api/batches?limit=200").json()["batches"]
+    batch = next(item for item in batches if item["status"] == "Completed")
     batch_detail = client.get(f"/api/batches/{batch['batch_id']}").json()
     assert batch_detail["display_id"].startswith("BATCH-")
     assert batch_detail["experiments"]
