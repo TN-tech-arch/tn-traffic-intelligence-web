@@ -188,6 +188,20 @@ if (-not $installedMember -or $installedMember.display_id -ne $run.experiment_id
 Write-Host ("[test] installed core: dataset={0}, experiment={1}, evaluation={2}, predictions={3}" -f `
         $dataset_id, $experiment.experiment_id, $evaluationState.evaluation_id, $evaluationState.prediction_count)
 
+Write-Host "[test] deep verification: installed Module 4 two-column UI"
+$oldUiBase = $env:TN_UI_BASE
+Push-Location (Join-Path $root "frontend")
+try {
+    $env:TN_UI_BASE = "http://127.0.0.1:8077"
+    & node "tests\check_m4_redesign.mjs"
+    if ($LASTEXITCODE -ne 0) {
+        throw "installed Module 4 Playwright regression failed"
+    }
+} finally {
+    $env:TN_UI_BASE = $oldUiBase
+    Pop-Location
+}
+
 Write-Host "[test] packaged history-ID migration against pre-migration snapshot"
 $legacyBackup = Get-ChildItem -LiteralPath (Join-Path $root "data\backups") `
     -Filter "tn_traffic-before-history-id-migration-*.db" -ErrorAction SilentlyContinue |

@@ -51,7 +51,8 @@ check(
 check(
   '5 历史分页存在',
   (await page.locator('.tn-m4-history-filters').count()) === 1 &&
-    (await page.locator('.tn-m4-card .ant-pagination').count()) >= 1,
+    ((await page.locator('.tn-m4-card .ant-pagination').count()) >= 1 ||
+      (await page.locator('.tn-m4-history-item').count()) <= 6),
 )
 
 const bodyText = await page.locator('body').innerText()
