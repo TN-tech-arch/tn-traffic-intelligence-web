@@ -10,8 +10,8 @@ from app.api.deps import create_job, raise_if_invalid
 from app.core.errors import Conflict, NotFound
 from app.core.ids import (
     batch_id as make_batch_id,
-    experiment_id as make_id,
     now_utc,
+    readable_id_on_connection,
 )
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.forecast.registry import MODELS, MODEL_BY_KEY, default_params
@@ -122,7 +122,15 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
         for model in MODELS:
             entry = per_model[model["key"]]
             config = frozen[model["key"]]
-            new_experiment = make_id(source_key, scope, model["key"], primary_region)
+            # Allocate the business ID on the transaction connection. Opening a
+            # second connection here would self-lock SQLite while this batch
+            # transaction already owns the write lock.
+            region_part = "REGIONS" if scope == "all" else (primary_region or "REGION")
+            new_experiment = readable_id_on_connection(
+                conn,
+                "EXP",
+                [source_key, region_part, model["key"]],
+            )
             region_exp_ids = {region_ids[0]: new_experiment}
             errors = entry["errors"]
             status = "Queued"

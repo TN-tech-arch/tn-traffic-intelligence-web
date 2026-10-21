@@ -62,6 +62,32 @@ foreach ($removedField in @("frequency", "aggregation", "label")) {
 $index = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8077/" -TimeoutSec 20
 Write-Host "[test] installed UI served: HTTP $($index.StatusCode), $($index.Content.Length) bytes"
 
+Write-Host "[test] deep verification: all-region requests are rejected"
+$rejectedAllPreview = @{
+    source_key = "milano"
+    scope = "all"
+    region_id = "ADRIANO"
+    input_length = 24
+    output_length = 6
+    step = 1
+    train_ratio = 0.7
+    val_ratio = 0.15
+    test_ratio = 0.15
+    missing_mode = "automatic"
+    scaling = "standard"
+}
+try {
+    Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/datasets/preview" `
+        -ContentType "application/json" -Body (@{ values = $rejectedAllPreview } | ConvertTo-Json -Depth 6) `
+        -TimeoutSec 30 | Out-Null
+    throw "installed Module 3 unexpectedly accepted a full-region preview"
+} catch {
+    $statusCode = [int]$_.Exception.Response.StatusCode
+    if ($statusCode -notin @(409, 422)) {
+        throw "installed Module 3 full-region rejection returned HTTP $statusCode instead of 409/422"
+    }
+}
+
 Write-Host "[test] deep verification: Module 3 preview/window navigation"
 $previewValues = @{
     source_key = "milano"
@@ -77,6 +103,8 @@ $previewValues = @{
     test_ratio = 0.15
     missing_mode = "automatic"
     scaling = "standard"
+    time_start = "2013-11-01 00:00:00"
+    time_end = "2013-11-07 23:50:00"
 }
 $previewBody = @{ values = $previewValues } | ConvertTo-Json -Depth 6
 $preview = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/datasets/preview" `
@@ -117,8 +145,8 @@ if ($built.label -ne $dataset_id) {
 if ($built.display_id -ne $dataset_id) {
     throw "installed dataset display_id is not the persisted DS business ID"
 }
-if ($built.time_start -ne "2013-11-01 00:00:00" -or $built.time_end -ne "2014-01-01 23:50:00") {
-    throw "installed dataset did not default to the full Milano range"
+if ($built.time_start -ne "2013-11-01 00:00:00" -or $built.time_end -ne "2013-11-07 23:50:00") {
+    throw "installed dataset did not preserve the selected Milano range"
 }
 $datasetList = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/datasets?include_archived=true" -TimeoutSec 20
 $installedDataset = $datasetList.datasets | Where-Object { $_.dataset_id -eq $dataset_id } | Select-Object -First 1
@@ -188,6 +216,89 @@ if (-not $installedMember -or $installedMember.display_id -ne $run.experiment_id
 Write-Host ("[test] installed core: dataset={0}, experiment={1}, evaluation={2}, predictions={3}" -f `
         $dataset_id, $experiment.experiment_id, $evaluationState.evaluation_id, $evaluationState.prediction_count)
 
+Write-Host "[test] deep verification: one-region all-models batch"
+$batchBody = @{
+    dataset_id = $dataset_id
+    scope = "single"
+    model_configs = @{}
+    execution_policy = @{
+        continue_on_error = $true
+        skip_unavailable_after_confirmation = $true
+        max_concurrent_gpu_jobs = 1
+    }
+} | ConvertTo-Json -Depth 8
+$batch = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/batches/run" `
+    -ContentType "application/json" -Body $batchBody -TimeoutSec 120
+if ($batch.scope -ne "single" -or $batch.region_count -ne 1 -or `
+    $batch.algorithm_count -ne 12 -or $batch.planned_region_model_tasks -ne 12 -or `
+    @($batch.experiments).Count -ne 12) {
+    throw "installed all-models batch did not plan exactly 12 models for one region"
+}
+$batchState = $null
+for ($i = 0; $i -lt 1800; $i++) {
+    Start-Sleep -Seconds 2
+    $batchState = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/batches/$($batch.batch_id)" -TimeoutSec 30
+    $terminal = @("Completed", "Partial", "Failed", "Stopped", "Stopping")
+    if ($batchState.status -in $terminal -and
+        @($batchState.experiments | Where-Object { $_.status -in @("Queued", "Running") }).Count -eq 0) {
+        break
+    }
+}
+if (-not $batchState -or $batchState.status -notin @("Completed", "Partial")) {
+    throw "installed one-region all-models batch did not finish successfully: $($batchState.status)"
+}
+if ($batchState.scope -ne "single" -or $batchState.region_count -ne 1 -or
+    @($batchState.experiments).Count -ne 12 -or
+    @($batchState.region_summary | Where-Object { $_.region_id -ne "ADRIANO" }).Count -ne 0) {
+    throw "installed all-models batch contains an invalid region scope or member count"
+}
+$successfulBatchExperiments = @($batchState.experiments | Where-Object { $_.status -eq "Completed" })
+if ($successfulBatchExperiments.Count -ne 12) {
+    throw "installed all-models batch completed $($successfulBatchExperiments.Count) of 12 models"
+}
+Write-Host ("[test] installed batch: {0}, status={1}, models={2}, completed={3}" -f `
+        $batchState.display_id, $batchState.status, @($batchState.experiments).Count,
+        $successfulBatchExperiments.Count)
+
+Write-Host "[test] deep verification: Module 5 single-region multi-model evaluation"
+$multiEvaluationBody = @{
+    dataset_id = $dataset_id
+    scope = "single"
+    region_id = "ADRIANO"
+    experiment_ids = @($successfulBatchExperiments | ForEach-Object { $_.experiment_id })
+    test_selection = "full"
+} | ConvertTo-Json -Depth 6
+$multiEvaluation = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/evaluations/run" `
+    -ContentType "application/json" -Body $multiEvaluationBody -TimeoutSec 120
+$multiEvaluationState = $null
+for ($i = 0; $i -lt 300; $i++) {
+    Start-Sleep -Seconds 2
+    $multiEvaluationState = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/evaluations/$($multiEvaluation.evaluation_id)" -TimeoutSec 30
+    if ($multiEvaluationState.status -in @("Completed", "Failed", "Stopped")) { break }
+}
+if ($multiEvaluationState.status -ne "Completed" -or $multiEvaluationState.prediction_count -le 0) {
+    throw "installed Module 5 multi-model evaluation failed or produced no predictions"
+}
+if ($multiEvaluationState.scope -ne "single" -or $multiEvaluationState.region_id -ne "ADRIANO" -or
+    @($multiEvaluationState.experiments).Count -ne $successfulBatchExperiments.Count) {
+    throw "installed Module 5 multi-model evaluation does not contain the expected single-region members"
+}
+Write-Host ("[test] installed multi-model evaluation: {0}, members={1}, predictions={2}" -f `
+        $multiEvaluationState.evaluation_id, @($multiEvaluationState.experiments).Count,
+        $multiEvaluationState.prediction_count)
+
+Write-Host "[test] deep verification: all history APIs expose only single-region records"
+$installedDatasets = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/datasets?include_archived=true" -TimeoutSec 30
+$installedExperiments = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/experiments?limit=500" -TimeoutSec 30
+$installedBatches = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/batches?limit=200" -TimeoutSec 30
+$installedEvaluations = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/evaluations?limit=200" -TimeoutSec 30
+if (@($installedDatasets.datasets | Where-Object { $_.scope -ne "single" }).Count -ne 0 -or
+    @($installedExperiments.experiments | Where-Object { $_.scope -ne "single" }).Count -ne 0 -or
+    @($installedBatches.batches | Where-Object { $_.scope -ne "single" }).Count -ne 0 -or
+    @($installedEvaluations.evaluations | Where-Object { $_.scope -ne "single" }).Count -ne 0) {
+    throw "installed history APIs expose a non-single-region record"
+}
+
 Write-Host "[test] deep verification: installed Module 4 two-column UI"
 $oldUiBase = $env:TN_UI_BASE
 Push-Location (Join-Path $root "frontend")
@@ -197,10 +308,31 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "installed Module 4 Playwright regression failed"
     }
+    & node "tests\check_single_region_workflow.mjs"
+    if ($LASTEXITCODE -ne 0) {
+        throw "installed single-region Playwright regression failed"
+    }
 } finally {
     $env:TN_UI_BASE = $oldUiBase
     Pop-Location
 }
+
+Write-Host "[test] database-level full-region cleanup audit"
+$oldInstalledDataDir = $env:TN_DATA_DIR
+$env:TN_DATA_DIR = Join-Path $Target "data"
+try {
+    $scopeAuditJson = & $python (Join-Path $root "scripts\audit_single_region_db.py")
+} finally {
+    $env:TN_DATA_DIR = $oldInstalledDataDir
+}
+if ($LASTEXITCODE -ne 0) { throw "installed database scope audit failed to execute" }
+$scopeAudit = ($scopeAuditJson | Select-Object -Last 1) | ConvertFrom-Json
+if ($scopeAudit.datasets -ne 0 -or $scopeAudit.experiments -ne 0 -or
+    $scopeAudit.batches -ne 0 -or $scopeAudit.evaluations -ne 0 -or
+    $scopeAudit.foreign_key_violations -ne 0) {
+    throw "installed database contains full-region or orphaned records"
+}
+Write-Host "[test] installed database cleanup audit: zero non-single records, zero foreign-key violations"
 
 Write-Host "[test] packaged history-ID migration against pre-migration snapshot"
 $legacyBackup = Get-ChildItem -LiteralPath (Join-Path $root "data\backups") `

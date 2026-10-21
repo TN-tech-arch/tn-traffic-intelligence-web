@@ -33,7 +33,7 @@ check(
   `datasets=${datasets.count}, experiments=${experiments.count}, batches=${batches.count}, evaluations=${evaluations.count}`,
 )
 
-await page.goto(`${BASE}/dataset`, { waitUntil: 'networkidle' })
+await page.goto(`${BASE}/dataset`, { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('[data-field="m3.region_id"]', { timeout: 60000 })
 check(
   '2 Module 3 exposes region but no scope selector',

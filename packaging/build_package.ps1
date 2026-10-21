@@ -5,7 +5,8 @@
 # Produces: packaging\dist\TN-Traffic-Intelligence-Setup-<version>.exe
 param(
     [string]$Version = "3.2.0",
-    [switch]$SkipSitePackages
+    [switch]$SkipSitePackages,
+    [switch]$SkipModelCache
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +54,18 @@ New-Item -ItemType Directory -Force -Path (Join-Path $appDir "frontend") | Out-N
 Copy-Item -LiteralPath (Join-Path $root "frontend\dist") -Destination (Join-Path $appDir "frontend\dist") -Recurse -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $appDir "data") | Out-Null
 Copy-Item -LiteralPath (Join-Path $root "data\raw") -Destination (Join-Path $appDir "data\raw") -Recurse -Force
+if (-not $SkipModelCache) {
+    $modelCacheSource = Join-Path $root "models_cache"
+    if (Test-Path $modelCacheSource) {
+        Write-Host "[pack] bundling downloaded foundation-model checkpoints"
+        $modelCacheTarget = Join-Path $appDir "models_cache"
+        New-Item -ItemType Directory -Force -Path $modelCacheTarget | Out-Null
+        robocopy $modelCacheSource $modelCacheTarget /E /NFL /NDL /NJH /NJS /NP /XF *.pyc /XD __pycache__ | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "model-cache robocopy failed with exit code $LASTEXITCODE" }
+    } else {
+        Write-Host "[pack] model cache not found; installer will require prefetch_models.ps1"
+    }
+}
 foreach ($file in @("README.md", "PROJECT_SPEC.md", "CODEX_START.md", "ACCEPTANCE_CHECKLIST.md",
                     "CHANGES_v3_1.md", "DATA_MANIFEST_SHA256.txt", "requirements-core.txt",
                     "requirements-ml.txt", "requirements-models.txt", "requirements.lock.txt")) {
