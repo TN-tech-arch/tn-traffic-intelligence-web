@@ -177,6 +177,15 @@ def run_experiment(
             break
         total = len(regions)
         base_percent = 100.0 * index / total
+        region_started_at = now_utc()
+        get_connection().execute(
+            """
+            UPDATE experiment_region_models
+            SET status='Running', started_at=COALESCE(started_at, ?)
+            WHERE experiment_id=? AND region_id=?
+            """,
+            (region_started_at, experiment_id, region_id),
+        )
         try:
             region = _region_context(bundle, region_id)
             train_batch = _region_batch(bundle, region_id, "train")
@@ -250,6 +259,7 @@ def run_experiment(
                     status=excluded.status, model_artifact_ref=excluded.model_artifact_ref,
                     checkpoint_ref=excluded.checkpoint_ref, metrics_json=excluded.metrics_json,
                     history_json=excluded.history_json, logs_ref=excluded.logs_ref, error=excluded.error,
+                    started_at=COALESCE(experiment_region_models.started_at, excluded.started_at),
                     ended_at=excluded.ended_at
                 """,
                 (
@@ -263,7 +273,7 @@ def run_experiment(
                     json_dumps(result.history),
                     str(experiment_log_path(experiment_id)),
                     None,
-                    now_utc(),
+                    region_started_at,
                     now_utc(),
                 ),
             )
@@ -295,10 +305,11 @@ def run_experiment(
                     (experiment_id, region_id, region_experiment_id, status, error, started_at, ended_at)
                 VALUES (?,?,?,?,?,?,?)
                 ON CONFLICT(experiment_id, region_id) DO UPDATE SET status='Failed', error=excluded.error,
+                    started_at=COALESCE(experiment_region_models.started_at, excluded.started_at),
                     ended_at=excluded.ended_at
                 """,
                 (experiment_id, region_id, region_experiment_ids.get(region_id), "Failed",
-                 f"{type(exc).__name__}: {exc}", now_utc(), now_utc()),
+                 f"{type(exc).__name__}: {exc}", region_started_at, now_utc()),
             )
             append_log(experiment_id, "error", f"region {region_id} failed: {exc}",
                        region_id=region_id, traceback=traceback.format_exc(limit=3))

@@ -88,6 +88,8 @@ def _experiment_public(row, *, include_logs: bool = False) -> dict[str, Any]:
                 "checkpoint_ref": r["checkpoint_ref"],
                 "error": r["error"],
                 "artifact_ref": r["model_artifact_ref"],
+                "started_at": r["started_at"],
+                "ended_at": r["ended_at"],
             }
             for r in query_all(
                 "SELECT * FROM experiment_region_models WHERE experiment_id=? ORDER BY region_id",

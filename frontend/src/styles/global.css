@@ -186,6 +186,280 @@ body {
   grid-template-columns: minmax(300px, 32fr) minmax(0, 68fr);
 }
 
+/* Module 4: configuration/history and experiment detail/monitor */
+.tn-m4-layout {
+  display: grid;
+  grid-template-columns: minmax(390px, 31fr) minmax(0, 69fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.tn-m4-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tn-m4-card {
+  min-width: 0;
+}
+
+.tn-m4-card .ant-card-head-title {
+  min-width: 0;
+}
+
+.tn-m4-dataset-summary {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--tn-line);
+  border-radius: 7px;
+  background: #f7faff;
+  color: var(--tn-text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tn-m4-dataset-summary > div {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.tn-m4-dataset-summary strong {
+  color: var(--tn-text);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.tn-m4-preflight {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid #b7e3c7;
+  border-radius: 7px;
+  background: #f4fff8;
+  color: #246c45;
+  font-size: 11.5px;
+}
+
+.tn-m4-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tn-m4-history-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tn-m4-history-filters .ant-select {
+  min-width: 0;
+}
+
+.tn-m4-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tn-m4-history-item {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--tn-line);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.tn-m4-history-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tn-m4-history-id {
+  min-width: 0;
+  color: var(--tn-text);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.tn-m4-history-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, auto);
+  gap: 3px 10px;
+  margin-top: 5px;
+  color: var(--tn-text-soft);
+  font-size: 10.5px;
+}
+
+.tn-m4-history-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tn-m4-history-meta span:last-child {
+  grid-column: 1 / -1;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+}
+
+.tn-m4-history-meta b {
+  margin-right: 5px;
+  color: #64728d;
+  font-weight: 600;
+}
+
+.tn-m4-history-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.tn-m4-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(210px, 2fr) minmax(105px, 1fr) minmax(95px, 0.8fr) minmax(175px, 1.35fr) minmax(95px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.tn-m4-detail-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.tn-m4-detail-item > span:first-child {
+  color: var(--tn-text-soft);
+  font-size: 11px;
+}
+
+.tn-m4-detail-item > strong {
+  color: var(--tn-text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.tn-m4-monitor {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tn-m4-progress-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tn-m4-progress-head > span {
+  color: var(--tn-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tn-m4-monitor-table {
+  min-width: 0;
+}
+
+.tn-m4-monitor-table .ant-table-cell {
+  vertical-align: top;
+}
+
+.tn-m4-monitor-table .ant-table-cell:first-child {
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 10.5px;
+}
+
+.tn-m4-monitor-tabs {
+  min-width: 0;
+}
+
+.tn-m4-process-title {
+  margin-bottom: 7px;
+  color: var(--tn-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tn-m4-process-note {
+  padding: 16px;
+  border: 1px dashed var(--tn-line);
+  border-radius: 8px;
+  background: #fafcff;
+  color: var(--tn-text-soft);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.tn-m4-log-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.tn-m4-log-console {
+  max-height: 380px;
+  overflow: auto;
+  padding: 11px 12px;
+  border: 1px solid #142746;
+  border-radius: 8px;
+  background: #08182f;
+  color: #e4ecfb;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 10.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tn-m4-log-time {
+  color: #8fa8d2;
+}
+
+.tn-m4-log-level {
+  color: #73d6a3;
+  font-weight: 700;
+}
+
+@media (max-width: 1200px) {
+  .tn-m4-layout {
+    grid-template-columns: minmax(360px, 38fr) minmax(0, 62fr);
+  }
+
+  .tn-m4-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .tn-m4-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .tn-m4-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1500px) {
   .tn-three-pane.tn-three-pane-m1 {
     grid-template-columns: minmax(260px, 26fr) minmax(340px, 39fr) minmax(330px, 35fr);

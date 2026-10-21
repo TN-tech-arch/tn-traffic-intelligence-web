@@ -114,14 +114,34 @@ def test_region_experiment_ids_and_persistent_mapping_are_complete():
     assert all(value and value.startswith("EXP-") for value in region_ids)
     assert len(region_ids) == len(set(region_ids))
 
-    mappings = query_one("SELECT COUNT(*) AS n FROM history_id_migrations")["n"]
-    assert mappings == (
-        query_one("SELECT COUNT(*) AS n FROM dataset_versions")["n"]
-        + query_one("SELECT COUNT(*) AS n FROM clusters")["n"]
-        + query_one("SELECT COUNT(*) AS n FROM experiments")["n"]
-        + len(region_rows)
-        + query_one("SELECT COUNT(*) AS n FROM batches")["n"]
-    )
+    for resource_type, table, internal_column in (
+        ("dataset", "dataset_versions", "dataset_id"),
+        ("cluster", "clusters", "cluster_run_id"),
+        ("experiment", "experiments", "experiment_id"),
+        ("batch", "batches", "batch_id"),
+    ):
+        changed_rows = query_all(
+            f"SELECT {internal_column} AS internal_id, display_id FROM {table} "
+            f"WHERE display_id IS NOT NULL AND display_id != {internal_column}"
+        )
+        for row in changed_rows:
+            mapping = query_one(
+                "SELECT display_id FROM history_id_migrations "
+                "WHERE resource_type=? AND internal_id=?",
+                (resource_type, row["internal_id"]),
+            )
+            assert mapping is not None
+            assert mapping["display_id"] == row["display_id"]
+    for row in region_rows:
+        if row["region_experiment_id"] == row["experiment_id"]:
+            continue
+        mapping = query_one(
+            "SELECT display_id FROM history_id_migrations "
+            "WHERE resource_type='region_experiment' AND internal_id=?",
+            (f"{row['experiment_id']}|{row['region_id']}",),
+        )
+        assert mapping is not None
+        assert mapping["display_id"] == row["region_experiment_id"]
     assert query_one("SELECT COUNT(*) AS n FROM history_id_migration_issues")["n"] == 0
 
 

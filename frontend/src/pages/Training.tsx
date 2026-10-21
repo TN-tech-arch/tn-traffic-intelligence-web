@@ -1,33 +1,75 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Button, Card, Collapse, Descriptions, Popconfirm, Progress, Select, Table, Tabs, Tag, Tooltip, message,
+  Alert,
+  Button,
+  Card,
+  Collapse,
+  Pagination,
+  Popconfirm,
+  Progress,
+  Select,
+  Table,
+  Tabs,
+  Tag,
+  Tooltip,
+  message,
 } from 'antd'
-import { useNavigate } from 'react-router-dom'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
-import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
+import { EmptyState, ModuleHeader } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
 import BiLabel from '../components/BiLabel'
 import { LineChart } from '../components/Charts'
 import { useGroupValidation, useSchema } from '../validation/useValidation'
-import type { Issue as IssueType } from '../api/client'
-import { fieldDisabledReason, isVisible, visibleFields, type FieldSpec, type Values } from '../validation/engine'
+import { fieldDisabledReason, visibleFields, type Values } from '../validation/engine'
 import {
-  ACTION_LABELS, MODULE_META, algorithmCategoryLabel, bilingual,
-  frequencyLabel, missingModeLabel, modeLabel, scalingLabel, scopeLabel,
-  sourceDisplayName, unitDisplayLabel,
+  MODULE_META,
+  frequencyLabel,
+  missingModeLabel,
+  modeLabel,
+  scalingLabel,
+  scopeLabel,
+  sourceDisplayName,
+  statusLabel,
+  unitDisplayLabel,
 } from '../i18n/terms'
 
 const ALL_MODELS = 'all_models'
+const HISTORY_PAGE_SIZE = 6
+const RUNNING_STATUSES = ['Queued', 'Running', 'Stopping']
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '—'
+  return String(value).replace('T', ' ').replace(/(\.\d+)?Z$/, '')
+}
+
+function durationLabel(start?: string | null, end?: string | null) {
+  if (!start) return '—'
+  const started = Date.parse(start)
+  const ended = end ? Date.parse(end) : Date.now()
+  if (!Number.isFinite(started) || !Number.isFinite(ended)) return '—'
+  const seconds = Math.max(0, (ended - started) / 1000)
+  if (seconds < 60) return `${seconds.toFixed(1)} 秒`
+  const minutes = Math.floor(seconds / 60)
+  const remain = Math.round(seconds % 60)
+  if (minutes < 60) return `${minutes} 分 ${remain} 秒`
+  const hours = Math.floor(minutes / 60)
+  return `${hours} 小时 ${minutes % 60} 分`
+}
+
+function progressStatus(status?: string) {
+  if (status === 'Failed' || status === 'Interrupted') return 'exception'
+  if (status === 'Completed') return 'success'
+  return 'normal'
+}
 
 export default function Training() {
   const [messageApi, contextHolder] = message.useMessage()
-  const navigate = useNavigate()
   const { schema, error: schemaError } = useSchema()
   const [datasets, setDatasets] = useState<any[]>([])
-  const [datasetId, setDatasetId] = useState<string>('')
+  const [datasetId, setDatasetId] = useState('')
   const [dataset, setDataset] = useState<any>(null)
-  const [algorithm, setAlgorithm] = useState<string>('arima')
+  const [algorithm, setAlgorithm] = useState('arima')
   const [params, setParams] = useState<Values>({})
   const [allParams, setAllParams] = useState<Record<string, Values>>({})
   const [customized, setCustomized] = useState<Record<string, boolean>>({})
@@ -35,52 +77,50 @@ export default function Training() {
   const [batch, setBatch] = useState<any>(null)
   const [experiment, setExperiment] = useState<any>(null)
   const [experiments, setExperiments] = useState<any[]>([])
-  const [batches, setBatches] = useState<any[]>([])
   const [logs, setLogs] = useState<any[]>([])
-  const [tab, setTab] = useState('overview')
-  const [monitorTab, setMonitorTab] = useState('monitor')
+  const [monitorTab, setMonitorTab] = useState('process')
   const [busy, setBusy] = useState(false)
-  const [serverIssues, setServerIssues] = useState<IssueType[]>([])
+  const [loadingId, setLoadingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [serverIssues, setServerIssues] = useState<Issue[]>([])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [historyDataset, setHistoryDataset] = useState('all')
+  const [historyAlgorithm, setHistoryAlgorithm] = useState('all')
+  const [historyStatus, setHistoryStatus] = useState('all')
+  const [historyPage, setHistoryPage] = useState(1)
 
   const models = schema?.models ?? []
-  const activeModel = models.find((m) => m.key === algorithm)
+  const activeModel = models.find((model) => model.key === algorithm)
   const isAllModels = algorithm === ALL_MODELS
+  const activeRun = experiment ?? batch
+  const activeIsBatch = !experiment && Boolean(batch)
 
   const defaultsFor = useCallback(
     (key: string): Values => {
-      const model = models.find((m) => m.key === key)
+      const model = models.find((item) => item.key === key)
       if (!model) return {}
-      const values: Values = {}
-      model.params.forEach((spec) => {
-        values[spec.key] = spec.default
-      })
-      return values
+      return Object.fromEntries(model.params.map((spec) => [spec.key, spec.default]))
     },
     [models],
   )
 
   useEffect(() => {
     if (!models.length) return
-    setParams((prev) => (Object.keys(prev).length ? prev : defaultsFor('arima')))
-    setAllParams((prev) => {
-      if (Object.keys(prev).length) return prev
-      const next: Record<string, Values> = {}
-      models.forEach((model) => {
-        next[model.key] = defaultsFor(model.key)
-      })
-      return next
+    setParams((previous) => (Object.keys(previous).length ? previous : defaultsFor('arima')))
+    setAllParams((previous) => {
+      if (Object.keys(previous).length) return previous
+      return Object.fromEntries(models.map((model) => [model.key, defaultsFor(model.key)]))
     })
-  }, [models, defaultsFor])
+  }, [defaultsFor, models])
 
   const loadDatasets = useCallback(() => {
     api
       .get<any>(ENDPOINTS.datasetList)
       .then((data) => {
-        const built = data.datasets.filter((d: any) => d.status !== 'Archived')
+        const built = data.datasets.filter((item: any) => item.status !== 'Archived')
         setDatasets(built)
-        setDatasetId((prev) => {
-          if (prev && built.some((d: any) => d.dataset_id === prev)) return prev
+        setDatasetId((previous) => {
+          if (previous && built.some((item: any) => item.dataset_id === previous)) return previous
           return built[0]?.dataset_id ?? ''
         })
       })
@@ -88,8 +128,10 @@ export default function Training() {
   }, [])
 
   const loadHistory = useCallback(() => {
-    api.get<any>(ENDPOINTS.experimentList).then((data) => setExperiments(data.experiments)).catch(() => undefined)
-    api.get<any>(ENDPOINTS.batchList).then((data) => setBatches(data.batches)).catch(() => undefined)
+    api
+      .get<any>(`${ENDPOINTS.experimentList}?limit=500`)
+      .then((data) => setExperiments(data.experiments))
+      .catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -98,49 +140,80 @@ export default function Training() {
   }, [loadDatasets, loadHistory])
 
   useEffect(() => {
-    if (!datasetId) return
-    api.get<any>(ENDPOINTS.datasetGet(datasetId)).then(setDataset).catch(() => setDataset(null))
+    if (!datasetId) {
+      setDataset(null)
+      return
+    }
+    api
+      .get<any>(ENDPOINTS.datasetGet(datasetId))
+      .then(setDataset)
+      .catch(() => setDataset(null))
   }, [datasetId])
 
-  // live polling for the running experiment / batch
   useEffect(() => {
-    const running = experiment && ['Queued', 'Running', 'Stopping'].includes(experiment.status)
+    const experimentRunning = experiment && RUNNING_STATUSES.includes(experiment.status)
     const batchRunning = batch && ['Running', 'Created', 'Stopping'].includes(batch.status)
-    if (!running && !batchRunning) return
+    if (!experimentRunning && !batchRunning) return
     const timer = window.setInterval(async () => {
-      if (experiment && running) {
+      if (experiment && RUNNING_STATUSES.includes(experiment.status)) {
         try {
           const data = await api.get<any>(ENDPOINTS.experimentGet(experiment.experiment_id))
           setExperiment(data)
-          if (!['Queued', 'Running', 'Stopping'].includes(data.status)) loadHistory()
+          if (!RUNNING_STATUSES.includes(data.status)) loadHistory()
         } catch {
-          /* keep previous state */
+          // Keep the last confirmed backend state.
         }
       }
-      if (batch && batchRunning) {
+      if (batch && ['Running', 'Created', 'Stopping'].includes(batch.status)) {
         try {
           const data = await api.get<any>(ENDPOINTS.batchGet(batch.batch_id))
           setBatch(data)
           if (!['Running', 'Created', 'Stopping'].includes(data.status)) loadHistory()
         } catch {
-          /* ignore */
+          // Keep the last confirmed backend state.
         }
       }
     }, 2500)
     return () => window.clearInterval(timer)
-  }, [experiment, batch, loadHistory])
+  }, [batch, experiment, loadHistory])
 
   useEffect(() => {
-    if (!experiment) {
+    if (experiment) {
+      api
+        .get<any>(ENDPOINTS.experimentLogs(experiment.experiment_id))
+        .then((data) => setLogs(data.logs ?? []))
+        .catch(() => setLogs([]))
+      return
+    }
+    if (!batch?.experiments?.length) {
       setLogs([])
       return
     }
-    api
-      .get<any>(ENDPOINTS.experimentLogs(experiment.experiment_id))
-      .then((data) => setLogs(data.logs))
-      .catch(() => setLogs([]))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [experiment?.experiment_id, experiment?.status, experiment?.progress?.percent])
+    let active = true
+    Promise.all(
+      batch.experiments.map(async (item: any) => {
+        try {
+          const data = await api.get<any>(ENDPOINTS.experimentLogs(item.experiment_id))
+          return (data.logs ?? []).map((entry: any) => ({
+            ...entry,
+            experiment_display_id: item.display_id ?? item.experiment_id,
+          }))
+        } catch {
+          return []
+        }
+      }),
+    ).then((groups) => {
+      if (!active) return
+      setLogs(
+        groups
+          .flat()
+          .sort((left, right) => String(left.at ?? '').localeCompare(String(right.at ?? ''))),
+      )
+    })
+    return () => {
+      active = false
+    }
+  }, [batch, experiment])
 
   const singleValidation = useGroupValidation({
     specs: (activeModel?.params ?? []).filter((spec) => spec.level !== 'advanced'),
@@ -168,56 +241,157 @@ export default function Training() {
     values: {},
     pathPrefix: 'all_models',
     remote: datasetId
-      ? { kind: 'all_models', values: allParams, context: { dataset_id: datasetId, region_count: dataset?.region_count, train_samples: dataset?.window_counts?.train } }
+      ? {
+          kind: 'all_models',
+          values: allParams,
+          context: {
+            dataset_id: datasetId,
+            region_count: dataset?.region_count,
+            train_samples: dataset?.window_counts?.train,
+          },
+        }
       : null,
   })
 
-  const activeIssues: IssueType[] = isAllModels ? allValidation.issues : singleValidation.issues
-  const activeErrors = activeIssues.filter((i) => i.severity === 'error')
-  const activeWarnings = activeIssues.filter((i) => i.severity === 'warning')
-  const runnable = activeErrors.length === 0
+  const activeIssues: Issue[] = isAllModels ? allValidation.issues : singleValidation.issues
+  const activeErrors = activeIssues.filter((item) => item.severity === 'error')
+  const activeWarnings = activeIssues.filter((item) => item.severity === 'warning')
+  const runnable = Boolean(models.length && datasetId && activeErrors.length === 0)
+
+  const algorithmOptions = [
+    { value: ALL_MODELS, label: '全部模型（All Models，12 种）' },
+    ...models.map((model) => ({
+      value: model.key,
+      label: `${model.label} · ${model.category_label_zh}`,
+    })),
+  ]
+
+  const historyDatasetOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          experiments.map((item) => [
+            item.dataset_id,
+            { value: item.dataset_id, label: item.dataset_display_id ?? item.dataset_id },
+          ]),
+        ).values(),
+      ),
+    [experiments],
+  )
+
+  const historyAlgorithmOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          experiments.map((item) => [
+            item.algorithm_key,
+            { value: item.algorithm_key, label: item.algorithm_label },
+          ]),
+        ).values(),
+      ).sort((left, right) => left.label.localeCompare(right.label)),
+    [experiments],
+  )
+
+  const historyStatusOptions = useMemo(
+    () =>
+      Array.from(new Set(experiments.map((item) => item.status)))
+        .sort()
+        .map((value) => ({ value, label: statusLabel(value) })),
+    [experiments],
+  )
+
+  const filteredExperiments = useMemo(
+    () =>
+      experiments.filter(
+        (item) =>
+          (historyDataset === 'all' || item.dataset_id === historyDataset) &&
+          (historyAlgorithm === 'all' || item.algorithm_key === historyAlgorithm) &&
+          (historyStatus === 'all' || item.status === historyStatus),
+      ),
+    [experiments, historyAlgorithm, historyDataset, historyStatus],
+  )
+
+  useEffect(() => {
+    setHistoryPage(1)
+  }, [historyDataset, historyAlgorithm, historyStatus])
+
+  useEffect(() => {
+    const pages = Math.max(1, Math.ceil(filteredExperiments.length / HISTORY_PAGE_SIZE))
+    if (historyPage > pages) setHistoryPage(pages)
+  }, [filteredExperiments.length, historyPage])
+
+  const visibleExperiments = filteredExperiments.slice(
+    (historyPage - 1) * HISTORY_PAGE_SIZE,
+    historyPage * HISTORY_PAGE_SIZE,
+  )
+
+  const epochHistory = useMemo(() => {
+    const regions = experiment?.region_models ?? []
+    return regions.find((item: any) => item.history?.epoch?.length)?.history ?? null
+  }, [experiment])
+
+  const regionRows = experiment?.region_models ?? []
+  const batchRegionRows = batch?.region_summary ?? []
+  const activeStatus = activeRun?.status ?? ''
+  const currentProgress = activeIsBatch
+    ? Math.round(
+        (100 *
+          ((batch?.task_summary?.completed ?? 0) +
+            (batch?.task_summary?.failed ?? 0) +
+            (batch?.task_summary?.skipped ?? 0))) /
+          Math.max(1, batch?.experiments?.length ?? 12),
+      )
+    : Math.round(experiment?.progress?.percent ?? 0)
+  const currentStartedAt = activeRun?.started_at ?? activeRun?.created_at
+  const currentEndedAt = activeRun?.ended_at
+  const currentRegionsDone =
+    (activeRun?.region_completed ?? 0) + (activeRun?.region_failed ?? 0)
+
+  const buildModelConfigs = () => {
+    const configs: Record<string, any> = {}
+    Object.entries(allParams).forEach(([key, value]) => {
+      const model = models.find((item) => item.key === key)
+      configs[key] = { mode: model?.default_mode, params: value }
+    })
+    return configs
+  }
 
   const runPreflight = async () => {
     if (!datasetId) {
-      messageApi.warning('请先选择一个已构建的数据集。')
+      messageApi.warning('请先选择一个已构建数据集。')
       return
     }
     setBusy(true)
     setServerIssues([])
     try {
       const payload = isAllModels
-        ? { dataset_id: datasetId, algorithm_choice: 'all_models', model_configs: buildModelConfigs() }
+        ? {
+            dataset_id: datasetId,
+            algorithm_choice: ALL_MODELS,
+            model_configs: buildModelConfigs(),
+          }
         : {
             dataset_id: datasetId,
             algorithm_key: algorithm,
             mode: activeModel?.default_mode,
             params,
           }
-      const data = await api.post<any>(ENDPOINTS.preflight, payload)
-      setPreflight(data)
-    } catch (err) {
-      if (err instanceof ApiError) setServerIssues(err.issues)
-      else messageApi.error(String(err))
+      setPreflight(await api.post<any>(ENDPOINTS.preflight, payload))
+    } catch (error) {
+      if (error instanceof ApiError) setServerIssues(error.issues)
+      else messageApi.error(String(error))
     } finally {
       setBusy(false)
     }
   }
 
-  const buildModelConfigs = () => {
-    const configs: Record<string, any> = {}
-    Object.entries(allParams).forEach(([key, value]) => {
-      const model = models.find((m) => m.key === key)
-      configs[key] = { mode: model?.default_mode, params: value }
-    })
-    return configs
-  }
-
   const runSingle = async () => {
     if (!runnable) {
-      messageApi.error('存在参数错误，无法运行。请查看字段下方提示（服务器还会再次校验）。')
+      messageApi.error('当前参数未通过校验，无法开始训练。')
       return
     }
     setBusy(true)
+    setServerIssues([])
     try {
       const created = await api.post<any>(ENDPOINTS.experimentRun, {
         dataset_id: datasetId,
@@ -225,16 +399,19 @@ export default function Training() {
         mode: activeModel?.default_mode,
         params,
       })
-      messageApi.success(`实验 ${created.display_id ?? created.experiment_id} 已提交（${created.region_count} 个区域）`)
       const data = await api.get<any>(ENDPOINTS.experimentGet(created.experiment_id))
       setExperiment(data)
-      setMonitorTab('monitor')
+      setBatch(null)
+      setMonitorTab('process')
       loadHistory()
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setServerIssues(err.issues)
-        messageApi.error(`后端拒绝：${err.message}`)
-      } else messageApi.error(String(err))
+      messageApi.success(`实验 ${created.display_id ?? created.experiment_id} 已提交。`)
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setServerIssues(error.issues)
+        messageApi.error(`后端拒绝：${error.message}`)
+      } else {
+        messageApi.error(String(error))
+      }
     } finally {
       setBusy(false)
     }
@@ -242,35 +419,42 @@ export default function Training() {
 
   const runAllModels = async () => {
     if (!runnable) {
-      messageApi.error('批次存在阻断性错误，无法提交。')
+      messageApi.error('当前数据集或模型参数未通过校验。')
       return
     }
     const confirmed = window.confirm(
-      `将按顺序运行 12 个算法：\n` +
-        `数据源/数据集：${sourceDisplayName(dataset?.source_key, dataset?.source_display_name)} ${dataset?.display_id ?? dataset?.dataset_id}\n` +
-        `预测范围：${dataset?.scope === 'all' ? `全部区域（${dataset?.region_count} 个区域）` : '单区域'}\n` +
-        `计划任务数：${12 * (dataset?.scope === 'all' ? dataset?.region_count ?? 1 : 1)}\n` +
-        `不可运行模型：${(preflight?.models ?? []).filter((m: any) => !m.runnable).map((m: any) => m.label).join(', ') || '无'}\n\n` +
-        `默认顺序执行；可在实验历史中随时停止。估计耗时：无法可靠估计（取决于模型与硬件）。`,
+      `将按顺序运行 12 种算法。\n` +
+        `数据集：${dataset?.display_id ?? datasetId}\n` +
+        `范围：${dataset?.scope === 'all' ? `全部区域 ${dataset?.region_count} 个` : '单区域'}\n` +
+        `计划区域模型任务：${12 * (dataset?.scope === 'all' ? dataset?.region_count ?? 1 : 1)}\n\n` +
+        `运行期间可在页面停止。确定开始吗？`,
     )
     if (!confirmed) return
     setBusy(true)
+    setServerIssues([])
     try {
       const created = await api.post<any>(ENDPOINTS.batchRun, {
         dataset_id: datasetId,
         model_configs: buildModelConfigs(),
-        execution_policy: { sequential: true, continue_on_error: true, skip_unavailable_after_confirmation: true },
+        execution_policy: {
+          sequential: true,
+          continue_on_error: true,
+          skip_unavailable_after_confirmation: true,
+        },
       })
-      messageApi.success(`批量任务 ${created.display_id ?? created.batch_id} 已创建（${created.experiments.length} 个实验计划）`)
       const data = await api.get<any>(ENDPOINTS.batchGet(created.batch_id))
       setBatch(data)
-      setMonitorTab('batch')
+      setExperiment(null)
+      setMonitorTab('process')
       loadHistory()
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setServerIssues(err.issues)
-        messageApi.error(`后端拒绝：${err.message}`)
-      } else messageApi.error(String(err))
+      messageApi.success(`批量任务 ${created.display_id ?? created.batch_id} 已创建。`)
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setServerIssues(error.issues)
+        messageApi.error(`后端拒绝：${error.message}`)
+      } else {
+        messageApi.error(String(error))
+      }
     } finally {
       setBusy(false)
     }
@@ -280,31 +464,86 @@ export default function Training() {
     try {
       if (batch && ['Running', 'Created', 'Stopping'].includes(batch.status)) {
         await api.post(ENDPOINTS.batchStop(batch.batch_id))
-        messageApi.success('已请求停止批次（后端确认后将把未开始任务置为已取消或已跳过）')
-      } else if (experiment && ['Queued', 'Running', 'Stopping'].includes(experiment.status)) {
+        messageApi.success('已请求停止批量任务。')
+        const data = await api.get<any>(ENDPOINTS.batchGet(batch.batch_id))
+        setBatch(data)
+      } else if (experiment && RUNNING_STATUSES.includes(experiment.status)) {
         await api.post(ENDPOINTS.experimentStop(experiment.experiment_id))
-        messageApi.success('已请求停止实验')
+        messageApi.success('已请求停止实验。')
+      } else {
+        messageApi.info('当前没有可停止的训练任务。')
       }
-    } catch (err) {
-      messageApi.error(err instanceof ApiError ? err.message : String(err))
+    } catch (error) {
+      messageApi.error(error instanceof ApiError ? error.message : String(error))
     }
   }
 
-  const epochHistory = useMemo(() => {
-    const regions = experiment?.region_models ?? []
-    const withEpochs = regions.find((r: any) => r.history?.epoch?.length)
-    if (!withEpochs) return null
-    return withEpochs.history
-  }, [experiment])
+  const openExperiment = async (experimentId: string) => {
+    setLoadingId(experimentId)
+    setServerIssues([])
+    try {
+      const data = await api.get<any>(ENDPOINTS.experimentGet(experimentId))
+      setExperiment(data)
+      setBatch(null)
+      setMonitorTab('process')
+    } catch (error) {
+      messageApi.error(error instanceof ApiError ? error.message : String(error))
+    } finally {
+      setLoadingId(null)
+    }
+  }
 
-  const currentProgress = batch
-    ? Math.round(
-        (100 * ((batch.task_summary?.completed ?? 0) + (batch.task_summary?.failed ?? 0) + (batch.task_summary?.skipped ?? 0))) /
-          Math.max(1, batch.experiments?.length ?? 12),
+  const deleteExperiment = async (item: any) => {
+    setDeletingId(item.experiment_id)
+    try {
+      await api.del(ENDPOINTS.experimentDelete(item.experiment_id))
+      setExperiments((previous) =>
+        previous.filter((experimentItem) => experimentItem.experiment_id !== item.experiment_id),
       )
-    : Math.round(experiment?.progress?.percent ?? 0)
+      if (experiment?.experiment_id === item.experiment_id) {
+        setExperiment(null)
+        setLogs([])
+      }
+      loadHistory()
+      messageApi.success(`实验 ${item.display_id ?? item.experiment_id} 已删除。`)
+    } catch (error) {
+      messageApi.error(error instanceof ApiError ? error.message : String(error))
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
-  if (schemaError) return <Alert type="error" showIcon message="无法读取模型注册表" description={schemaError} />
+  const downloadLogs = () => {
+    if (!logs.length) {
+      messageApi.warning('当前任务没有可下载的真实日志。')
+      return
+    }
+    const text =
+      logs
+        .map(
+          (entry) =>
+            `[${entry.at ?? ''}] ${String(entry.level ?? 'info').toUpperCase()}` +
+            `${entry.experiment_display_id ? ` [${entry.experiment_display_id}]` : ''}` +
+            `${entry.region_id ? ` (${entry.region_id})` : ''} ${entry.message ?? ''}`,
+        )
+        .join('\n') + '\n'
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${activeRun?.display_id ?? activeRun?.experiment_id ?? 'training'}-logs.txt`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const resetAllModels = () => {
+    setAllParams(Object.fromEntries(models.map((model) => [model.key, defaultsFor(model.key)])))
+    setCustomized({})
+    messageApi.success('已恢复 12 种算法的默认参数。')
+  }
+
+  if (schemaError) {
+    return <Alert type="error" showIcon message="无法读取模型注册表" description={schemaError} />
+  }
 
   return (
     <div>
@@ -313,155 +552,155 @@ export default function Training() {
         module={MODULE_META.m4.index}
         titleZh={MODULE_META.m4.titleZh}
         titleEn={MODULE_META.m4.titleEn}
-        description="12 种真实算法（含 TimesFM / Chronos 零样本预测）与全部模型批量执行"
-        datasetInfo={dataset ? `${dataset.display_id ?? dataset.dataset_id} · ${sourceDisplayName(dataset.source_key, dataset.source_display_name)} · L/H/S = ${dataset.L}/${dataset.H}/${dataset.S} · ${dataset.scope === 'all' ? `全部区域（${dataset.region_count}）` : '单区域'}` : '请先构建数据集'}
+        description="12 种真实预测算法、全部模型批量编排与区域独立训练"
+        datasetInfo={
+          dataset
+            ? `${dataset.display_id ?? dataset.dataset_id} · ${sourceDisplayName(
+                dataset.source_key,
+                dataset.source_display_name,
+              )} · ${scopeLabel(dataset.scope)}`
+            : '请先选择已构建数据集'
+        }
       />
-      {activeErrors.length > 0 ? (
-        <Alert type="error" showIcon style={{ marginBottom: 10 }} message={`${activeErrors.length} 个阻断性错误（错误位于对应输入框下方）`} description={activeErrors.slice(0, 3).map((i) => `${i.path}: ${i.message}`).join('；')} />
+      {activeErrors.length ? (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message={`${activeErrors.length} 个参数错误`}
+          description={activeErrors
+            .slice(0, 3)
+            .map((item) => `${item.path}: ${item.message}`)
+            .join('；')}
+        />
       ) : null}
-      {serverIssues.length > 0 ? (
-        <Alert type="error" showIcon style={{ marginBottom: 10 }} message="后端拒绝了请求（未创建任何任务、实验或批量任务）" description={serverIssues.map((i) => `${i.path}: ${i.message}`).join('；')} />
+      {serverIssues.length ? (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message="后端拒绝请求，未创建训练任务"
+          description={serverIssues.map((item) => `${item.path}: ${item.message}`).join('；')}
+        />
       ) : null}
-      <ThreePane
-        config={
-          <>
-            <PaneHead
-              title={bilingual('配置', 'Configuration')}
-              extra={
-                <Tooltip title="只重置当前可编辑参数，不影响已保存的实验">
-                  <Button size="small" onClick={() => { isAllModels ? resetAllModels() : setParams(defaultsFor(algorithm)); setDrafts({}) }}>
-                    重置参数
-                  </Button>
-                </Tooltip>
-              }
-            />
+
+      <div className="tn-m4-layout">
+        <div className="tn-m4-column">
+          <Card
+            size="small"
+            className="tn-m4-card"
+            title={<BiLabel zh="① 配置区" en="Configuration" />}
+            extra={
+              <Tooltip title="只重置当前可编辑参数，不影响已保存实验。">
+                <Button
+                  size="small"
+                  onClick={() => {
+                    if (isAllModels) resetAllModels()
+                    else setParams(defaultsFor(algorithm))
+                    setDrafts({})
+                  }}
+                >
+                  重置参数
+                </Button>
+              </Tooltip>
+            }
+          >
             <div className="tn-field">
-              <label className="tn-field-label">1 · 数据集选择（Dataset Selection，只读快照）</label>
+              <label className="tn-field-label">1 · 数据集选择（只读快照）</label>
               <Select
                 style={{ width: '100%' }}
                 size="small"
                 value={datasetId || undefined}
-                placeholder="选择一个已构建的数据集"
-                options={datasets.map((d) => ({ value: d.dataset_id, label: `${d.display_id ?? d.dataset_id} · ${sourceDisplayName(d.source_key, d.source_display_name)} · ${scopeLabel(d.scope)}` }))}
-                onChange={(value) => setDatasetId(value)}
+                placeholder="选择已构建数据集"
+                options={datasets.map((item) => ({
+                  value: item.dataset_id,
+                  label: `${item.display_id ?? item.dataset_id} · ${sourceDisplayName(
+                    item.source_key,
+                    item.source_display_name,
+                  )} · ${scopeLabel(item.scope)}`,
+                }))}
+                onChange={(value) => {
+                  setDatasetId(value)
+                  setPreflight(null)
+                }}
               />
               {dataset ? (
-                <Descriptions size="small" column={1} style={{ marginTop: 8, fontSize: 11 }}>
-                  <Descriptions.Item label="来源">{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</Descriptions.Item>
-                  <Descriptions.Item label="预测范围">{dataset.scope === 'all' ? `全部区域（${dataset.region_count} 个区域，独立建模）` : `单区域（${dataset.region_ids?.[0]}）`}</Descriptions.Item>
-                  <Descriptions.Item label="数据频率">
-                    {frequencyLabel(String(dataset.frequency))}（{dataset.frequency_minutes} 分钟）
-                  </Descriptions.Item>
-                  <Descriptions.Item label="构建时间范围">{dataset.time_start ?? '—'} → {dataset.time_end ?? '—'}</Descriptions.Item>
-                  <Descriptions.Item label="L / H / S">{dataset.L} / {dataset.H} / {dataset.S}</Descriptions.Item>
-                  <Descriptions.Item label="训练 / 验证 / 测试">{dataset.ratios?.train} / {dataset.ratios?.validation} / {dataset.ratios?.test}</Descriptions.Item>
-                  <Descriptions.Item label="窗口数">训练 {dataset.window_counts?.train} · 验证 {dataset.window_counts?.validation} · 测试 {dataset.window_counts?.test}</Descriptions.Item>
-                  <Descriptions.Item label="预处理">{missingModeLabel(dataset.preprocess?.missing_mode)} · {scalingLabel(dataset.preprocess?.scaling)}</Descriptions.Item>
-                </Descriptions>
+                <div className="tn-m4-dataset-summary" data-testid="m4-dataset-summary">
+                  <div><span>来源</span><strong>{sourceDisplayName(dataset.source_key, dataset.source_display_name)} · {unitDisplayLabel(dataset.unit_label)}</strong></div>
+                  <div><span>区域范围</span><strong>{dataset.scope === 'all' ? `全部区域 ${dataset.region_count} 个` : `单区域 ${dataset.region_ids?.[0] ?? '—'}`}</strong></div>
+                  <div><span>采样频率</span><strong>{frequencyLabel(String(dataset.frequency))} · {dataset.frequency_minutes} 分钟</strong></div>
+                  <div><span>时间范围</span><strong>{dataset.time_start ?? '—'} → {dataset.time_end ?? '—'}</strong></div>
+                  <div><span>L / H / S</span><strong>{dataset.L} / {dataset.H} / {dataset.S}</strong></div>
+                  <div><span>划分比例</span><strong>{dataset.ratios?.train} / {dataset.ratios?.validation} / {dataset.ratios?.test}</strong></div>
+                  <div><span>窗口数</span><strong>训练 {dataset.window_counts?.train ?? 0} · 验证 {dataset.window_counts?.validation ?? 0} · 测试 {dataset.window_counts?.test ?? 0}</strong></div>
+                  <div><span>预处理</span><strong>{missingModeLabel(dataset.preprocess?.missing_mode)} · {scalingLabel(dataset.preprocess?.scaling)}</strong></div>
+                </div>
               ) : null}
             </div>
 
             <div className="tn-field">
-              <label className="tn-field-label">2 · 预测算法（Prediction Algorithm）</label>
-              <div
-                className={`tn-history-row${isAllModels ? ' active' : ''}`}
-                style={{ background: isAllModels ? '#e7f0fe' : undefined, borderRadius: 6, padding: '8px 6px' }}
-                role="button"
-                tabIndex={0}
-                onClick={() => setAlgorithm(ALL_MODELS)}
-                onKeyDown={(e) => e.key === 'Enter' && setAlgorithm(ALL_MODELS)}
-              >
-                <div>
-                  <strong>全部模型（All Models，12 种）</strong>
-                  <div className="tn-muted">批量编排：按顺序运行下方 12 个算法（不是第 13 种算法）</div>
+              <label className="tn-field-label">2 · 预测算法</label>
+              <Select
+                data-testid="m4-algorithm-select"
+                style={{ width: '100%' }}
+                value={algorithm}
+                options={algorithmOptions}
+                onChange={(value) => {
+                  setAlgorithm(value)
+                  setPreflight(null)
+                  if (value !== ALL_MODELS) {
+                    setParams(allParams[value] ?? defaultsFor(value))
+                  }
+                }}
+              />
+              {isAllModels ? (
+                <div className="tn-muted" style={{ marginTop: 6 }}>
+                  批量编排会依次运行下方 12 种算法；全部区域仍按区域独立建模。
                 </div>
-                {isAllModels ? <Tag color="blue">已选择</Tag> : null}
-              </div>
-              {['statistical', 'machine_learning', 'deep_learning', 'foundation'].map((category) => (
-                <Collapse
-                  key={category}
-                  size="small"
-                  ghost
-                  defaultActiveKey={['statistical']}
-                  items={[
-                    {
-                      key: category,
-                      label: models.find((m) => m.category === category)?.category_label_zh ?? algorithmCategoryLabel(category),
-                      children: models
-                        .filter((m) => m.category === category)
-                        .map((model) => (
-                          <div
-                            key={model.key}
-                            className="tn-history-row"
-                            style={{ background: algorithm === model.key ? '#f0f6ff' : undefined, cursor: 'pointer' }}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => {
-                              setAlgorithm(model.key)
-                              setParams(allParams[model.key] ?? defaultsFor(model.key))
-                            }}
-                            onKeyDown={(e) => e.key === 'Enter' && setAlgorithm(model.key)}
-                          >
-                            <div>
-                              <div style={{ fontSize: 12 }}>
-                                {model.label}
-                                {customized[model.key] ? <Tag color="gold" style={{ marginLeft: 6 }}>已自定义</Tag> : null}
-                              </div>
-                              <div className="tn-muted">{modeLabel(model.default_mode)}{model.capabilities?.installed === false ? ' · 依赖未安装' : ''}</div>
-                            </div>
-                            <Tag color={model.category === 'foundation' ? 'purple' : 'blue'}>{model.category_label_zh}</Tag>
-                          </div>
-                        )),
-                    },
-                  ]}
-                />
-              ))}
+              ) : activeModel ? (
+                <div className="tn-inline" style={{ marginTop: 6 }}>
+                  <Tag>{modeLabel(activeModel.default_mode)}</Tag>
+                  <span className="tn-muted">{activeModel.category_label_zh}</span>
+                </div>
+              ) : null}
             </div>
 
             <div className="tn-field">
-              <label className="tn-field-label">
-                3 · 模型参数（Model Parameters）
-              </label>
+              <label className="tn-field-label">3 · 模型参数</label>
               {isAllModels ? (
                 <>
-                  <Alert
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: 8, fontSize: 11 }}
-                    message={`每个算法都有独立参数组；当前已自定义 ${Object.values(customized).filter(Boolean).length} 个算法。默认使用注册表预设。`}
-                  />
                   <Collapse
                     size="small"
                     items={models.map((model) => {
-                      const issues = allValidation.issues.filter((i) => i.path.startsWith(`model_configs.${model.key}.params`) && i.severity === 'error')
-                      const warnings = allValidation.issues.filter((i) => i.path.startsWith(`model_configs.${model.key}.params`) && i.severity === 'warning')
+                      const issues = allValidation.issues.filter(
+                        (item) =>
+                          item.path.startsWith(`model_configs.${model.key}.params`) &&
+                          item.severity === 'error',
+                      )
                       return {
                         key: model.key,
                         label: (
                           <span className="tn-inline">
                             <span>{model.label}</span>
-                            <Tag color={model.category === 'foundation' ? 'purple' : 'default'}>{modeLabel(model.default_mode)}</Tag>
-                            {customized[model.key] ? <Tag color="gold">自定义</Tag> : <Tag>默认</Tag>}
-                            {issues.length ? <Tag color="red">{issues.length} 个错误</Tag> : <Tag color="green">可运行</Tag>}
-                            {warnings.length ? <Tag color="orange">{warnings.length} 条警告</Tag> : null}
+                            <Tag>{modeLabel(model.default_mode)}</Tag>
+                            {issues.length ? <Tag color="red">{issues.length} 个错误</Tag> : null}
                           </span>
                         ),
                         children: (
-                          <div>
-                            <div className="tn-inline" style={{ marginBottom: 6 }}>
-                              <Button
-                                size="small"
-                                onClick={() => {
-                                  setAllParams((prev) => ({ ...prev, [model.key]: defaultsFor(model.key) }))
-                                  setCustomized((prev) => ({ ...prev, [model.key]: false }))
-                                }}
-                              >
-                                恢复本算法默认值
-                              </Button>
-                              {issues.length ? (
-                                <span className="tn-muted">跳转到该算法首个错误：{issues[0].path}</span>
-                              ) : null}
-                            </div>
+                          <>
+                            <Button
+                              size="small"
+                              style={{ marginBottom: 6 }}
+                              onClick={() => {
+                                setAllParams((previous) => ({
+                                  ...previous,
+                                  [model.key]: defaultsFor(model.key),
+                                }))
+                                setCustomized((previous) => ({ ...previous, [model.key]: false }))
+                              }}
+                            >
+                              恢复该算法默认值
+                            </Button>
                             {visibleFields(model.params, allParams[model.key] ?? {})
                               .filter((spec) => spec.level !== 'advanced')
                               .map((spec) => (
@@ -469,444 +708,460 @@ export default function Training() {
                                   key={spec.key}
                                   spec={spec}
                                   value={(allParams[model.key] ?? {})[spec.key]}
-                                  issues={allValidation.issues.filter((i) => i.path === `model_configs.${model.key}.params.${spec.key}`)}
+                                  issues={allValidation.issues.filter(
+                                    (item) =>
+                                      item.path ===
+                                      `model_configs.${model.key}.params.${spec.key}`,
+                                  )}
                                   path={`model_configs.${model.key}.params.${spec.key}`}
                                   onChange={(key, value) => {
-                                    setAllParams((prev) => ({ ...prev, [model.key]: { ...(prev[model.key] ?? {}), [key]: value } }))
-                                    setCustomized((prev) => ({ ...prev, [model.key]: true }))
+                                    setAllParams((previous) => ({
+                                      ...previous,
+                                      [model.key]: {
+                                        ...(previous[model.key] ?? {}),
+                                        [key]: value,
+                                      },
+                                    }))
+                                    setCustomized((previous) => ({
+                                      ...previous,
+                                      [model.key]: true,
+                                    }))
                                   }}
-                                  disabledReason={fieldDisabledReason(spec, allParams[model.key] ?? {})}
+                                  disabledReason={fieldDisabledReason(
+                                    spec,
+                                    allParams[model.key] ?? {},
+                                  )}
                                   compact
                                 />
                               ))}
-                          </div>
+                          </>
                         ),
                       }
                     })}
                   />
-                  <Button
-                    size="small"
-                    danger
-                    style={{ marginTop: 6 }}
-                    onClick={() =>
-                      window.confirm('重置全部模型参数？这会丢弃 12 个算法的全部自定义参数（不影响已保存实验）。') && resetAllModels()
-                    }
-                  >
-                    重置全部模型参数
+                  <Button size="small" style={{ marginTop: 6 }} onClick={resetAllModels}>
+                    恢复全部模型默认参数
                   </Button>
                 </>
               ) : activeModel ? (
-                <>
-                  <div className="tn-muted" style={{ marginBottom: 6 }}>
-                    使用模式：<Tag>{modeLabel(activeModel.default_mode)}</Tag>
-                    {activeModel.capabilities?.supports_finetune ? <Tag color="green">支持微调</Tag> : <Tag>仅零样本预测</Tag>}
-                    {activeModel.capabilities?.requires_checkpoint ? <Tag color="purple">需要模型权重</Tag> : null}
-                  </div>
-                  {visibleFields(activeModel.params, params)
-                    .filter((spec) => spec.level !== 'advanced')
-                    .map((spec) => (
-                      <ParamField
-                        key={spec.key}
-                        spec={spec}
-                        value={params[spec.key]}
-                        issues={singleValidation.fieldIssues(spec.key)}
-                        path={`model_configs.${algorithm}.params.${spec.key}`}
-                        draft={drafts[`${algorithm}.${spec.key}`]}
-                        onDraftChange={(key, text) => setDrafts((prev) => ({ ...prev, [`${algorithm}.${key}`]: text }))}
-                        onChange={(key, value) => {
-                          setParams((prev) => ({ ...prev, [key]: value }))
-                          setCustomized((prev) => ({ ...prev, [algorithm]: true }))
-                        }}
-                        disabledReason={fieldDisabledReason(spec, params)}
-                        compact
-                      />
-                    ))}
-                </>
+                visibleFields(activeModel.params, params)
+                  .filter((spec) => spec.level !== 'advanced')
+                  .map((spec) => (
+                    <ParamField
+                      key={spec.key}
+                      spec={spec}
+                      value={params[spec.key]}
+                      issues={singleValidation.fieldIssues(spec.key)}
+                      path={`model_configs.${algorithm}.params.${spec.key}`}
+                      draft={drafts[`${algorithm}.${spec.key}`]}
+                      onDraftChange={(key, text) =>
+                        setDrafts((previous) => ({
+                          ...previous,
+                          [`${algorithm}.${key}`]: text,
+                        }))
+                      }
+                      onChange={(key, value) => {
+                        setParams((previous) => ({ ...previous, [key]: value }))
+                        setAllParams((previous) => ({
+                          ...previous,
+                          [algorithm]: { ...(previous[algorithm] ?? {}), [key]: value },
+                        }))
+                        setCustomized((previous) => ({ ...previous, [algorithm]: true }))
+                      }}
+                      disabledReason={fieldDisabledReason(spec, params)}
+                      compact
+                    />
+                  ))
               ) : (
-                <EmptyState text="模型注册表加载中…" />
+                <EmptyState text="模型注册表加载中。" />
               )}
             </div>
 
             <div className="tn-field">
-              <label className="tn-field-label">4 · 运行前检查（Preflight Summary）</label>
-              <Button size="small" onClick={runPreflight} loading={busy} disabled={!datasetId}>
-                检查兼容性
-              </Button>
+              <label className="tn-field-label">4 · 运行前检查</label>
+              <div className="tn-inline" style={{ marginBottom: 6 }}>
+                <Button size="small" onClick={runPreflight} loading={busy} disabled={!datasetId}>
+                  重新检查
+                </Button>
+                {!activeErrors.length && dataset ? <Tag color="green">参数校验通过</Tag> : null}
+              </div>
               {preflight ? (
-                <div className="tn-muted" style={{ marginTop: 6 }}>
+                <div className="tn-m4-preflight">
                   {isAllModels ? (
                     <>
-                      <div>可运行模型：{preflight.runnable_count} / 12；阻断性错误 {preflight.blocking_error_count}</div>
-                      {preflight.batch_issues?.map((issue: any) => (
-                        <div key={issue.code} className="tn-warning-text">⚠ {issue.message}（{issue.suggestion}）</div>
-                      ))}
+                      <span>可运行模型：{preflight.runnable_count ?? 0} / 12</span>
+                      <span>阻断错误：{preflight.blocking_error_count ?? 0}</span>
                     </>
                   ) : (
                     <>
-                      <div>可运行：{preflight.valid ? '是' : '否'}</div>
-                      {preflight.issues?.map((issue: any) => (
-                        <div key={issue.code + issue.path} className={issue.severity === 'error' ? 'tn-error-text' : 'tn-warning-text'}>
-                          {issue.severity === 'error' ? '✕' : '⚠'} {issue.message}
-                        </div>
-                      ))}
-                      <div>训练样本数（首区域）：{preflight.context?.train_samples ?? '—'}</div>
+                      <span>数据集有效：{dataset ? '是' : '否'}</span>
+                      <span>算法与参数兼容：{preflight.valid ? '是' : '否'}</span>
+                      <span>训练条件：{preflight.context?.train_samples ?? '—'} 个样本</span>
                     </>
                   )}
+                  {(preflight.batch_issues ?? preflight.issues ?? []).slice(0, 4).map((item: any) => (
+                    <span key={item.code + item.path} className="tn-warning-text">
+                      {item.message}
+                    </span>
+                  ))}
                 </div>
               ) : (
-                <div className="tn-muted" style={{ marginTop: 4 }}>运行前会自动预检；也可手动执行。</div>
+                <div className="tn-muted">训练开始前会自动执行后端预检。</div>
+              )}
+              {activeWarnings.slice(0, 3).map((item) => (
+                <div key={item.path + item.code} className="tn-warning-text">
+                  {item.message}
+                </div>
+              ))}
+            </div>
+
+            <div className="tn-field" style={{ marginBottom: 0 }}>
+              <label className="tn-field-label">5 · 操作</label>
+              <div className="tn-m4-actions">
+                <Button
+                  type="primary"
+                  block
+                  onClick={isAllModels ? runAllModels : runSingle}
+                  loading={busy}
+                  disabled={!runnable}
+                >
+                  {isAllModels ? '运行全部模型' : '开始训练'}
+                </Button>
+                <Button block danger onClick={stop}>
+                  停止训练
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          <Card
+            size="small"
+            className="tn-m4-card"
+            title={<BiLabel zh="④ 实验历史" en="Experiment History" />}
+          >
+            <div className="tn-m4-history-filters">
+              <Select
+                size="small"
+                value={historyDataset}
+                options={[{ value: 'all', label: '全部数据集' }, ...historyDatasetOptions]}
+                onChange={setHistoryDataset}
+              />
+              <Select
+                size="small"
+                value={historyAlgorithm}
+                options={[{ value: 'all', label: '全部算法' }, ...historyAlgorithmOptions]}
+                onChange={setHistoryAlgorithm}
+              />
+              <Select
+                size="small"
+                value={historyStatus}
+                options={[{ value: 'all', label: '全部状态' }, ...historyStatusOptions]}
+                onChange={setHistoryStatus}
+              />
+            </div>
+            <div className="tn-m4-history-list" data-testid="m4-experiment-history">
+              {visibleExperiments.length ? (
+                visibleExperiments.map((item) => (
+                  <div className="tn-m4-history-item" key={item.experiment_id}>
+                    <div className="tn-m4-history-head">
+                      <span className="tn-m4-history-id">{item.display_id ?? item.experiment_id}</span>
+                      <StatusTag status={item.status} error={item.error} />
+                    </div>
+                    <div className="tn-m4-history-meta">
+                      <span><b>数据集</b>{item.dataset_display_id ?? item.dataset_id}</span>
+                      <span><b>算法</b>{item.algorithm_label}</span>
+                      <span><b>开始</b>{formatDateTime(item.started_at ?? item.created_at)}</span>
+                    </div>
+                    <div className="tn-m4-history-actions">
+                      <Button
+                        size="small"
+                        loading={loadingId === item.experiment_id}
+                        onClick={() => openExperiment(item.experiment_id)}
+                      >
+                        打开
+                      </Button>
+                      <Popconfirm
+                        title="删除这条实验记录？"
+                        description="将同步清理该实验的区域记录、日志和模型文件；被评估引用的实验会被后端拒绝删除。"
+                        okText="确认删除"
+                        cancelText="取消"
+                        onConfirm={() => deleteExperiment(item)}
+                      >
+                        <Button size="small" danger loading={deletingId === item.experiment_id}>
+                          删除记录
+                        </Button>
+                      </Popconfirm>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <EmptyState text="没有符合筛选条件的实验历史。" />
               )}
             </div>
+            {filteredExperiments.length > HISTORY_PAGE_SIZE ? (
+              <Pagination
+                size="small"
+                current={historyPage}
+                pageSize={HISTORY_PAGE_SIZE}
+                total={filteredExperiments.length}
+                showSizeChanger={false}
+                onChange={setHistoryPage}
+              />
+            ) : null}
+          </Card>
+        </div>
 
-            <div className="tn-field">
-              <label className="tn-field-label">5 · 操作（Actions）</label>
-              <div className="tn-inline">
-                {isAllModels ? (
-                  <Button type="primary" onClick={runAllModels} loading={busy} disabled={!runnable || !datasetId}>运行全部模型</Button>
-                ) : (
-                  <Button
-                    type="primary"
-                    onClick={runSingle}
-                    loading={busy}
-                    disabled={!runnable || !datasetId}
-                  >
-                    开始训练
-                  </Button>
-                )}
-                <Button onClick={stop} danger>{isAllModels || batch ? ACTION_LABELS.stopBatch : ACTION_LABELS.stopTraining}</Button>
+        <div className="tn-m4-column">
+          <Card
+            size="small"
+            className="tn-m4-card"
+            title={<BiLabel zh="③ 当前实验详情" en="Current Experiment Details" />}
+          >
+            {activeRun ? (
+              <div className="tn-m4-detail-grid" data-testid="m4-current-details">
+                <div className="tn-m4-detail-item">
+                  <span>{activeIsBatch ? '批量任务 ID' : '实验 ID'}</span>
+                  <strong>{activeRun.display_id ?? activeRun.experiment_id ?? activeRun.batch_id}</strong>
+                </div>
+                <div className="tn-m4-detail-item">
+                  <span>算法</span>
+                  <strong>{activeIsBatch ? '全部模型（12 种）' : activeRun.algorithm_label}</strong>
+                </div>
+                <div className="tn-m4-detail-item">
+                  <span>当前状态</span>
+                  <StatusTag status={activeRun.status} error={activeRun.error} />
+                </div>
+                <div className="tn-m4-detail-item">
+                  <span>开始时间</span>
+                  <strong>{currentStartedAt ? formatDateTime(currentStartedAt) : '排队中'}</strong>
+                </div>
+                <div className="tn-m4-detail-item">
+                  <span>运行时长</span>
+                  <strong>{durationLabel(currentStartedAt, currentEndedAt)}</strong>
+                </div>
               </div>
-              <div className="tn-inline" style={{ marginTop: 6 }}>
-                    <Tooltip title="只有已完成或部分完成的实验才能保存与评估；实验 ID 在开始训练时创建">
-                  <Button
-                    size="small"
-                    disabled={!experiment || !['Completed', 'Partial'].includes(experiment?.status)}
-                    onClick={() => messageApi.success(`实验 ${experiment.display_id ?? experiment.experiment_id} 的工件已落盘（data/artifacts/experiments/${experiment.experiment_id}）`)}
-                  >
-                    保存模型
-                  </Button>
-                </Tooltip>
-                <Tooltip title="跳转到模块五，并使用留出测试集评估该实验">
-                  <Button
-                    size="small"
-                    disabled={!experiment || !['Completed', 'Partial'].includes(experiment?.status)}
-                    onClick={() => navigate(`/evaluation?dataset=${datasetId}&experiment=${experiment?.experiment_id}`)}
-                  >
-                    开始评估
-                  </Button>
-                </Tooltip>
-              </div>
-            </div>
-          </>
-        }
-        visual={
-          <Tabs
-            className="tn-tabs-tight"
-            activeKey={monitorTab}
-            onChange={setMonitorTab}
-            items={[
-              {
-                key: 'monitor',
-                label: <BiLabel zh="训练监控" en="Training Monitor" />,
-                children: (
-                  <div className="tn-stack">
-                    {experiment && !isAllModels ? (
-                      <>
-                        <Card size="small" title={`${experiment.algorithm_label} · ${modeLabel(experiment.mode)}`}>
-                          <div className="tn-inline">
-                            <StatusTag status={experiment.status} error={experiment.error} />
-                            <Tag>{experiment.display_id ?? experiment.experiment_id}</Tag>
-                            {experiment.batch_id ? <Tag color="blue">BATCH {experiment.batch_display_id ?? experiment.batch_id}</Tag> : null}
-                            <span className="tn-muted">{scopeLabel(experiment.scope)} · {experiment.region_completed}/{experiment.region_total} 区域完成</span>
-                          </div>
-                          <Progress percent={Math.round(experiment.progress?.percent ?? 0)} status={experiment.status === 'Failed' ? 'exception' : undefined} style={{ marginTop: 8 }} />
-                          <div className="tn-muted">
-                            {experiment.progress?.stage ?? '等待任务进程'} · {experiment.progress?.message ?? ''}
-                          </div>
-                          {epochHistory ? (
-                            <LineChart
-                              height={220}
-                              x={epochHistory.epoch.map((e: number) => `第 ${e} 轮`)}
-                              xName="训练轮次"
-                              yName="损失值"
-                              series={[
-                                { name: '训练损失（MSE）', data: epochHistory.train_loss, color: '#2467E8' },
-                                { name: '验证损失', data: epochHistory.validation_loss, color: '#D98F00' },
-                              ]}
-                            />
-                          ) : (
-                            <div className="tn-muted" style={{ marginTop: 8 }}>
-                              {experiment.history_type === 'zero_shot' || ['ARIMA', 'Prophet', 'Random Forest'].includes(experiment.algorithm_label)
-                                ? '该算法没有训练轮次概念：不显示训练曲线，仅显示真实状态、耗时与日志。'
-                                : '尚无训练轮次记录（Boosting 模型显示真实迭代指标）。'}
-                            </div>
-                          )}
-                          {experiment.metrics?.macro_validation?.rmse ? (
-                            <div className="tn-muted" style={{ marginTop: 6 }}>
-                              验证集（真实预测）：平均绝对误差 MAE {Number(experiment.metrics.macro_validation.mae).toFixed(2)} · 均方根误差 RMSE{' '}
-                              {Number(experiment.metrics.macro_validation.rmse).toFixed(2)} · sMAPE{' '}
-                              {Number(experiment.metrics.macro_validation.smape).toFixed(2)}% · R²{' '}
-                              {experiment.metrics.macro_validation.r2 === null ? '不适用' : Number(experiment.metrics.macro_validation.r2).toFixed(4)}
-                            </div>
-                          ) : null}
-                          {experiment.scope === 'all' ? (
-                            <Table
-                              size="small"
-                              style={{ marginTop: 8 }}
-                              rowKey="region_id"
-                              pagination={{ pageSize: 6, size: 'small' }}
-                              dataSource={experiment.region_models ?? []}
-                              columns={[
-                                { title: '区域', dataIndex: 'region_id' },
-                                { title: '区域实验 ID', dataIndex: 'region_experiment_id', render: (value: string | null) => value ?? '—' },
-                                { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
-                                { title: '验证 RMSE', render: (_: unknown, row: any) => row.metrics?.rmse ? Number(row.metrics.rmse).toFixed(1) : '—' },
-                                { title: '训练轮数', render: (_: unknown, row: any) => row.history?.epochs_completed ?? '—' },
-                              ]}
-                            />
-                          ) : null}
-                        </Card>
-                      </>
-                    ) : null}
-                    {batch ? (
-                          <Card size="small" title={`全部模型批次 ${batch.display_id ?? batch.batch_id}`}>
-                        <div className="tn-inline">
-                          <StatusTag status={batch.status} error={batch.error} />
-                          <Tag>总任务 {batch.experiments?.length}</Tag>
-                          <Tag color="green">已完成 {batch.task_summary?.completed ?? 0}</Tag>
-                          <Tag color="red">已失败 {batch.task_summary?.failed ?? 0}</Tag>
-                          <Tag>已跳过 {batch.task_summary?.skipped ?? 0}</Tag>
-                          <Tag color="orange">部分完成 {batch.task_summary?.partial ?? 0}</Tag>
-                        </div>
-                        <Progress percent={currentProgress} style={{ marginTop: 8 }} />
-                        <Table
-                          size="small"
-                          style={{ marginTop: 8 }}
-                          rowKey="experiment_id"
-                          pagination={false}
-                          dataSource={batch.experiments ?? []}
-                          columns={[
-                            { title: '实验 ID', dataIndex: 'display_id', width: 240, render: (value: string, row: any) => value ?? row.experiment_id },
-                            { title: '模型', dataIndex: 'algorithm_label', sorter: (a: any, b: any) => a.algorithm_label.localeCompare(b.algorithm_label) },
-                            { title: '执行模式', dataIndex: 'mode', width: 100, render: (value: string) => modeLabel(value) },
-                            {
-                              title: '进度',
-                              width: 130,
-                              render: (_: unknown, row: any) => (
-                                <Progress percent={Math.round(row.progress?.percent ?? 0)} size="small" />
-                              ),
-                            },
-                            { title: '区域', width: 90, render: (_: unknown, row: any) => `${row.region_completed}/${row.region_total}` },
-                            { title: '失败区域', dataIndex: 'region_failed', width: 80 },
-                            { title: '状态', width: 110, render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
-                            { title: '验证 RMSE', width: 110, render: (_: unknown, row: any) => row.metrics?.macro_validation?.rmse ? Number(row.metrics.macro_validation.rmse).toFixed(1) : '—' },
-                            {
-                              title: '',
-                              render: (_: unknown, row: any) => (
-                                <Button
-                                  size="small"
-                                  onClick={async () => {
-                                    const data = await api.get<any>(ENDPOINTS.experimentGet(row.experiment_id))
-                                    setExperiment(data)
-                                    setMonitorTab('monitor')
-                                    setAlgorithm(row.algorithm_key)
-                                  }}
-                                >
-                                  查看
-                                </Button>
-                              ),
-                            },
-                          ]}
-                        />
-                        {batch.region_summary?.length ? (
-                          <Table
-                            size="small"
-                            style={{ marginTop: 10 }}
-                            rowKey={(row: any) => `${row.experiment_id}-${row.region_id}`}
-                            pagination={{ pageSize: 6, size: 'small' }}
-                            dataSource={batch.region_summary}
-                            columns={[
-                              { title: '实验 ID', dataIndex: 'display_id', width: 220, render: (value: string, row: any) => value ?? row.experiment_id },
-                              { title: '区域', dataIndex: 'region_id' },
-                              { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
-                              { title: '验证 RMSE', render: (_: unknown, row: any) => row.metrics?.rmse ? Number(row.metrics.rmse).toFixed(1) : '—' },
-                            ]}
-                          />
-                        ) : null}
-                      </Card>
-                    ) : null}
-                    {!experiment && !batch ? <EmptyState text="选择算法并开始训练后，这里显示真实的训练状态、进度与日志。" /> : null}
-                  </div>
-                ),
-              },
-            ]}
-          />
-        }
-        info={
-          <Tabs
-            className="tn-tabs-tight"
-            activeKey={tab}
-            onChange={setTab}
-            items={[
-              {
-                key: 'overview',
-                label: <BiLabel zh="训练概览" en="Training Overview" />,
-                children: (
-                  <div className="tn-stack">
-                    {experiment ? (
-                      <Card size="small" title="当前实验（Experiment）">
-                        <div className="tn-code">{experiment.display_id ?? experiment.experiment_id}</div>
-                        <div className="tn-muted" style={{ marginTop: 6 }}>
-                          <div>批量任务：{experiment.batch_display_id ?? experiment.batch_id ?? '（单模型运行）'}</div>
-                          <div>数据集：{experiment.dataset?.display_id ?? experiment.dataset_id}</div>
-                          <div>算法 / 模式：{experiment.algorithm_label} · {modeLabel(experiment.mode)}</div>
-                          <div>预测范围：{scopeLabel(experiment.scope)} · 区域 {experiment.region_completed}/{experiment.region_total}</div>
-                          <div>开始：{experiment.started_at ?? '—'} · 结束：{experiment.ended_at ?? '—'}</div>
-                          <div>耗时：{experiment.metrics?.duration_seconds ?? '—'} 秒</div>
-                        </div>
-                        <div className="tn-section-title">不可变快照（运行即冻结）</div>
-                        <pre className="tn-code" style={{ maxHeight: 200, overflow: 'auto' }}>{JSON.stringify(experiment.snapshot, null, 1)}</pre>
-                      </Card>
-                    ) : (
-                      <EmptyState text="尚未运行实验。" />
-                    )}
-                    {batch ? (
-                      <Card size="small" title="当前批量任务（Batch）">
-                        <div className="tn-code">{batch.display_id ?? batch.batch_id}</div>
-                        <div className="tn-muted" style={{ marginTop: 6 }}>
-                          <div>数据集：{batch.dataset_display_id ?? batch.dataset_id}</div>
-                          <div>预测范围：{scopeLabel(batch.scope)} · 区域 {batch.region_count}</div>
-                          <div>计划任务：{batch.planned_tasks}（12 算法 × {batch.region_count} 区域）</div>
-                          <div>策略：顺序执行={batch.policy?.sequential ? '是' : '否'} · 出错后继续={batch.policy?.continue_on_error ? '是' : '否'} · 跳过不可用={batch.policy?.skip_unavailable_after_confirmation ? '是' : '否'}</div>
-                        </div>
-                      </Card>
-                    ) : null}
-                  </div>
-                ),
-              },
-              {
-                key: 'logs',
-                label: <BiLabel zh="训练日志" en="Training Logs" />,
-                children: (
-                  <div className="tn-stack">
-                    <div className="tn-inline">
-                      <span className="tn-muted">实验 {experiment?.display_id ?? experiment?.experiment_id ?? '—'} 的真实后端日志</span>
-                      <a href={experiment ? `/api/experiments/${experiment.experiment_id}/logs` : '#'} download={`${experiment?.experiment_id ?? 'logs'}.json`}>
-                        <Button size="small" disabled={!experiment}>下载日志</Button>
-                      </a>
+            ) : (
+              <EmptyState text="从左侧实验历史打开记录，或开始一项新的训练。" />
+            )}
+          </Card>
+
+          <Card
+            size="small"
+            className="tn-m4-card"
+            title={<BiLabel zh="② 训练监控" en="Training Monitor" />}
+            extra={
+              activeRun ? (
+                <span className="tn-muted">
+                  {currentRegionsDone} / {activeRun.region_total ?? 0} 区域完成
+                </span>
+              ) : null
+            }
+          >
+            {activeRun ? (
+              <div className="tn-m4-monitor">
+                <div className="tn-m4-progress-head">
+                  <div>
+                    <strong>
+                      {activeIsBatch
+                        ? `${batch?.task_summary?.completed ?? 0} / ${batch?.experiments?.length ?? 12} 个模型实验完成`
+                        : `${currentRegionsDone} / ${activeRun.region_total ?? 0} 个区域完成`}
+                    </strong>
+                    <div className="tn-muted">
+                      状态：{statusLabel(activeStatus)}
+                      {activeRun.progress?.message ? ` · ${activeRun.progress.message}` : ''}
                     </div>
-                    {logs.length ? (
-                      <div className="tn-code" style={{ maxHeight: 420, overflow: 'auto' }}>
-                        {logs.map((entry, index) => (
-                          <div key={index}>
-                            [{entry.at}] {entry.level.toUpperCase()} {entry.region_id ? `(${entry.region_id}) ` : ''}
-                            {entry.message}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <EmptyState text="暂无日志（实验尚未开始或已被清理）。" />
-                    )}
                   </div>
-                ),
-              },
-              {
-                key: 'history',
-                label: <BiLabel zh="实验历史" en="Experiment History" />,
-                children: (
-                  <div className="tn-stack">
+                  <span>{currentProgress}%</span>
+                </div>
+                <Progress
+                  percent={currentProgress}
+                  status={progressStatus(activeStatus)}
+                  showInfo={false}
+                />
+
+                {activeIsBatch ? (
+                  <>
                     <Table
-                      size="small"
-                      rowKey="batch_id"
-                      title={() => '批量任务（Batches）'}
-                      dataSource={batches}
-                      pagination={{ pageSize: 4, size: 'small' }}
-                      columns={[
-                        { title: '批量任务 ID', dataIndex: 'display_id', width: 220, render: (value: string, row: any) => <span className="tn-code">{value ?? row.batch_id}</span> },
-                        { title: '数据集', dataIndex: 'dataset_display_id', width: 210, ellipsis: true, render: (value: string, row: any) => value ?? row.dataset_id },
-                        { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
-                        { title: '完成/失败/跳过', render: (_: unknown, row: any) => `${row.task_summary?.completed ?? 0}/${row.task_summary?.failed ?? 0}/${row.task_summary?.skipped ?? 0}` },
-                        { title: '创建时间', dataIndex: 'created_at', width: 150 },
-                        {
-                          title: '操作',
-                          render: (_: unknown, row: any) => (
-                            <div className="tn-inline">
-                              <Button size="small" onClick={async () => { setBatch(await api.get<any>(ENDPOINTS.batchGet(row.batch_id))); setMonitorTab('batch') }}>{ACTION_LABELS.open}</Button>
-                              <Button size="small" danger disabled={!['Running', 'Created', 'Stopping'].includes(row.status)} onClick={async () => {
-                                try { await api.post(ENDPOINTS.batchStop(row.batch_id)); messageApi.success('已请求停止批次'); loadHistory() } catch (err) { messageApi.error(String(err)) }
-                              }}>停止</Button>
-                            </div>
-                          ),
-                        },
-                      ]}
-                    />
-                    <Table
+                      className="tn-m4-monitor-table"
                       size="small"
                       rowKey="experiment_id"
-                      title={() => '实验（Experiments）'}
-                      dataSource={experiments}
-                      pagination={{ pageSize: 8, size: 'small' }}
+                      pagination={false}
+                      dataSource={batch?.experiments ?? []}
                       columns={[
-                        { title: '实验 ID', dataIndex: 'display_id', width: 240, render: (value: string, row: any) => <span className="tn-code">{value ?? row.experiment_id}</span> },
-                        { title: '模型', dataIndex: 'algorithm_label' },
-                        { title: '执行模式', dataIndex: 'mode', width: 100, render: (value: string) => modeLabel(value) },
-                        { title: '数据集', dataIndex: 'dataset_display_id', width: 210, ellipsis: true, render: (value: string, row: any) => value ?? row.dataset_id },
-                        { title: '状态', render: (_: unknown, row: any) => <StatusTag status={row.status} error={row.error} /> },
-                        { title: '创建时间', dataIndex: 'created_at', width: 150 },
                         {
-                          title: '操作',
+                          title: '模型实验',
+                          dataIndex: 'display_id',
+                          render: (value: string, row: any) => value ?? row.experiment_id,
+                        },
+                        { title: '算法', dataIndex: 'algorithm_label' },
+                        {
+                          title: '状态',
                           render: (_: unknown, row: any) => (
-                            <div className="tn-inline">
-                              <Button size="small" onClick={async () => { setExperiment(await api.get<any>(ENDPOINTS.experimentGet(row.experiment_id))); setMonitorTab('monitor') }}>{ACTION_LABELS.open}</Button>
-                              <Tooltip title="复制为草稿，不创建新的实验 ID">
-                                <Button size="small" onClick={async () => {
-                                  try {
-                                    const draft = await api.post<any>(ENDPOINTS.experimentDuplicate(row.experiment_id))
-                                    setAlgorithm(draft.algorithm_key)
-                                    if (draft.algorithm_key === ALL_MODELS) {
-                                      setAllParams((prev) => ({ ...prev, [draft.algorithm_key]: draft.params }))
-                                    } else {
-                                      setParams(draft.params)
-                                      setAllParams((prev) => ({ ...prev, [draft.algorithm_key]: draft.params }))
-                                    }
-                                    setDatasetId(draft.dataset_id)
-                                    messageApi.success('已复制为草稿（尚未创建新的实验 ID，开始训练时才创建）')
-                                  } catch (err) { messageApi.error(err instanceof ApiError ? err.message : String(err)) }
-                                }}>{ACTION_LABELS.duplicate}</Button>
-                              </Tooltip>
-                              <Button size="small" onClick={async () => {
-                                try { await api.post(ENDPOINTS.experimentArchive(row.experiment_id, row.status !== 'Archived')); loadHistory(); messageApi.success('已更新归档状态') } catch (err) { messageApi.error(err instanceof ApiError ? err.message : String(err)) }
-                              }}>{row.status === 'Archived' ? ACTION_LABELS.unarchive : ACTION_LABELS.archive}</Button>
-                              <Popconfirm
-                                title="删除该实验？"
-                                description="被评价引用的实验只能归档。"
-                                onConfirm={async () => {
-                                  try { await api.del(ENDPOINTS.experimentDelete(row.experiment_id)); loadHistory(); messageApi.success('已删除') } catch (err) { messageApi.error(err instanceof ApiError ? err.message : String(err)) }
-                                }}
-                              >
-                                <Button size="small" danger>{ACTION_LABELS.deleteRecord}</Button>
-                              </Popconfirm>
-                            </div>
+                            <StatusTag status={row.status} error={row.error} />
                           ),
+                        },
+                        {
+                          title: '区域进度',
+                          render: (_: unknown, row: any) =>
+                            `${row.region_completed ?? 0} / ${row.region_total ?? 0}`,
                         },
                       ]}
                     />
-                  </div>
-                ),
-              },
-            ]}
-          />
-        }
-      />
+                    {batchRegionRows.length ? (
+                      <Table
+                        className="tn-m4-monitor-table"
+                        size="small"
+                        rowKey={(row: any) => `${row.experiment_id}-${row.region_id}`}
+                        pagination={{ pageSize: 8, size: 'small' }}
+                        dataSource={batchRegionRows}
+                        columns={[
+                          { title: '模型实验', dataIndex: 'parent_display_id' },
+                          { title: '区域', dataIndex: 'region_id' },
+                          {
+                            title: '状态',
+                            render: (_: unknown, row: any) => (
+                              <StatusTag status={row.status} error={row.error} />
+                            ),
+                          },
+                          { title: '开始', dataIndex: 'started_at', render: (value: string) => formatDateTime(value) },
+                          { title: '结束', dataIndex: 'ended_at', render: (value: string) => formatDateTime(value) },
+                          {
+                            title: '耗时',
+                            render: (_: unknown, row: any) =>
+                              durationLabel(row.started_at, row.ended_at),
+                          },
+                        ]}
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    {experiment?.scope === 'all' &&
+                    regionRows.length < (experiment?.region_total ?? 0) ? (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message={`该历史任务仅保存了实际进入执行的 ${regionRows.length} 个区域记录，任务总区域数为 ${experiment?.region_total ?? 0}。未落库区域不推断状态。`}
+                      />
+                    ) : null}
+                    <Table
+                      className="tn-m4-monitor-table"
+                      size="small"
+                      rowKey="region_id"
+                      pagination={regionRows.length > 8 ? { pageSize: 8, size: 'small' } : false}
+                      dataSource={regionRows}
+                      columns={[
+                        { title: '区域', dataIndex: 'region_id' },
+                        {
+                          title: '状态',
+                          render: (_: unknown, row: any) => (
+                            <StatusTag status={row.status} error={row.error} />
+                          ),
+                        },
+                        {
+                          title: '开始时间',
+                          dataIndex: 'started_at',
+                          render: (value: string) => formatDateTime(value),
+                        },
+                        {
+                          title: '结束时间',
+                          dataIndex: 'ended_at',
+                          render: (value: string) => formatDateTime(value),
+                        },
+                        {
+                          title: '耗时',
+                          render: (_: unknown, row: any) =>
+                            durationLabel(row.started_at, row.ended_at),
+                        },
+                      ]}
+                    />
+                  </>
+                )}
+
+                <Tabs
+                  className="tn-m4-monitor-tabs"
+                  activeKey={monitorTab}
+                  onChange={setMonitorTab}
+                  items={[
+                    {
+                      key: 'process',
+                      label: <BiLabel zh="训练过程" en="Training Process" />,
+                      children: activeIsBatch ? (
+                        <div className="tn-m4-process-note">
+                          批量任务按模型和区域独立执行。选择左侧任一实验记录可查看其真实训练过程与日志。
+                        </div>
+                      ) : epochHistory ? (
+                        <div>
+                          <div className="tn-m4-process-title">真实训练与验证 Loss</div>
+                          <LineChart
+                            height={280}
+                            x={epochHistory.epoch.map((epoch: number) => `第 ${epoch} 轮`)}
+                            xName="迭代轮次"
+                            yName="Loss"
+                            series={[
+                              {
+                                name: '训练 Loss',
+                                data: epochHistory.train_loss,
+                                color: '#2467E8',
+                              },
+                              {
+                                name: '验证 Loss',
+                                data: epochHistory.validation_loss,
+                                color: '#F08C00',
+                              },
+                            ]}
+                          />
+                        </div>
+                      ) : (
+                        <div className="tn-m4-process-note">
+                          当前算法不提供标准 epoch 训练过程。此处展示的是真实拟合状态、耗时与后端日志，不生成模拟 Loss 曲线。
+                        </div>
+                      ),
+                    },
+                    {
+                      key: 'logs',
+                      label: <BiLabel zh="训练日志" en="Training Logs" />,
+                      children: (
+                        <div>
+                          <div className="tn-m4-log-toolbar">
+                            <span className="tn-muted">
+                              {activeIsBatch
+                                ? `批量任务 ${batch?.display_id ?? batch?.batch_id} 的成员实验日志`
+                                : `实验 ${experiment?.display_id ?? experiment?.experiment_id} 的真实后端日志`}
+                            </span>
+                            <Button size="small" onClick={downloadLogs} disabled={!logs.length}>
+                              下载日志
+                            </Button>
+                          </div>
+                          {logs.length ? (
+                            <div className="tn-m4-log-console" data-testid="m4-training-logs">
+                              {logs.map((entry, index) => (
+                                <div key={`${entry.at}-${index}`}>
+                                  <span className="tn-m4-log-time">[{entry.at ?? '—'}]</span>{' '}
+                                  <span className="tn-m4-log-level">
+                                    {String(entry.level ?? 'info').toUpperCase()}
+                                  </span>{' '}
+                                  {entry.experiment_display_id ? `[${entry.experiment_display_id}] ` : ''}
+                                  {entry.region_id ? `(${entry.region_id}) ` : ''}
+                                  {entry.message}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <EmptyState text="当前任务没有可用日志；任务可能仍在排队或尚未开始。" />
+                          )}
+                        </div>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            ) : (
+              <EmptyState text="训练监控将显示真实任务进度、区域状态、训练过程与日志。" />
+            )}
+          </Card>
+        </div>
+      </div>
     </div>
   )
-
-  function resetAllModels() {
-    const next: Record<string, Values> = {}
-    models.forEach((model) => {
-      next[model.key] = defaultsFor(model.key)
-    })
-    setAllParams(next)
-    setCustomized({})
-    messageApi.success('已恢复 12 个算法的默认参数（草稿级，不影响已保存实验）')
-  }
 }

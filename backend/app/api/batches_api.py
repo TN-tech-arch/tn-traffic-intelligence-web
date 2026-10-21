@@ -297,7 +297,8 @@ def _region_summary(experiment_ids: list[str]) -> list[dict[str, Any]]:
     placeholders = ",".join("?" for _ in experiment_ids)
     rows = query_all(
         f"""
-        SELECT experiment_id, region_id, region_experiment_id, status, metrics_json, error
+        SELECT experiment_id, region_id, region_experiment_id, status, metrics_json, error,
+               started_at, ended_at
         FROM experiment_region_models WHERE experiment_id IN ({placeholders})
         ORDER BY experiment_id, region_id
         """,
@@ -322,6 +323,8 @@ def _region_summary(experiment_ids: list[str]) -> list[dict[str, Any]]:
             "status": r["status"],
             "metrics": json_loads(r["metrics_json"]),
             "error": r["error"],
+            "started_at": r["started_at"],
+            "ended_at": r["ended_at"],
         }
         for r in rows
     ]
