@@ -136,12 +136,7 @@ export const ENDPOINTS = {
   evaluationSeries: (id: string, experiment: string, region?: string, horizonStep?: number) =>
     `/api/evaluations/${id}/series?experiment_id=${experiment}` +
     `${region ? `&region_id=${encodeURIComponent(region)}` : ''}${horizonStep ? `&horizon_step=${horizonStep}` : ''}`,
-  evaluationExport: (id: string) => `/api/evaluations/${id}/export?format=csv`,
   evaluationDelete: (id: string) => `/api/evaluations/${id}`,
   evaluationStop: (id: string) => `/api/evaluations/${id}/stop`,
   job: (id: string) => `/api/jobs/${id}`,
-}
-
-export function downloadUrl(path: string): string {
-  return `${BASE}${path}`
 }

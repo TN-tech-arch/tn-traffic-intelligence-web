@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import csv
-import io
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Query
-from fastapi.responses import PlainTextResponse
 
 from app.api.deps import create_job, raise_if_invalid
 from app.core.errors import Conflict, NotFound
@@ -17,6 +15,51 @@ from app.services.datasets import get_dataset, load_dataset
 from app.services.validation import validate_m5
 
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
+
+
+def _test_range_issues(values: dict[str, Any], dataset: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not dataset or values.get("test_selection") != "range":
+        return []
+    raw_start = values.get("range_start_at")
+    raw_end = values.get("range_end_at")
+    if not raw_start or not raw_end:
+        return []
+    try:
+        start = datetime.fromisoformat(str(raw_start).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(raw_end).replace("Z", "+00:00"))
+        boundaries = dataset.get("split_boundaries") or []
+        test_boundary = boundaries[2] if len(boundaries) > 2 else None
+        valid_start = datetime.fromisoformat(str(test_boundary["start_at"]).replace("Z", "+00:00"))
+        valid_end = datetime.fromisoformat(str(test_boundary["end_at"]).replace("Z", "+00:00"))
+    except (TypeError, ValueError, KeyError):
+        return [{
+            "path": "m5.range_start_at",
+            "code": "RANGE_INVALID",
+            "severity": "error",
+            "message": "测试时间范围格式无效。",
+            "suggestion": "使用 YYYY-MM-DD HH:mm:ss 格式。",
+            "received_value": [raw_start, raw_end],
+        }]
+    issues: list[dict[str, Any]] = []
+    if start > end:
+        issues.append({
+            "path": "m5.range_start_at",
+            "code": "RANGE_ORDER_INVALID",
+            "severity": "error",
+            "message": "测试开始时间不能晚于结束时间。",
+            "suggestion": "调整开始或结束时间。",
+            "received_value": [raw_start, raw_end],
+        })
+    if start < valid_start or end > valid_end:
+        issues.append({
+            "path": "m5.range_start_at",
+            "code": "RANGE_OUTSIDE_TEST",
+            "severity": "error",
+            "message": "自定义范围必须位于该数据集的有效测试集范围内。",
+            "suggestion": f"选择 {test_boundary['start_at']} 至 {test_boundary['end_at']} 之间的时间。",
+            "received_value": [raw_start, raw_end],
+        })
+    return issues
 
 
 def _load_members(experiment_ids: list[str]) -> list[dict[str, Any]]:
@@ -62,7 +105,11 @@ def _load_members(experiment_ids: list[str]) -> list[dict[str, Any]]:
                 if batch
                 else None,
                 "region_ids": snapshot.get("region_ids") or [],
+                "params": json_loads(row["params_json"]) or {},
+                "snapshot": snapshot,
                 "created_at": row["created_at"],
+                "started_at": row["started_at"],
+                "ended_at": row["ended_at"],
                 "error": row["error"],
             }
         )
@@ -107,6 +154,7 @@ def _prepare(payload: dict[str, Any]) -> dict[str, Any]:
         "horizon_step": payload.get("horizon_step", 1),
     }
     issues = validate_m5(values, experiments=experiments, dataset=dataset)
+    issues.extend(_test_range_issues(values, dataset))
     raise_if_invalid(issues, message="评价配置校验未通过")
     regions = [region_id]
     if not regions or not regions[0]:
@@ -125,6 +173,7 @@ def validate(payload: dict[str, Any] = Body(...)) -> dict:
     dataset = get_dataset(dataset_id) if dataset_id else None
     experiments = _load_members(payload.get("experiment_ids") or [])
     issues = validate_m5(payload, experiments=experiments, dataset=dataset)
+    issues.extend(_test_range_issues(payload, dataset))
     common = _common_protocol(experiments, dataset)
     return {
         "valid": not any(i["severity"] == "error" for i in issues),
@@ -137,7 +186,23 @@ def validate(payload: dict[str, Any] = Body(...)) -> dict:
 def _common_protocol(experiments: list[dict[str, Any]], dataset: dict[str, Any] | None) -> dict[str, Any]:
     comparable = [e for e in experiments if e.get("status") in ("Completed", "Partial")]
     datasets = {e.get("dataset_id") for e in comparable}
+    if dataset and dataset.get("dataset_id"):
+        datasets.add(dataset["dataset_id"])
     scopes = {e.get("scope") for e in comparable}
+    hashes = {
+        ((e.get("snapshot") or {}).get("dataset_snapshot") or {}).get("hash")
+        for e in comparable
+    }
+    hashes.discard(None)
+    if dataset and dataset.get("hash"):
+        hashes.add(dataset["hash"])
+    horizons = {
+        ((e.get("snapshot") or {}).get("dataset_snapshot") or {}).get("H")
+        for e in comparable
+    }
+    horizons.discard(None)
+    if dataset and dataset.get("H") is not None:
+        horizons.add(dataset["H"])
     return {
         "eligible_experiments": [e["experiment_id"] for e in comparable],
         "non_eligible": [
@@ -153,8 +218,15 @@ def _common_protocol(experiments: list[dict[str, Any]], dataset: dict[str, Any] 
         "same_dataset": len(datasets) <= 1,
         "datasets": sorted(d for d in datasets if d),
         "same_scope": len(scopes) <= 1,
-        "same_horizon": bool(dataset and all(dataset["H"] for _ in comparable)),
-        "standard_ranking_allowed": len(datasets) <= 1 and len(scopes) <= 1 and bool(comparable),
+        "same_dataset_hash": len(hashes) <= 1 and (not dataset or not hashes or hashes == {dataset.get("hash")}),
+        "same_horizon": len(horizons) <= 1 and (not dataset or not horizons or horizons == {dataset["H"]}),
+        "standard_ranking_allowed": (
+            len(datasets) <= 1
+            and len(scopes) <= 1
+            and len(hashes) <= 1
+            and len(horizons) <= 1
+            and bool(comparable)
+        ),
         "note_zh": "只有相同 Dataset、H 与 Test 目标时间的实验才进入标准排名；不同协议会单独列出。",
     }
 
@@ -163,6 +235,7 @@ def _common_protocol(experiments: list[dict[str, Any]], dataset: dict[str, Any] 
 def run(payload: dict[str, Any] = Body(...)) -> dict:
     prepared = _prepare(payload)
     bundle = load_dataset(prepared["dataset"]["dataset_id"])
+    test_boundary = (prepared["dataset"].get("split_boundaries") or [[], [], [{}]])[-1]
     protocol = {
         "dataset_id": prepared["dataset"]["dataset_id"],
         "dataset_hash": prepared["dataset"]["hash"],
@@ -174,9 +247,27 @@ def run(payload: dict[str, Any] = Body(...)) -> dict:
         "test_selection": prepared["values"]["test_selection"],
         "range_start_at": prepared["values"].get("range_start_at"),
         "range_end_at": prepared["values"].get("range_end_at"),
-        "horizon_step": prepared["values"]["horizon_step"],
+        "display_horizon_step": prepared["values"].get("horizon_step", 1),
+        "metric_protocol_detail": {
+            "overall": "all valid test windows across h=1..H",
+            "per_horizon": "each horizon step calculated independently",
+            "deduplication": "(experiment_id, region_id, window_index, horizon_step) counted once",
+        },
         "metric_protocol": "(region_id, window_index, horizon_step) 每个样本计一次；正式成绩使用 Full Test",
         "experiments": [e["experiment_id"] for e in prepared["experiments"]],
+        "selected_experiments": [
+            {
+                "experiment_id": e["experiment_id"],
+                "display_id": e.get("display_id") or e["experiment_id"],
+                "algorithm_key": e.get("algorithm_key"),
+                "algorithm_label": e.get("algorithm_label"),
+                "mode": e.get("mode"),
+                "params": e.get("params") or {},
+                "status": e.get("status"),
+                "training_completed_at": e.get("ended_at"),
+            }
+            for e in prepared["experiments"]
+        ],
         "created_at": now_utc(),
     }
     new_id = make_id()
@@ -197,7 +288,13 @@ def run(payload: dict[str, Any] = Body(...)) -> dict:
                 prepared["values"]["scope"],
                 prepared["regions"][0] if prepared["values"]["scope"] == "single" else None,
                 json_dumps(protocol),
-                json_dumps({"selection": prepared["values"]["test_selection"]}),
+                json_dumps({
+                    "selection": prepared["values"]["test_selection"],
+                    "requested_start_at": prepared["values"].get("range_start_at"),
+                    "requested_end_at": prepared["values"].get("range_end_at"),
+                    "valid_test_start_at": test_boundary.get("start_at"),
+                    "valid_test_end_at": test_boundary.get("end_at"),
+                }),
                 now_utc(),
             ),
         )
@@ -238,7 +335,8 @@ def _evaluation_public(row, *, include_predictions: bool = False, limit: int = 4
     )
     experiment_rows = query_all(
         f"""
-        SELECT experiment_id, display_id, batch_id
+        SELECT experiment_id, display_id, batch_id, algorithm_key, algorithm_label, mode,
+               status, params_json, snapshot_json, created_at, started_at, ended_at
         FROM experiments
         WHERE experiment_id IN ({",".join("?" for _ in members)})
         """,
@@ -275,13 +373,13 @@ def _evaluation_public(row, *, include_predictions: bool = False, limit: int = 4
         "region_id": row["region_id"],
         "status": row["status"],
         "protocol": json_loads(row["protocol_json"]),
+        "test_range": json_loads(row["test_range_json"]),
         "metrics_summary": metrics_summary,
         "progress": json_loads(row["progress_json"]),
         "error": row["error"],
         "created_at": row["created_at"],
         "started_at": row["started_at"],
         "ended_at": row["ended_at"],
-        "exported_at": row["exported_at"],
         "experiments": [
             {
                 "experiment_id": m["experiment_id"],
@@ -304,6 +402,36 @@ def _evaluation_public(row, *, include_predictions: bool = False, limit: int = 4
                 and experiment_lookup[m["experiment_id"]]["batch_id"] in batch_lookup
                 else None,
                 "algorithm_key": m["algorithm_key"],
+                "algorithm_label_archive": (
+                    experiment_lookup[m["experiment_id"]]["algorithm_label"]
+                    if m["experiment_id"] in experiment_lookup
+                    else m["algorithm_key"]
+                ),
+                "mode": (
+                    experiment_lookup[m["experiment_id"]]["mode"]
+                    if m["experiment_id"] in experiment_lookup
+                    else None
+                ),
+                "params": (
+                    json_loads(experiment_lookup[m["experiment_id"]]["params_json"]) or {}
+                    if m["experiment_id"] in experiment_lookup
+                    else {}
+                ),
+                "training_status": (
+                    experiment_lookup[m["experiment_id"]]["status"]
+                    if m["experiment_id"] in experiment_lookup
+                    else "Missing"
+                ),
+                "training_created_at": (
+                    experiment_lookup[m["experiment_id"]]["created_at"]
+                    if m["experiment_id"] in experiment_lookup
+                    else None
+                ),
+                "training_completed_at": (
+                    experiment_lookup[m["experiment_id"]]["ended_at"]
+                    if m["experiment_id"] in experiment_lookup
+                    else None
+                ),
                 "status": m["status"],
                 "coverage_regions": m["coverage_regions"],
                 "sample_count": m["sample_count"],
@@ -386,33 +514,9 @@ def series(evaluation_id: str, experiment_id: str = Query(...), region_id: str |
     }
 
 
-@router.get("/{evaluation_id}/export")
-def export(evaluation_id: str, format: str = Query("csv")) -> PlainTextResponse:
-    row = query_one("SELECT * FROM evaluations WHERE evaluation_id=?", (evaluation_id,))
-    if row is None:
-        raise NotFound(f"评价 {evaluation_id} 不存在")
-    rows = query_all(
-        """
-        SELECT experiment_id, region_id, window_index, horizon_step, target_at, y_true, y_pred
-        FROM evaluation_predictions WHERE evaluation_id=? ORDER BY experiment_id, region_id, window_index, horizon_step
-        """,
-        (evaluation_id,),
-    )
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(["evaluation_id", "experiment_id", "region_id", "window_index", "horizon_step",
-                     "target_at", "y_true", "y_pred"])
-    for r in rows:
-        writer.writerow([evaluation_id, r["experiment_id"], r["region_id"], r["window_index"],
-                         r["horizon_step"], r["target_at"], r["y_true"], r["y_pred"]])
-    get_connection().execute(
-        "UPDATE evaluations SET exported_at=? WHERE evaluation_id=?", (now_utc(), evaluation_id)
-    )
-    return PlainTextResponse(
-        buffer.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{evaluation_id}.csv"'},
-    )
+@router.api_route("/{evaluation_id}/export", methods=["GET", "POST"])
+def export_removed(evaluation_id: str) -> None:
+    raise NotFound("Module 5 导出功能已移除。", code="EXPORT_REMOVED")
 
 
 @router.delete("/{evaluation_id}")

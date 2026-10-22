@@ -475,22 +475,18 @@ try {
   // ------------------------------------------------------------ Module 5
   await page.click('.tn-nav-item >> text=Evaluation')
   await page.waitForTimeout(2500)
-  const m5Tabs = (await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
+  const m5Text = await page.locator('body').innerText()
   record(
-    'T31/T39 M5 三个右侧 Tab + 历史管理折叠区',
-    ['Metrics Overview', 'Model Ranking', 'Regional Performance'].every((t) =>
-      m5Tabs.some((text) => text.includes(t)),
-    ) &&
-      (await page.locator('text=评价历史（Evaluation History）').count()) > 0,
-    m5Tabs.join('|'),
+    'T31/T39 M5 两栏布局 + 左侧评价历史',
+    (await page.locator('.tn-three-pane.tn-two-pane').count()) === 1 &&
+      (await page.locator('.tn-pane-info').count()) === 0 &&
+      m5Text.includes('评价历史（Evaluation History）'),
   )
-  const centerTabs = (await page.locator('.tn-three-pane section').nth(1).locator('.ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
   record(
-    'T29 M5 中央四个视图齐全',
-    ['Prediction Comparison', 'Error Analysis', 'Forecast Horizon Analysis'].every((t) =>
-      centerTabs.some((text) => text.includes(t)),
-    ),
-    centerTabs.join('|'),
+    'T29 M5 中央五个纵向区域齐全',
+    ['Forecast Details', 'Prediction Comparison', 'Forecast Horizon Analysis', 'Error Analysis', 'Evaluation Overview'].every(
+      (text) => m5Text.includes(text),
+    ) && (await page.locator('.ant-tabs').count()) === 0,
   )
   await page.screenshot({ path: path.join(SHOTS, '06-module5-evaluation.png'), fullPage: true })
 

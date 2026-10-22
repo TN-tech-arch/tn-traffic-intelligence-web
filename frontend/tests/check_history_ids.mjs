@@ -58,10 +58,8 @@ check(
 await page.screenshot({ path: path.join(SHOTS, 'history-ids-module3.png'), fullPage: true })
 
 await page.goto(`${BASE}/training`, { waitUntil: 'domcontentloaded' })
-await page.waitForSelector('.ant-tabs-tab', { timeout: 60000 })
-const historyTab = page.locator('.ant-tabs-tab').filter({ hasText: 'Experiment History' }).first()
-await historyTab.waitFor({ state: 'visible', timeout: 60000 })
-await historyTab.click()
+await page.waitForSelector('.tn-m4-layout', { timeout: 60000 })
+await page.getByTestId('m4-experiment-history').waitFor({ state: 'visible', timeout: 60000 })
 await page.waitForTimeout(1000)
 const experimentApi = await page.evaluate(async () => {
   const response = await fetch('/api/experiments?limit=500')
@@ -71,11 +69,10 @@ const batchApi = await page.evaluate(async () => {
   const response = await fetch('/api/batches?limit=200')
   return (await response.json()).batches
 })
-const trainingTables = await page.locator('.tn-pane .ant-table-tbody').allInnerTexts()
-const trainingText = trainingTables.join('\n')
+const trainingText = await page.getByTestId('m4-experiment-history').innerText()
 check(
-  'Module 4 history renders BATCH IDs',
-  /BATCH-[A-Z0-9-]+-\d{4,}/.test(trainingText),
+  'Module 4 batch records remain available with BATCH display IDs',
+  batchApi.every((row) => /^BATCH-[A-Z0-9-]+-\d{4,}$/.test(row.display_id ?? row.batch_id)),
   `${batchApi.length} batches available`,
 )
 check(

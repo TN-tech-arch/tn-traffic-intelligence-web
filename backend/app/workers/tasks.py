@@ -101,6 +101,60 @@ def _region_batch(bundle, region_id: str, split: str) -> WindowBatch:
     )
 
 
+def _filter_test_batch(
+    batch: WindowBatch,
+    protocol: dict[str, Any],
+) -> tuple[WindowBatch, dict[str, Any]]:
+    selection = str(protocol.get("test_selection") or "full")
+    if selection == "range":
+        raw_start = protocol.get("range_start_at")
+        raw_end = protocol.get("range_end_at")
+        if not raw_start or not raw_end:
+            raise ValueError("custom test range requires both start and end")
+        start = np.datetime64(str(raw_start).replace(" ", "T"))
+        end = np.datetime64(str(raw_end).replace(" ", "T"))
+        first_target = batch.target_timestamps[:, 0]
+        last_target = batch.target_timestamps[:, -1]
+        mask = (first_target >= start) & (last_target <= end)
+        batch = WindowBatch(
+            starts=batch.starts[mask],
+            X_scaled=batch.X_scaled[mask],
+            Y_scaled=batch.Y_scaled[mask],
+            X_raw=batch.X_raw[mask],
+            Y_raw=batch.Y_raw[mask],
+            target_index=batch.target_index[mask],
+            target_timestamps=batch.target_timestamps[mask],
+        )
+    if batch.size:
+        timestamps = batch.target_timestamps.reshape(-1)
+        actual_start = str(np.datetime_as_string(timestamps.min(), unit="s")).replace("T", " ")
+        actual_end = str(np.datetime_as_string(timestamps.max(), unit="s")).replace("T", " ")
+    else:
+        actual_start = None
+        actual_end = None
+    return batch, {
+        "selection": selection,
+        "requested_start_at": protocol.get("range_start_at"),
+        "requested_end_at": protocol.get("range_end_at"),
+        "actual_start_at": actual_start,
+        "actual_end_at": actual_end,
+        "window_count": batch.size,
+        "valid_prediction_count": int(batch.size * int(batch.Y_raw.shape[1])) if batch.size else 0,
+    }
+
+
+def _evaluation_metrics(truth: np.ndarray, prediction: np.ndarray) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    overall = all_metrics(truth, prediction)
+    per_horizon = [
+        {
+            "horizon_step": horizon + 1,
+            **all_metrics(truth[:, horizon], prediction[:, horizon]),
+        }
+        for horizon in range(truth.shape[1])
+    ]
+    return overall, per_horizon
+
+
 def _region_context(bundle, region_id: str) -> RegionContext:
     index = bundle.region_index(region_id)
     return RegionContext(
@@ -475,6 +529,7 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
             conn.execute("COMMIT")
 
     experiment_reports: list[dict[str, Any]] = []
+    actual_test_range: dict[str, Any] = {}
     cancelled = False
     total_members = len(members)
     for member_index, member in enumerate(members):
@@ -511,7 +566,11 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
                 continue
             try:
                 region = _region_context(bundle, region_id)
-                batch = _region_batch(bundle, region_id, "test")
+                batch, test_range_detail = _filter_test_batch(
+                    _region_batch(bundle, region_id, "test"),
+                    protocol,
+                )
+                actual_test_range = actual_test_range or test_range_detail
                 if batch.size == 0:
                     errors.append({"region_id": region_id, "error": "测试集没有可用窗口"})
                     continue
@@ -538,8 +597,14 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
                 if not np.isfinite(prediction).all():
                     raise ValueError("预测包含非有限值")
                 insert_predictions(experiment_id, region_id, batch.starts, truth, prediction)
-                metrics = all_metrics(truth, prediction)
-                per_region.append({"region_id": region_id, **metrics, "file": None})
+                metrics, per_horizon = _evaluation_metrics(truth, prediction)
+                per_region.append({
+                    "region_id": region_id,
+                    **metrics,
+                    "per_horizon": per_horizon,
+                    "test_window_count": batch.size,
+                    "file": None,
+                })
                 pooled_true.append(truth.ravel())
                 pooled_pred.append(prediction.ravel())
             except Exception as exc:
@@ -550,6 +615,19 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
             if pooled_true
             else {}
         )
+        per_horizon = []
+        if per_region and bundle.H:
+            for horizon_index in range(bundle.H):
+                groups = [
+                    region_report["per_horizon"][horizon_index]
+                    for region_report in per_region
+                    if len(region_report.get("per_horizon") or []) > horizon_index
+                ]
+                aggregate = macro_average(groups) if groups else {}
+                per_horizon.append({
+                    "horizon_step": horizon_index + 1,
+                    **aggregate,
+                })
         status = "Completed" if not errors else ("Partial" if per_region else "Failed")
         get_connection().execute(
             """
@@ -560,7 +638,13 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
                 status,
                 len(per_region),
                 int(macro.get("n_samples") or 0),
-                json_dumps({"macro": macro, "pooled": pooled, "per_region": per_region, "errors": errors[:50]}),
+                json_dumps({
+                    "macro": macro,
+                    "pooled": pooled,
+                    "per_horizon": per_horizon,
+                    "per_region": per_region,
+                    "errors": errors[:50],
+                }),
                 (json_dumps(errors[:5]) if errors else None),
                 evaluation_id,
                 experiment_id,
@@ -576,6 +660,7 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
                 "coverage_regions": len(per_region),
                 "macro": macro,
                 "pooled": pooled,
+                "per_horizon": per_horizon,
                 "errors": errors[:20],
             }
         )
@@ -590,13 +675,15 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
             for i, r in enumerate(ranking)
         ],
         "protocol": protocol,
+        "test_range": actual_test_range,
         "duration_seconds": round(time.time() - started, 3),
         "horizon_step": horizon_step,
     }
     status = "Stopped" if cancelled else ("Completed" if experiment_reports else "Failed")
     get_connection().execute(
-        "UPDATE evaluations SET status=?, metrics_summary_json=?, artifact_ref=?, ended_at=? WHERE evaluation_id=?",
-        (status, json_dumps(summary), None, now_utc(), evaluation_id),
+        "UPDATE evaluations SET status=?, metrics_summary_json=?, test_range_json=?, artifact_ref=?, "
+        "ended_at=? WHERE evaluation_id=?",
+        (status, json_dumps(summary), json_dumps(actual_test_range), None, now_utc(), evaluation_id),
     )
     reporter("Ready", 100.0, f"评价完成：{status}，共 {len(experiment_reports)} 个实验")
     log_event("evaluation", evaluation_id, "finished", {"status": status, "experiments": len(experiment_reports)})

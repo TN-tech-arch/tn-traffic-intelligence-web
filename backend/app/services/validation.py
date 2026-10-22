@@ -530,9 +530,6 @@ M5_SCHEMA: list[dict[str, Any]] = [
     {"key": "range_end_at", "label": "Range End", "label_zh": "子集终点", "type": "string", "default": "",
      "help_zh": "Selected Range 的结束时间（ISO 格式）。", "suggestion_zh": "格式 2024-08-05 23:45:00。",
      "required": False, "visible_when": {"test_selection": "range"}},
-    {"key": "horizon_step", "label": "Horizon Step", "label_zh": "显示步长", "type": "integer", "default": 1,
-     "min": 1, "help_zh": "图表默认展示的 horizon step（不改动 H，也不影响指标协议）。",
-     "suggestion_zh": "默认 1。"},
 ]
 
 MODULE_SCHEMAS = {"m1": M1_SCHEMA, "m2": M2_SCHEMA, "m3": M3_SCHEMA, "m5": M5_SCHEMA}
@@ -815,7 +812,7 @@ def validate_m5(
         incompatible: list[str] = []
         for exp in experiments:
             if exp.get("status") not in ("Completed", "Partial"):
-                issues.append(warning(
+                issues.append(error(
                     f"m5.experiment_ids.{exp['experiment_id']}", "EXPERIMENT_NOT_READY",
                     f"实验 {exp['experiment_id']}（{exp.get('algorithm_label')}）状态为 {exp.get('status')}，"
                     "无法进入正式排名。",
@@ -823,7 +820,7 @@ def validate_m5(
                 continue
             if exp.get("dataset_id") != dataset.get("dataset_id"):
                 incompatible.append(exp["experiment_id"])
-                issues.append(warning(
+                issues.append(error(
                     f"m5.experiment_ids.{exp['experiment_id']}", "DATASET_MISMATCH",
                     f"实验 {exp['experiment_id']} 使用数据集 {exp.get('dataset_id')}，"
                     f"与当前数据集 {dataset.get('dataset_id')} 不同，测试目标时间不可比。",
@@ -837,6 +834,18 @@ def validate_m5(
                     exp.get("scope"),
                 ))
                 continue
+            snapshot = (exp.get("snapshot") or {}).get("dataset_snapshot") or {}
+            if snapshot.get("hash") and dataset.get("hash") and snapshot["hash"] != dataset["hash"]:
+                issues.append(error(
+                    f"m5.experiment_ids.{exp['experiment_id']}", "DATASET_VERSION_MISMATCH",
+                    f"实验 {exp['experiment_id']} 使用旧的数据集版本，不能与当前数据集直接比较。",
+                    "请重新训练，或选择使用当前数据集版本的实验。", snapshot.get("hash")))
+            for key in ("L", "H", "S"):
+                if snapshot.get(key) is not None and int(snapshot[key]) != int(dataset.get(key) or 0):
+                    issues.append(error(
+                        f"m5.experiment_ids.{exp['experiment_id']}", f"{key}_MISMATCH",
+                        f"实验 {exp['experiment_id']} 的 {key} 与当前数据集不一致。",
+                        "选择与当前数据集 L/H/S 完全一致的实验。", snapshot.get(key)))
             if exp.get("region_ids"):
                 if values.get("region_id") and values["region_id"] not in exp["region_ids"]:
                     issues.append(error(

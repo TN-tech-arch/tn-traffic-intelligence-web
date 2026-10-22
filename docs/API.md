@@ -75,7 +75,6 @@
 | POST | `/api/evaluations/run` | 创建 Evaluation ID 与推理 job |
 | GET | `/api/evaluations` / `/{id}` | 历史 / 结果（逐实验 macro+pooled+逐区域指标、排名、预测样本） |
 | GET | `/api/evaluations/{id}/series?experiment_id=&region_id=&horizon_step=` | 预测/真实序列（供图表） |
-| GET | `/api/evaluations/{id}/export?format=csv` | 导出真实预测明细 |
 | POST | `/api/evaluations/{id}/stop` / DELETE | 停止 / 删除本层结果（不影响上游） |
 
 ## 8. 统一校验

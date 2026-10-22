@@ -68,10 +68,9 @@ console.log('saved 08-module2-clustering-results.png')
 
 await page.goto(`${BASE}/evaluation`, { waitUntil: 'networkidle' })
 await page.waitForTimeout(3000)
-await page.locator('.ant-collapse-header:has-text("Evaluation History")').first().click()
-await page.waitForTimeout(800)
-await page.locator('.tn-history-row button:has-text("View")').first().click()
-await page.waitForTimeout(6000)
+await page.getByTestId('m5-history').waitFor()
+await page.locator('.tn-history-row button').filter({ hasText: /查\s*看/ }).first().click()
+await page.getByTestId('m5-forecast-details').getByText('正在查看历史评价').waitFor()
 await page.screenshot({ path: path.join(SHOTS, '09-module5-evaluation-results.png'), fullPage: true })
 console.log('saved 09-module5-evaluation-results.png')
 

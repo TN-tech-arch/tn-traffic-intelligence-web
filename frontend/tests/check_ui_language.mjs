@@ -98,7 +98,13 @@ const moduleChecks = [
     title: '模块五｜预测结果评估',
     subtitle: 'Prediction & Evaluation',
     shot: '40-language-m5.png',
-    must: ['预测对比（Prediction Comparison）', '误差分析（Error Analysis）', '指标概览（Metrics Overview）', '区域表现（Regional Performance）'],
+    must: [
+      '预测详情（Forecast Details）',
+      '预测对比（Prediction Comparison）',
+      '预测时域分析（Forecast Horizon Analysis）',
+      '误差分析（Error Analysis）',
+      '评估概览（Evaluation Overview）',
+    ],
   },
 ]
 

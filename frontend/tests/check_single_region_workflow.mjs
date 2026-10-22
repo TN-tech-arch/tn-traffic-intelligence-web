@@ -96,13 +96,14 @@ check(
     (await page.locator('[data-field="m5.scope"]').count()) === 0,
 )
 check(
-  '7 Module 5 keeps single-region comparison and metrics tabs',
-  ['Prediction Comparison', 'Error Analysis', 'Forecast Horizon Analysis'].every((label) =>
+  '7 Module 5 uses the five-section vertical workspace without exports',
+  ['Forecast Details', 'Prediction Comparison', 'Forecast Horizon Analysis', 'Error Analysis', 'Evaluation Overview'].every((label) =>
     evaluationText.includes(label),
   ) &&
-    ['Metrics Overview', 'Model Ranking', 'Regional Performance'].every((label) =>
-      evaluationText.includes(label),
-    ),
+    (await page.locator('.tn-pane-info').count()) === 0 &&
+    (await page.locator('.ant-tabs').count()) === 0 &&
+    !evaluationText.includes('导出') &&
+    !evaluationText.includes('下载'),
 )
 
 check(
