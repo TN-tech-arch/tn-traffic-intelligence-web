@@ -138,12 +138,13 @@ Temporal 内部**不再有二级 Tab**，而是按顺序纵向排列：
 
 ## 6. Module 5 · Evaluation
 
-1. 选择单区域数据集；可用 `Batch ID` 一键载入该批次成功实验（失败/跳过项会列原因）。
-2. 勾选 Experiment，查看只读快照与兼容性检查。
-3. `Test Range` 默认 `Full Test`；`Selected Test Range` 只用于可视化子集。
-4. `Run Prediction` 生成 `Evaluation ID`。
-5. 中央三视图：`Prediction Comparison`、`Error Analysis`、`Forecast Horizon Analysis`。
-6. 右侧：`Metrics Overview`、`Model Ranking`、`Regional Performance`，底部 `Evaluation History / Management`。
+1. 选择模块三构建的单区域数据集。
+2. 手动勾选 EXP ID；不自动选择实验，也不要求选择 BATCH ID。
+3. 测试范围默认为完整测试集；自定义范围只能位于有效测试集内。
+4. 运行评估后，中央按顺序显示预测详情、预测对比、预测时域分析、误差分析和评估概览。
+5. 预测对比内部可切换 h=1 至 h=H；该操作只改变展示，不改变模型或整体指标。
+6. 评价历史位于左侧，可查看保存时的数据集、EXP 清单、测试范围和结果，或删除该评价记录。
+7. Module 5 不提供任何导出、下载、CSV、Excel 或图表下载入口。
 
 ## 7. 常见错误与处理
 

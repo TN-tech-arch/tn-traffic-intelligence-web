@@ -56,6 +56,31 @@ def test_m5_export_endpoint_is_removed():
     assert response.status_code == 404
 
 
+def test_m5_custom_range_must_stay_inside_test_split():
+    dataset = next(item for item in _datasets() if item["scope"] == "single")
+    experiment = next(
+        item for item in client.get("/api/experiments?limit=500").json()["experiments"]
+        if item["dataset_id"] == dataset["dataset_id"]
+        and item.get("status") in ("Completed", "Partial")
+    )
+    response = client.post(
+        "/api/evaluations/validate",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "scope": "single",
+            "region_id": dataset["region_ids"][0],
+            "experiment_ids": [experiment["experiment_id"]],
+            "test_selection": "range",
+            "range_start_at": "1900-01-01 00:00:00",
+            "range_end_at": "1900-01-02 00:00:00",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["valid"] is False
+    assert any(item["code"] == "RANGE_OUTSIDE_TEST" for item in payload["issues"])
+
+
 def test_m5_test_range_filters_real_test_windows():
     dataset = next(
         item for item in _datasets()
