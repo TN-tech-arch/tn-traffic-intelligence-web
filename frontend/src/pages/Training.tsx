@@ -20,6 +20,7 @@ import StatusTag from '../components/StatusTag'
 import { LineChart } from '../components/Charts'
 import { useGroupValidation, useSchema } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec, type Values } from '../validation/engine'
+import { formatShanghaiDateTime } from '../utils/shanghaiDateTime'
 import {
   MODULE_META,
   frequencyLabel,
@@ -37,7 +38,7 @@ const RUNNING_STATUSES = ['Queued', 'Running', 'Stopping']
 
 function formatDateTime(value?: string | null) {
   if (!value) return '—'
-  return String(value).replace('T', ' ').replace(/(\.\d+)?Z$/, '')
+  return formatShanghaiDateTime(value)
 }
 
 function durationLabel(start?: string | null, end?: string | null) {
@@ -183,7 +184,14 @@ export default function Training() {
     if (experiment) {
       api
         .get<any>(ENDPOINTS.experimentLogs(experiment.experiment_id))
-        .then((data) => setLogs(data.logs ?? []))
+        .then((data) =>
+          setLogs(
+            (data.logs ?? []).map((entry: any) => ({
+              ...entry,
+              at: formatDateTime(entry.at),
+            })),
+          ),
+        )
         .catch(() => setLogs([]))
       return
     }
@@ -209,7 +217,11 @@ export default function Training() {
       setLogs(
         groups
           .flat()
-          .sort((left, right) => String(left.at ?? '').localeCompare(String(right.at ?? ''))),
+          .sort((left, right) => String(left.at ?? '').localeCompare(String(right.at ?? '')))
+          .map((entry) => ({
+            ...entry,
+            at: formatDateTime(entry.at),
+          })),
       )
     })
     return () => {

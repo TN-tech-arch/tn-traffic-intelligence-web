@@ -308,6 +308,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "installed Module 4 Playwright regression failed"
     }
+    & node "tests\check_training_time_format.mjs"
+    if ($LASTEXITCODE -ne 0) {
+        throw "installed Module 4 time-format regression failed"
+    }
     & node "tests\check_single_region_workflow.mjs"
     if ($LASTEXITCODE -ne 0) {
         throw "installed single-region Playwright regression failed"
