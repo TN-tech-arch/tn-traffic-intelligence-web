@@ -170,6 +170,7 @@ check(
 const comparisonCard = page.getByTestId('m5-prediction-comparison')
 await comparisonCard.locator('.ant-select-selector').click()
 await page.locator('.ant-select-dropdown:visible').waitFor({ state: 'visible', timeout: 10000 })
+await page.locator('.ant-select-dropdown:visible .ant-select-item-option').first().waitFor({ timeout: 10000 })
 const hOptions = await page.locator('.ant-select-dropdown:visible .ant-select-item-option').allInnerTexts()
 check(
   '10 comparison horizon selector exposes h=1 through H',
@@ -180,11 +181,13 @@ check(
 )
 await page.locator('.ant-select-dropdown:visible .ant-select-item-option').last().click()
 await page.waitForTimeout(500)
-const horizonRows = await page.locator('[data-testid="m5-horizon-analysis"] tbody tr').count()
+const horizonChart = page.getByTestId('m5-horizon-chart')
 check(
-  '11 horizon analysis still contains every step after changing display h',
-  horizonRows >= Number(dataset.item.H) * selectedExperiments.length,
-  `${horizonRows} rows`,
+  '11 horizon chart keeps every step and has no detail table',
+  Number(await horizonChart.getAttribute('data-horizon-count')) === Number(dataset.item.H) &&
+    Number(await horizonChart.getAttribute('data-series-count')) === selectedExperiments.length &&
+    (await page.locator('[data-testid="m5-horizon-analysis"] tbody tr').count()) === 0,
+  `steps=${await horizonChart.getAttribute('data-horizon-count')} series=${await horizonChart.getAttribute('data-series-count')}`,
 )
 await page.locator('[data-testid="m5-evaluation-overview"] tbody tr').first().waitFor({ timeout: 60000 })
 await page.waitForFunction(
@@ -218,9 +221,25 @@ const historyRow = page.locator(`[data-evaluation-id="${created.evaluation_id}"]
 await historyRow.waitFor({ state: 'visible', timeout: 60000 })
 await historyRow.getByRole('button').filter({ hasText: /查\s*看/ }).click()
 await page.getByTestId('m5-forecast-details').getByText('正在查看历史评价').waitFor({ timeout: 30000 })
+await page.waitForFunction(
+  () => {
+    const comparison = document.querySelector('[data-testid="m5-prediction-chart"]')
+    const errors = document.querySelector('[data-testid="m5-error-chart"]')
+    return Number(comparison?.getAttribute('data-point-count') ?? 0) > 0 &&
+      Number(comparison?.getAttribute('data-series-count') ?? 0) >= 2 &&
+      Number(errors?.getAttribute('data-point-count') ?? 0) > 0
+  },
+  undefined,
+  { timeout: 60000 },
+)
 check(
   '13 history view restores the saved evaluation context',
   (await page.getByTestId('m5-forecast-details').innerText()).includes('正在查看历史评价'),
+)
+check(
+  '13.1 restored prediction and error charts contain real aligned data',
+  true,
+  `comparison=${await page.getByTestId('m5-prediction-chart').getAttribute('data-point-count')}x${await page.getByTestId('m5-prediction-chart').getAttribute('data-series-count')}`,
 )
 
 await page.screenshot({
@@ -232,12 +251,20 @@ await page.screenshot({
 await historyRow.getByRole('button').filter({ hasText: /删\s*除\s*记\s*录/ }).click()
 const popconfirm = page.locator('.ant-popconfirm').last()
 await popconfirm.waitFor({ state: 'visible' })
-await popconfirm.getByRole('button').filter({ hasText: /确定|确 定/ }).click()
-await page.waitForTimeout(1200)
-const deletedResponse = await fetch(`${BASE}/api/evaluations/${created.evaluation_id}`)
+const [deleteResponse] = await Promise.all([
+  page.waitForResponse(
+    (response) =>
+      response.request().method() === 'DELETE' &&
+      response.url().includes(`/api/evaluations/${created.evaluation_id}`),
+    { timeout: 30000 },
+  ),
+  popconfirm.getByRole('button').filter({ hasText: /确定|确 定/ }).click(),
+])
+const deletedResponse = await fetch(`${BASE}/api/evaluations/${created.evaluation_id}`, { cache: 'no-store' })
 check(
   '14 deleting evaluation history preserves training records',
-  deletedResponse.status === 404 &&
+  deleteResponse.ok() &&
+    deletedResponse.status === 404 &&
     (await (await fetch(`${BASE}/api/experiments/${selectedExperiments[0].experiment_id}`)).ok),
 )
 

@@ -531,25 +531,6 @@ export default function Evaluation() {
     [experimentReports, seriesByExperiment, horizonMetric, horizonSteps.join(',')],
   )
 
-  const horizonSamples = useMemo(
-    () =>
-      horizonSteps.flatMap((step) =>
-        experimentReports.map((report: any) => {
-          const saved = (report.per_horizon ?? []).find((item: any) => Number(item.horizon_step) === step)
-          return {
-            key: `${report.experiment_id}-${step}`,
-            horizon_step: step,
-            model: report.algorithm_label,
-            display_id: report.display_id ?? report.experiment_id,
-            samples: saved?.n_samples ?? 0,
-            mae: saved?.mae,
-            rmse: saved?.rmse,
-          }
-        }),
-      ),
-    [experimentReports, horizonSteps.join(',')],
-  )
-
   const ranking = useMemo(
     () =>
       experimentReports
@@ -909,14 +890,20 @@ export default function Evaluation() {
                 </div>
               }
             >
-              <LineChart
-                height={320}
-                x={comparisonData.x}
-                series={comparisonData.series}
-                xName="目标时间"
-                yName={dataset?.unit_label ? `流量（${unitDisplayLabel(dataset.unit_label)}）` : '流量'}
-                empty={!comparisonData.series.length}
-              />
+              <div
+                data-testid="m5-prediction-chart"
+                data-point-count={comparisonData.x.length}
+                data-series-count={comparisonData.series.length}
+              >
+                <LineChart
+                  height={320}
+                  x={comparisonData.x}
+                  series={comparisonData.series}
+                  xName="目标时间"
+                  yName={dataset?.unit_label ? `流量（${unitDisplayLabel(dataset.unit_label)}）` : '流量'}
+                  empty={!comparisonData.series.length}
+                />
+              </div>
               <div className="tn-muted">
                 当前显示 h={horizonStep}。预测值按目标时间戳对齐；同一实验、同一 h 的重复目标时间保留最早预测窗口，缺失值保持为空。
               </div>
@@ -935,28 +922,20 @@ export default function Evaluation() {
                 />
               }
             >
-              <LineChart
-                height={280}
-                x={horizonSteps.map((step) => `h=${step}`)}
-                series={horizonSeries}
-                xName="预测步长"
-                yName={horizonMetric.toUpperCase()}
-                empty={!horizonSeries.length}
-              />
-              <Table
-                size="small"
-                rowKey="key"
-                pagination={false}
-                dataSource={horizonSamples}
-                columns={[
-                  { title: '预测步长', dataIndex: 'horizon_step', render: (value: number) => `h=${value}` },
-                  { title: '模型', dataIndex: 'model' },
-                  { title: 'EXP ID', dataIndex: 'display_id' },
-                  { title: '有效样本', dataIndex: 'samples' },
-                  { title: 'MAE', render: (_: unknown, row: any) => formatMetric(row.mae) },
-                  { title: 'RMSE', render: (_: unknown, row: any) => formatMetric(row.rmse) },
-                ]}
-              />
+              <div
+                data-testid="m5-horizon-chart"
+                data-horizon-count={horizonSteps.length}
+                data-series-count={horizonSeries.length}
+              >
+                <LineChart
+                  height={280}
+                  x={horizonSteps.map((step) => `h=${step}`)}
+                  series={horizonSeries}
+                  xName="预测步长"
+                  yName={horizonMetric.toUpperCase()}
+                  empty={!horizonSeries.length}
+                />
+              </div>
               <div className="tn-muted">本区域始终展示完整 h=1 至 h=H，不受上方预测对比当前 h 的影响。</div>
             </Card>
 
@@ -966,14 +945,20 @@ export default function Evaluation() {
               data-testid="m5-error-analysis"
             >
               <div className="tn-muted">当前分析步长：h={horizonStep} · 误差定义：预测值 − 真实值</div>
-              <LineChart
-                height={270}
-                x={errorData.x}
-                series={errorData.series}
-                xName="目标时间"
-                yName={`误差（h=${horizonStep}）`}
-                empty={!errorData.series.length}
-              />
+              <div
+                data-testid="m5-error-chart"
+                data-point-count={errorData.x.length}
+                data-series-count={errorData.series.length}
+              >
+                <LineChart
+                  height={270}
+                  x={errorData.x}
+                  series={errorData.series}
+                  xName="目标时间"
+                  yName={`误差（h=${horizonStep}）`}
+                  empty={!errorData.series.length}
+                />
+              </div>
               <div className="tn-m5-error-grid">
                 <Card size="small" title={`当前 h=${horizonStep} 平均绝对误差`}>
                   <BarChart

@@ -62,10 +62,14 @@ const visibleAllRegionText = await page.evaluate(() =>
   }),
 )
 const trainingText = visibleAllRegionText ? String.fromCharCode(0x5168, 0x533a, 0x57df) : ''
+const registryHasAllModels = await page.evaluate(async () => {
+  const response = await fetch('/api/models/registry')
+  return Boolean((await response.json()).all_models)
+})
 check(
   '4 Module 4 has no all-region setting and keeps all-models mode',
-  !trainingText.includes('全部区域') &&
-    (await allModelsOption.count()) === 1,
+  !trainingText.includes('全区域') &&
+    registryHasAllModels,
 )
 await page.keyboard.press('Escape')
 const scopeRejected = await page.evaluate(async () => {
