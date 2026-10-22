@@ -58,6 +58,8 @@ class ArimaAdapter(Adapter):
             "order": order,
             "params": np.asarray(fitted.params, dtype="float64").tolist(),
             "trend": self.params.get("trend", "c"),
+            "enforce_stationarity": bool(self.params.get("enforce_stationarity", True)),
+            "enforce_invertibility": bool(self.params.get("enforce_invertibility", True)),
             "aic": float(fitted.aic),
             "train_end_index": int(region.train_end_index),
             "train_end_at": region.train_end_at,
@@ -97,23 +99,44 @@ class ArimaAdapter(Adapter):
             series[: int(state["train_end_index"]) + 1],
             order=tuple(state["order"]),
             trend=state.get("trend", "c"),
+            enforce_stationarity=bool(state.get("enforce_stationarity", True)),
+            enforce_invertibility=bool(state.get("enforce_invertibility", True)),
         )
-        fitted = model.fit(method_kwargs={"maxiter": int(self.params.get("maxiter", 200))})
+        try:
+            fitted = model.smooth(np.asarray(state["params"], dtype="float64"))
+        except Exception:
+            fitted = model.fit(method_kwargs={"maxiter": int(self.params.get("maxiter", 200))})
         refit_interval = int(self.params.get("refit_interval", 0) or 0)
+        last_origin = int(state["train_end_index"])
+        total = max(1, batch.size)
         for row, start in enumerate(batch.starts):
             if row % 25 == 0:
                 self.check_cancel(cancel)
-                progress("Validation", 100.0 * row / max(1, batch.size),
+                progress("Validation", 100.0 * row / total,
                          f"ARIMA 滚动预测 {row}/{batch.size}")
             origin = int(start) + L - 1
-            if refit_interval and row % refit_interval == 0 and origin >= int(state["train_end_index"]):
-                model = ARIMA(series[: origin + 1], order=tuple(state["order"]), trend=state.get("trend", "c"))
+            if origin < last_origin:
+                raise ValueError("ARIMA validation windows must be ordered by forecast origin")
+            if refit_interval and row % refit_interval == 0 and origin > last_origin:
+                model = ARIMA(
+                    series[: origin + 1],
+                    order=tuple(state["order"]),
+                    trend=state.get("trend", "c"),
+                    enforce_stationarity=bool(state.get("enforce_stationarity", True)),
+                    enforce_invertibility=bool(state.get("enforce_invertibility", True)),
+                )
                 fitted = model.fit(method_kwargs={"maxiter": int(self.params.get("maxiter", 200))})
-            if origin > int(state["train_end_index"]):
-                # Only observations strictly before the forecast origin are used.
-                fitted = fitted.append(series[int(state["train_end_index"]) + 1: origin + 1], refit=False)
+                last_origin = origin
+            if origin > last_origin:
+                # ``Results.append`` expects only observations that have not
+                # already been incorporated into the state.
+                increment = series[last_origin + 1: origin + 1]
+                if increment.size:
+                    fitted = fitted.append(increment, refit=False)
+                    last_origin = origin
             forecast = fitted.forecast(steps=H)
             predictions[row] = np.asarray(forecast, dtype="float64")
+        progress("Validation", 100.0, f"ARIMA rolling prediction {batch.size}/{batch.size}")
         return predictions
 
 
@@ -122,6 +145,12 @@ class ProphetAdapter(Adapter):
     operates_in = "raw"
     has_epoch_progress = False
     stage_names = ("Fit", "Ready")
+
+    @staticmethod
+    def _flag(value: Any) -> Any:
+        if value == "auto":
+            return "auto"
+        return str(value).lower() == "true"
 
     def fit(
         self,
@@ -137,16 +166,11 @@ class ProphetAdapter(Adapter):
 
         progress("Fit", 5.0, "拟合 Prophet（仅训练段，含日/周周期）")
 
-        def _flag(value: Any) -> Any:
-            if value == "auto":
-                return "auto"
-            return str(value).lower() == "true"
-
         model = Prophet(
             growth=self.params.get("growth", "linear"),
             seasonality_mode=self.params.get("seasonality_mode", "additive"),
-            daily_seasonality=_flag(self.params.get("daily_seasonality", "auto")),
-            weekly_seasonality=_flag(self.params.get("weekly_seasonality", "auto")),
+            daily_seasonality=self._flag(self.params.get("daily_seasonality", "auto")),
+            weekly_seasonality=self._flag(self.params.get("weekly_seasonality", "auto")),
             yearly_seasonality=False,
             changepoint_prior_scale=float(self.params.get("changepoint_prior_scale", 0.05)),
             seasonality_prior_scale=float(self.params.get("seasonality_prior_scale", 10.0)),
@@ -198,8 +222,8 @@ class ProphetAdapter(Adapter):
         model = Prophet(
             growth=state.get("growth", "linear"),
             seasonality_mode=self.params.get("seasonality_mode", "additive"),
-            daily_seasonality=str(self.params.get("daily_seasonality", "auto")),
-            weekly_seasonality=str(self.params.get("weekly_seasonality", "auto")),
+            daily_seasonality=self._flag(self.params.get("daily_seasonality", "auto")),
+            weekly_seasonality=self._flag(self.params.get("weekly_seasonality", "auto")),
             yearly_seasonality=False,
             changepoint_prior_scale=float(self.params.get("changepoint_prior_scale", 0.05)),
             seasonality_prior_scale=float(self.params.get("seasonality_prior_scale", 10.0)),

@@ -260,8 +260,9 @@ class ChronosAdapter(_FoundationBase):
                     outputs.append(np.asarray(mean.cpu().numpy(), dtype="float64"))
                 else:
                     outputs.append(np.asarray(quantiles[:, :, 0].cpu().numpy(), dtype="float64"))
-                progress("Inference", 100.0 * (offset + chunk) / max(1, tensor.shape[0]),
-                         f"Chronos 推理 {min(offset + chunk, tensor.shape[0])}/{tensor.shape[0]} 个窗口")
+                completed = min(offset + chunk, tensor.shape[0])
+                progress("Inference", 100.0 * completed / max(1, tensor.shape[0]),
+                         f"Chronos 推理 {completed}/{tensor.shape[0]} 个窗口")
         return np.concatenate(outputs, axis=0)
 
 
@@ -411,8 +412,9 @@ class TimesFMAdapter(_FoundationBase):
             piece = [list(map(float, row)) for row in contexts[offset: offset + chunk]]
             result = self._forecast(model, piece, int(region.H))
             outputs.append(np.asarray(result, dtype="float64"))
-            progress("Inference", 100.0 * (offset + chunk) / max(1, contexts.shape[0]),
-                     f"TimesFM 推理 {min(offset + chunk, contexts.shape[0])}/{contexts.shape[0]} 个窗口")
+            completed = min(offset + chunk, contexts.shape[0])
+            progress("Inference", 100.0 * completed / max(1, contexts.shape[0]),
+                     f"TimesFM 推理 {completed}/{contexts.shape[0]} 个窗口")
         return np.concatenate(outputs, axis=0)
 
     @staticmethod

@@ -110,3 +110,66 @@ def test_foundation_adapter_reports_missing_weights_instead_of_faking():
     adapter = build_adapter("chronos", params, "zero_shot")
     with pytest.raises(RuntimeError):
         adapter.fit(region=region, train=make_batch(region, "train"), validation=None)
+
+
+def test_arima_rolling_predictions_append_only_new_observations():
+    from statsmodels.tsa.arima.model import ARIMA
+
+    region = make_region()
+    params = dict(default_params("arima"))
+    params.update({"p": 1, "d": 0, "q": 1, "refit_interval": 0})
+    adapter = build_adapter("arima", params, "fit")
+    train = make_batch(region, "train")
+    validation = make_batch(region, "validation")
+    result = adapter.fit(region=region, train=train, validation=validation)
+
+    progress_values = []
+    actual = adapter.predict(
+        region=region,
+        state=result.state,
+        batch=validation,
+        progress=lambda stage, percent, message, extra=None: progress_values.append(percent),
+    )
+
+    train_end = int(result.state["train_end_index"])
+    model = ARIMA(
+        region.series_full[: train_end + 1],
+        order=tuple(result.state["order"]),
+        trend=result.state["trend"],
+        enforce_stationarity=result.state["enforce_stationarity"],
+        enforce_invertibility=result.state["enforce_invertibility"],
+    )
+    fitted = model.smooth(np.asarray(result.state["params"], dtype="float64"))
+    expected = np.empty_like(actual)
+    last_origin = train_end
+    for row, start in enumerate(validation.starts):
+        origin = int(start) + region.L - 1
+        if origin > last_origin:
+            fitted = fitted.append(region.series_full[last_origin + 1: origin + 1], refit=False)
+            last_origin = origin
+        expected[row] = np.asarray(fitted.forecast(steps=region.H), dtype="float64")
+
+    assert np.allclose(actual, expected, rtol=1e-9, atol=1e-9)
+    assert progress_values
+    assert progress_values[-1] == 100.0
+
+
+def test_prophet_predict_accepts_explicit_false_seasonality():
+    region = make_region()
+    params = dict(default_params("prophet"))
+    params.update({"daily_seasonality": False, "weekly_seasonality": False, "yearly_seasonality": False})
+    adapter = build_adapter("prophet", params, "fit")
+    train = make_batch(region, "train")
+    validation = make_batch(region, "validation")
+    result = adapter.fit(region=region, train=train, validation=validation)
+    prediction = adapter.predict(region=region, state=result.state, batch=validation)
+    assert prediction.shape == (validation.size, H)
+    assert np.isfinite(prediction).all()
+
+
+def test_xgboost_passes_early_stopping_to_estimator():
+    params = dict(default_params("xgboost"))
+    params["early_stopping_rounds"] = 2
+    adapter = build_adapter("xgboost", params, "train")
+    estimator = adapter._make_estimator()
+    assert estimator.early_stopping_rounds == 2

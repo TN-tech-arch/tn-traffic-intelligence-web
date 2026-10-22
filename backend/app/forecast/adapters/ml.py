@@ -93,6 +93,7 @@ class GradientBoostingAdapter(Adapter):
         if self.algorithm_key == "xgboost":
             from xgboost import XGBRegressor
 
+            early_stopping_rounds = int(self.params.get("early_stopping_rounds", 0) or 0)
             return XGBRegressor(
                 n_estimators=int(self.params["n_estimators"]),
                 max_depth=int(self.params["max_depth"]),
@@ -105,6 +106,7 @@ class GradientBoostingAdapter(Adapter):
                 random_state=int(self.params.get("random_state", 42)
                                  if "random_state" in self.params else 42),
                 n_jobs=int(self.params.get("n_jobs", -1)) if "n_jobs" in self.params else -1,
+                early_stopping_rounds=early_stopping_rounds or None,
                 verbosity=0,
             )
         from lightgbm import LGBMRegressor

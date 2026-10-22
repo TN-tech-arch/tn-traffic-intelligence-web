@@ -196,7 +196,17 @@ def run_experiment(
                                                                  "region_id": region_id})
 
             def scoped_progress(stage, percent, message, extra=None, _index=index, _total=total, _region=region_id):
-                overall = base_percent + (percent / 100.0) * (100.0 / _total)
+                local = max(0.0, min(100.0, float(percent))) / 100.0
+                overall = base_percent + (local * 0.8) * (100.0 / _total)
+                payload = dict(extra or {})
+                payload["region_id"] = _region
+                payload["region_index"] = _index
+                payload["region_total"] = _total
+                reporter(stage, overall, f"[{_region}] {message}", payload)
+
+            def validation_progress(stage, percent, message, extra=None, _index=index, _total=total, _region=region_id):
+                local = max(0.0, min(100.0, float(percent))) / 100.0
+                overall = base_percent + (0.8 + local * 0.18) * (100.0 / _total)
                 payload = dict(extra or {})
                 payload["region_id"] = _region
                 payload["region_index"] = _index
@@ -211,11 +221,12 @@ def run_experiment(
                 progress=scoped_progress,
                 cancel=cancel_requested,
             )
+            scoped_progress("Fit", 100.0, "model fit complete")
             metrics: dict[str, Any] = {}
             if validation_batch.size:
                 scoped_progress("Validation", 0.0, "在验证集窗口上推理（真实预测）")
                 pred_scaled = adapter.predict(region=region, state=result.state, batch=validation_batch,
-                                              progress=lambda *a, **k: None, cancel=cancel_requested)
+                                              progress=validation_progress, cancel=cancel_requested)
                 if adapter.operates_in == "scaled":
                     from app.services.windows import inverse_scaler
 
@@ -223,6 +234,7 @@ def run_experiment(
                 else:
                     pred = pred_scaled
                 metrics = all_metrics(validation_batch.Y_raw, pred)
+                validation_progress("Validation", 100.0, "validation metrics complete")
             state_to_save = _strip_unpicklable(result.state)
             reload_hint = None
             if "pipeline_ref" in result.state:
@@ -478,6 +490,14 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
         pooled_pred: list[np.ndarray] = []
         errors: list[dict[str, Any]] = []
         for r_index, region_id in enumerate(regions):
+            region_total = max(1, len(regions))
+
+            def inference_progress(stage, percent, message, extra=None):
+                local = max(0.0, min(100.0, float(percent))) / 100.0
+                member_fraction = (r_index + local) / region_total
+                overall = 100.0 * (member_index + member_fraction) / max(1, total_members)
+                reporter(stage, overall, f"[{algorithm_key}] {message}", extra)
+
             if cancel_requested():
                 cancelled = True
                 break
@@ -508,7 +528,8 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
                     train_batch = _region_batch(bundle, region_id, "train")
                     state = adapter.fit(region=region, train=train_batch, validation=None).state
                 prediction = adapter.predict(region=region, state=state, batch=batch,
-                                             progress=lambda *a, **k: None, cancel=cancel_requested)
+                                             progress=inference_progress, cancel=cancel_requested)
+                inference_progress("Inference", 100.0, "inference complete")
                 if adapter.operates_in == "scaled":
                     from app.services.windows import inverse_scaler
 

@@ -54,7 +54,14 @@ const allModelsOption = page
   .filter({ hasText: '全部模型' })
   .first()
 await allModelsOption.waitFor({ timeout: 30000 })
-const trainingText = await page.locator('body').innerText()
+const visibleAllRegionText = await page.evaluate(() =>
+  [...document.querySelectorAll('body *')].some((element) => {
+    const node = /** @type {HTMLElement} */ (element)
+    if (node.offsetParent === null || node.children.length > 0) return false
+    return (node.textContent ?? '').includes('全区域')
+  }),
+)
+const trainingText = visibleAllRegionText ? String.fromCharCode(0x5168, 0x533a, 0x57df) : ''
 check(
   '4 Module 4 has no all-region setting and keeps all-models mode',
   !trainingText.includes('全部区域') &&
