@@ -13,6 +13,24 @@ if (!response.ok) throw new Error(`Evaluation history request failed: ${response
 const evaluations = (await response.json()).evaluations ?? []
 const target = evaluations.find((item) => item.status === 'Partial')
 if (!target) throw new Error('No Partial evaluation is available for history regression')
+const datasets = (await (await fetch(`${BASE}/api/datasets?include_archived=true`)).json()).datasets ?? []
+let currentDataset = null
+let currentExperiment = null
+for (const dataset of datasets) {
+  if (dataset.scope !== 'single' || dataset.dataset_id === target.dataset_id) continue
+  const candidates =
+    (await (await fetch(`${BASE}/api/experiments?dataset_id=${encodeURIComponent(dataset.dataset_id)}&limit=500`)).json())
+      .experiments ?? []
+  const experiment = candidates.find((item) => ['Completed', 'Partial'].includes(item.status))
+  if (experiment) {
+    currentDataset = dataset
+    currentExperiment = experiment
+    break
+  }
+}
+if (!currentDataset || !currentExperiment) {
+  throw new Error('No independent current configuration is available for history regression')
+}
 
 const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage({ viewport: { width: 1680, height: 1100 } })
@@ -21,7 +39,22 @@ page.on('pageerror', (error) => browserErrors.push(String(error)))
 page.on('console', (message) => message.type() === 'error' && browserErrors.push(message.text()))
 
 try {
-  await page.goto(`${BASE}/evaluation`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await page.goto(
+    `${BASE}/evaluation?dataset=${encodeURIComponent(currentDataset.dataset_id)}&experiment=${encodeURIComponent(currentExperiment.experiment_id)}`,
+    { waitUntil: 'domcontentloaded', timeout: 60000 },
+  )
+  const setup = page.getByTestId('m5-evaluation-setup')
+  await setup.waitFor({ state: 'visible', timeout: 60000 })
+  await setup.locator('.tn-m5-dataset-mini').waitFor({ state: 'visible', timeout: 30000 })
+  const setupSnapshot = async () => ({
+    dataset: await setup.locator('[data-field="m5.dataset_id"] .ant-select-selection-item').innerText(),
+    selectValues: await setup.locator('.ant-select-selection-item').allTextContents(),
+    checked: await setup
+      .locator('input[type="checkbox"]:checked')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-testid'))),
+    datasetInfo: await setup.locator('.tn-m5-dataset-mini').innerText(),
+  })
+  const setupBefore = await setupSnapshot()
   const row = page.locator(`[data-evaluation-id="${target.evaluation_id}"]`)
   await row.waitFor({ state: 'visible', timeout: 60000 })
   if (!(await row.innerText()).includes('部分完成')) {
@@ -29,6 +62,10 @@ try {
   }
   await row.getByRole('button').first().click()
   await page.getByTestId('m5-forecast-details').getByText('正在查看历史评价').waitFor({ timeout: 30000 })
+  const setupAfter = await setupSnapshot()
+  if (JSON.stringify(setupBefore) !== JSON.stringify(setupAfter)) {
+    throw new Error('Opening evaluation history changed the left configuration')
+  }
   await page.waitForFunction(
     () => {
       const prediction = document.querySelector('[data-testid="m5-prediction-chart"]')

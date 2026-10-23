@@ -112,7 +112,7 @@ export default function Evaluation() {
   const [searchParams] = useSearchParams()
   const [datasets, setDatasets] = useState<any[]>([])
   const [datasetId, setDatasetId] = useState(searchParams.get('dataset') ?? '')
-  const [dataset, setDataset] = useState<any>(null)
+  const [currentDataset, setDataset] = useState<any>(null)
   const [experiments, setExperiments] = useState<any[]>([])
   const [selectedExperiments, setSelectedExperiments] = useState<string[]>(
     searchParams.get('experiment') ? [searchParams.get('experiment') as string] : [],
@@ -123,6 +123,7 @@ export default function Evaluation() {
   const [rangeEnd, setRangeEnd] = useState('')
   const [compatibility, setCompatibility] = useState<any>(null)
   const [evaluation, setEvaluation] = useState<any>(null)
+  const [historyDataset, setHistoryDataset] = useState<any>(null)
   const [evaluations, setEvaluations] = useState<any[]>([])
   const [seriesByExperiment, setSeriesByExperiment] = useState<Record<string, any[]>>({})
   const [horizonStep, setHorizonStep] = useState(1)
@@ -170,7 +171,7 @@ export default function Evaluation() {
           kind: 'm5',
           values,
           context: {
-            dataset: dataset ?? null,
+            dataset: currentDataset ?? null,
             experiments: experiments.filter((item) => selectedExperiments.includes(item.experiment_id)),
           },
         }
@@ -231,10 +232,10 @@ export default function Evaluation() {
 
   useEffect(() => {
     setHorizonStep((previous) => {
-      const max = Number(dataset?.H ?? 1)
+      const max = Number(currentDataset?.H ?? 1)
       return previous >= 1 && previous <= max ? previous : 1
     })
-  }, [dataset?.H])
+  }, [currentDataset?.H])
 
   useEffect(() => {
     if (!evaluation || !['Queued', 'Running', 'Stopping'].includes(evaluation.status)) return
@@ -280,6 +281,7 @@ export default function Evaluation() {
 
   const clearResult = () => {
     setEvaluation(null)
+    setHistoryDataset(null)
     setSeriesByExperiment({})
     setViewingHistory(false)
   }
@@ -313,6 +315,7 @@ export default function Evaluation() {
       const created = await api.post<any>(ENDPOINTS.evaluationRun, { ...values, horizon_step: horizonStep })
       const data = await api.get<any>(ENDPOINTS.evaluationGet(created.evaluation_id))
       setEvaluation(data)
+      setHistoryDataset(null)
       setViewingHistory(false)
       setHorizonStep(1)
       loadHistory()
@@ -333,15 +336,10 @@ export default function Evaluation() {
     try {
       const data = await api.get<any>(ENDPOINTS.evaluationGet(evaluationId))
       const protocol = data.protocol ?? {}
-      const testRange = data.test_range ?? {}
+      const historicalDataset = await api.get<any>(ENDPOINTS.datasetGet(data.dataset_id))
       setEvaluation(data)
+      setHistoryDataset(historicalDataset)
       setViewingHistory(true)
-      setDatasetId(data.dataset_id)
-      setRegionId(data.region_id ?? '')
-      setSelectedExperiments((data.experiments ?? []).map((item: any) => item.experiment_id))
-      setTestSelection(protocol.test_selection ?? protocol.display_selection ?? testRange.selection ?? 'full')
-      setRangeStart(protocol.range_start_at ?? testRange.requested_start_at ?? '')
-      setRangeEnd(protocol.range_end_at ?? testRange.requested_end_at ?? '')
       setHorizonStep(Math.max(1, Number(protocol.display_horizon_step ?? protocol.horizon_step ?? 1)))
       messageApi.success(`已打开历史评价 ${evaluationId}`)
     } catch (error) {
@@ -385,10 +383,10 @@ export default function Evaluation() {
     [evaluationMembers],
   )
 
-  const selectedDetails = useMemo(
+  const currentSelectedDetails = useMemo(
     () =>
       selectedExperiments.map((experimentId) => {
-        const member: any = memberLookup.get(experimentId)
+        const member: any = viewingHistory ? undefined : memberLookup.get(experimentId)
         const experiment: any = experimentLookup.get(experimentId)
         return {
           experiment_id: experimentId,
@@ -404,7 +402,37 @@ export default function Evaluation() {
           training_completed_at: member?.training_completed_at ?? experiment?.ended_at,
         }
       }),
-    [selectedExperiments, memberLookup, experimentLookup],
+    [selectedExperiments, viewingHistory, memberLookup, experimentLookup],
+  )
+
+  const displayedExperimentIds = useMemo<string[]>(
+    () =>
+      viewingHistory
+        ? evaluationMembers.map((item: any) => String(item.experiment_id))
+        : selectedExperiments,
+    [viewingHistory, evaluationMembers, selectedExperiments],
+  )
+
+  const selectedDetails = useMemo(
+    () =>
+      displayedExperimentIds.map((experimentId) => {
+        const member: any = memberLookup.get(experimentId)
+        const experiment: any = experimentLookup.get(experimentId)
+        return {
+          experiment_id: experimentId,
+          display_id: member?.display_id ?? experiment?.display_id ?? experimentId,
+          algorithm_label:
+            member?.algorithm_label_archive ??
+            experiment?.algorithm_label ??
+            member?.algorithm_key ??
+            '\u672a\u77e5\u6a21\u578b',
+          mode: member?.mode ?? experiment?.mode,
+          params: member?.params ?? experiment?.params ?? {},
+          status: member?.training_status ?? experiment?.status ?? member?.status,
+          training_completed_at: member?.training_completed_at ?? experiment?.ended_at,
+        }
+      }),
+    [displayedExperimentIds, memberLookup, experimentLookup],
   )
 
   const experimentReports = useMemo(() => {
@@ -429,7 +457,7 @@ export default function Evaluation() {
   )
 
   const comparisonData = useMemo(() => {
-    const groups = selectedExperiments.map((experimentId) => {
+    const groups = displayedExperimentIds.map((experimentId) => {
       const rows = (seriesByExperiment[experimentId] ?? []).filter(
         (row) => Number(row.horizon_step) === horizonStep,
       )
@@ -468,7 +496,7 @@ export default function Evaluation() {
         : [],
       groups,
     }
-  }, [selectedExperiments, seriesByExperiment, horizonStep, reportLookup, selectedDetails])
+  }, [displayedExperimentIds, seriesByExperiment, horizonStep, reportLookup, selectedDetails])
 
   const errorData = useMemo(() => {
     const timestamps = comparisonData.x
@@ -513,7 +541,9 @@ export default function Evaluation() {
     [errorData],
   )
 
-  const horizonSteps = Array.from({ length: Number(dataset?.H ?? 0) }, (_, index) => index + 1)
+  const displayDataset = viewingHistory ? historyDataset : currentDataset
+  const dataset = displayDataset
+  const horizonSteps = Array.from({ length: Number(displayDataset?.H ?? 0) }, (_, index) => index + 1)
   const horizonSeries = useMemo(
     () =>
       experimentReports.map((report: any, index: number) => {
@@ -544,14 +574,15 @@ export default function Evaluation() {
     [experimentReports, rankingMetric],
   )
 
-  const testBoundary = dataset?.split_boundaries?.[2]
+  const testBoundary = currentDataset?.split_boundaries?.[2]
+  const displayTestBoundary = displayDataset?.split_boundaries?.[2]
   const actualTestRange = evaluation?.test_range ?? evaluation?.metrics_summary?.test_range ?? {}
   const displayTestStart =
-    actualTestRange.actual_start_at ?? testBoundary?.start_at ?? evaluation?.protocol?.range_start_at ?? '—'
+    actualTestRange.actual_start_at ?? displayTestBoundary?.start_at ?? evaluation?.protocol?.range_start_at ?? '—'
   const displayTestEnd =
-    actualTestRange.actual_end_at ?? testBoundary?.end_at ?? evaluation?.protocol?.range_end_at ?? '—'
+    actualTestRange.actual_end_at ?? displayTestBoundary?.end_at ?? evaluation?.protocol?.range_end_at ?? '—'
   const displayTestWindows =
-    actualTestRange.window_count ?? dataset?.window_counts?.test ?? 0
+    actualTestRange.window_count ?? displayDataset?.window_counts?.test ?? 0
   const displayTestSamples =
     actualTestRange.valid_prediction_count ?? experimentReports.reduce((sum: number, report: any) => sum + Number(report.macro?.n_samples ?? 0), 0)
 
@@ -593,9 +624,13 @@ export default function Evaluation() {
       <ThreePane
         variant="two"
         config={
-          <div className="tn-stack">
+          (() => {
+            const dataset = currentDataset
+            return (
+              <div className="tn-stack">
             <Card
               size="small"
+              data-testid="m5-evaluation-setup"
               title="评估配置（Evaluation Setup）"
               extra={<Button size="small" onClick={resetConfiguration}>清空选择</Button>}
             >
@@ -710,10 +745,10 @@ export default function Evaluation() {
                 <div>候选测试窗口：{dataset?.window_counts?.test ?? 0}</div>
               </div>
 
-              {selectedDetails.length ? (
+              {currentSelectedDetails.length ? (
                 <div className="tn-m5-selected-summary">
                   <strong>本次评估实验清单</strong>
-                  {selectedDetails.map((item) => (
+                  {currentSelectedDetails.map((item) => (
                     <div key={item.experiment_id}>{item.algorithm_label} · {item.display_id}</div>
                   ))}
                 </div>
@@ -805,7 +840,9 @@ export default function Evaluation() {
                 </div>
               )) : <EmptyState text="暂无评价历史。" />}
             </Card>
-          </div>
+              </div>
+            )
+          })()
         }
         visual={
           <div className="tn-stack tn-m5-workspace">
@@ -840,7 +877,7 @@ export default function Evaluation() {
                 </Tag>
                 <span className="tn-muted">所有信息只读，实验仅由左侧手动选择</span>
               </div>
-              {dataset && selectedDetails.length ? (
+              {displayDataset && selectedDetails.length ? (
                 <>
                   <div className="tn-m5-detail-grid">
                     <div><span>数据集 ID</span><strong>{dataset.display_id ?? dataset.dataset_id}</strong></div>
