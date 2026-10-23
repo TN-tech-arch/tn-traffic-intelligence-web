@@ -13,8 +13,8 @@ Module 5 现采用两栏布局：
 
 1. 预测详情（Forecast Details）
 2. 预测对比（Prediction Comparison）
-3. 预测时域分析（Forecast Horizon Analysis）
-4. 误差分析（Error Analysis）
+3. 误差分析（Error Analysis）
+4. 预测时域分析（Forecast Horizon Analysis）
 5. 评估概览（Evaluation Overview）
 
 ## 实验选择与兼容性

@@ -79,16 +79,24 @@ check(
   columns,
 )
 
-const sectionTitles = await page
-  .locator('.tn-m5-workspace > .ant-card > .ant-card-head .ant-card-head-title')
-  .allInnerTexts()
+const sectionTitles = (
+  await page.locator('.tn-m5-workspace > .ant-card').evaluateAll((nodes) =>
+    nodes
+      .map((node) => ({
+        title: node.querySelector('.ant-card-head-title')?.textContent?.trim() ?? '',
+        top: node.getBoundingClientRect().top,
+      }))
+      .sort((left, right) => left.top - right.top)
+      .map((item) => item.title),
+  )
+)
 check(
-  '2 five central sections are vertically ordered without tabs',
+  '2 five central sections use the requested visual order without tabs',
   sectionTitles.length === 5 &&
     sectionTitles[0].includes('预测详情') &&
     sectionTitles[1].includes('预测对比') &&
-    sectionTitles[2].includes('预测时域分析') &&
-    sectionTitles[3].includes('误差分析') &&
+    sectionTitles[2].includes('误差分析') &&
+    sectionTitles[3].includes('预测时域分析') &&
     sectionTitles[4].includes('评估概览') &&
     (await page.locator('.ant-tabs').count()) === 0,
   sectionTitles.join(' | '),

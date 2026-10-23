@@ -832,6 +832,7 @@ export default function Evaluation() {
               size="small"
               title="1 · 预测详情（Forecast Details）"
               data-testid="m5-forecast-details"
+              style={{ order: 1 }}
             >
               <div className="tn-inline tn-m5-detail-banner">
                 <Tag color={viewingHistory ? 'gold' : 'blue'}>
@@ -876,6 +877,7 @@ export default function Evaluation() {
               size="small"
               title="2 · 预测对比（Prediction Comparison）"
               data-testid="m5-prediction-comparison"
+              style={{ order: 2 }}
               extra={
                 <div className="tn-inline">
                   <span className="tn-muted">预测步长</span>
@@ -911,8 +913,9 @@ export default function Evaluation() {
 
             <Card
               size="small"
-              title="3 · 预测时域分析（Forecast Horizon Analysis）"
+              title="4 · 预测时域分析（Forecast Horizon Analysis）"
               data-testid="m5-horizon-analysis"
+              style={{ order: 4 }}
               extra={
                 <Select
                   size="small"
@@ -941,8 +944,9 @@ export default function Evaluation() {
 
             <Card
               size="small"
-              title="4 · 误差分析（Error Analysis）"
+              title="3 · 误差分析（Error Analysis）"
               data-testid="m5-error-analysis"
+              style={{ order: 3 }}
             >
               <div className="tn-muted">当前分析步长：h={horizonStep} · 误差定义：预测值 − 真实值</div>
               <div
@@ -987,6 +991,7 @@ export default function Evaluation() {
               size="small"
               title="5 · 评估概览（Evaluation Overview）"
               data-testid="m5-evaluation-overview"
+              style={{ order: 5 }}
               extra={
                 <Select
                   size="small"
