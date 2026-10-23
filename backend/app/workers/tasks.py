@@ -479,6 +479,24 @@ def rebuild_adapter_for_prediction(algorithm_key: str, payload: dict[str, Any], 
     return adapter, state
 
 
+def _aggregate_evaluation_status(
+    experiment_reports: list[dict[str, Any]],
+    *,
+    cancelled: bool,
+) -> str:
+    """Return an honest aggregate status for the evaluation history record."""
+
+    if cancelled:
+        return "Stopped"
+    if not experiment_reports:
+        return "Failed"
+    if all(report.get("status") == "Completed" for report in experiment_reports):
+        return "Completed"
+    if any(report.get("status") in ("Completed", "Partial") for report in experiment_reports):
+        return "Partial"
+    return "Failed"
+
+
 def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progress: ProgressReporter | None = None):
     """Module 5: real held-out test inference for every selected experiment."""
     row = query_one("SELECT * FROM evaluations WHERE evaluation_id = ?", (evaluation_id,))
@@ -690,7 +708,7 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
         "duration_seconds": round(time.time() - started, 3),
         "horizon_step": horizon_step,
     }
-    status = "Stopped" if cancelled else ("Completed" if experiment_reports else "Failed")
+    status = _aggregate_evaluation_status(experiment_reports, cancelled=cancelled)
     get_connection().execute(
         "UPDATE evaluations SET status=?, metrics_summary_json=?, test_range_json=?, artifact_ref=?, "
         "ended_at=? WHERE evaluation_id=?",

@@ -43,6 +43,18 @@ if (-not $SkipSitePackages) {
     robocopy $siteSource $siteTarget /E /NFL /NDL /NJH /NJS /NP /XF *.pyc /XD __pycache__ | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
     Write-Host "[pack] dependencies copied"
+
+    # PyTorch and LightGBM depend on msvcp140.dll. Some Windows machines keep
+    # an older system copy, so vendor the compatible runtime in a stable path
+    # that app.native_runtime preloads before importing native ML modules.
+    $msvcpSource = Join-Path $siteSource "sklearn\.libs\msvcp140.dll"
+    if (-not (Test-Path -LiteralPath $msvcpSource)) {
+        throw "compatible msvcp140.dll not found in the dependency environment: $msvcpSource"
+    }
+    $runtimeTarget = Join-Path $runtimeDir "tn_runtime"
+    New-Item -ItemType Directory -Force -Path $runtimeTarget | Out-Null
+    Copy-Item -LiteralPath $msvcpSource -Destination (Join-Path $runtimeTarget "msvcp140.dll") -Force
+    Write-Host "[pack] bundled compatible MSVC runtime"
 }
 
 Write-Host "[pack] staging application files"

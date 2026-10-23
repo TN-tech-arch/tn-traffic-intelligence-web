@@ -20,7 +20,7 @@ async function waitForEvaluation(evaluationId, timeoutMs = 180000) {
     const response = await fetch(`${BASE}/api/evaluations/${evaluationId}`)
     if (response.ok) {
       const body = await response.json()
-      if (['Completed', 'Failed', 'Stopped'].includes(body.status)) return body
+      if (['Completed', 'Partial', 'Failed', 'Stopped'].includes(body.status)) return body
     }
     await new Promise((resolve) => setTimeout(resolve, 1500))
   }

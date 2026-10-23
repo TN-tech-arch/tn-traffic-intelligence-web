@@ -45,6 +45,11 @@ for ($i = 0; $i -lt 40; $i++) {
 if (-not $healthy) { throw "installed application did not answer on /api/health" }
 Write-Host ("[test] installed app healthy: version {0}, db_ok={1}, sources={2}" -f `
         $health.version, $health.database.ok, $health.database.counts.data_sources)
+if (-not $health.environment.native_runtime.loaded -or -not $health.environment.torch) {
+    throw "installed app did not load the bundled native runtime or PyTorch"
+}
+Write-Host ("[test] installed native runtime: torch={0}, runtime={1}" -f `
+        $health.environment.torch, $health.environment.native_runtime.path)
 
 $sources = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/data/sources" -TimeoutSec 20
 Write-Host ("[test] installed data baseline: sources={0} series_regions={1} gis_regions={2} no_data={3}" -f `
@@ -274,7 +279,7 @@ $multiEvaluationState = $null
 for ($i = 0; $i -lt 300; $i++) {
     Start-Sleep -Seconds 2
     $multiEvaluationState = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/evaluations/$($multiEvaluation.evaluation_id)" -TimeoutSec 30
-    if ($multiEvaluationState.status -in @("Completed", "Failed", "Stopped")) { break }
+    if ($multiEvaluationState.status -in @("Completed", "Partial", "Failed", "Stopped")) { break }
 }
 if ($multiEvaluationState.status -ne "Completed" -or $multiEvaluationState.prediction_count -le 0) {
     throw "installed Module 5 multi-model evaluation failed or produced no predictions"

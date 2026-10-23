@@ -878,11 +878,16 @@ def _runtime_module_info() -> dict[str, Any]:
                     "cuda_available": bool(torch.cuda.is_available()),
                     "device_count": torch.cuda.device_count(),
                 }
-            except Exception:
-                _RUNTIME_MODULE_INFO = {
+            except Exception as exc:
+                # A failed native import can be transient (for example while an
+                # older MSVC runtime is being replaced). Cache only success so a
+                # restarted or repaired process can recover without an API
+                # process restart.
+                return {
                     "torch": None,
                     "cuda_available": False,
                     "device_count": 0,
+                    "torch_error": f"{type(exc).__name__}: {exc}",
                 }
         return dict(_RUNTIME_MODULE_INFO)
 
@@ -908,6 +913,9 @@ def environment_report() -> dict[str, Any]:
     except Exception:  # pragma: no cover
         pass
     report.update(_runtime_module_info())
+    from app.native_runtime import native_runtime_status
+
+    report["native_runtime"] = native_runtime_status()
     return report
 
 

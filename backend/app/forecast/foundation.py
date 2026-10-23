@@ -98,7 +98,8 @@ def _device_info() -> dict[str, Any]:
                 info["torch"] = torch.__version__
             except Exception:
                 pass
-            _DEVICE_INFO_CACHE = info
+            if info["torch"] is not None:
+                _DEVICE_INFO_CACHE = info
         return dict(_DEVICE_INFO_CACHE)
 
 

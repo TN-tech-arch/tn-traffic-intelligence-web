@@ -268,7 +268,7 @@ export default function Evaluation() {
   }, [])
 
   useEffect(() => {
-    if (!evaluation || evaluation.status !== 'Completed') {
+    if (!evaluation || !['Completed', 'Partial'].includes(evaluation.status)) {
       setSeriesByExperiment({})
       return
     }
