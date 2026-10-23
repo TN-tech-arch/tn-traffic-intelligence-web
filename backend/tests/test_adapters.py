@@ -167,6 +167,26 @@ def test_prophet_predict_accepts_explicit_false_seasonality():
     assert np.isfinite(prediction).all()
 
 
+def test_prophet_refit_interval_uses_origin_specific_targets():
+    region = make_region()
+    params = dict(default_params("prophet"))
+    params.update({"daily_seasonality": False, "weekly_seasonality": False, "refit_interval": 2})
+    adapter = build_adapter("prophet", params, "fit")
+    train = make_batch(region, "train")
+    validation = make_batch(region, "validation")
+    result = adapter.fit(region=region, train=train, validation=validation)
+    progress_values = []
+    prediction = adapter.predict(
+        region=region,
+        state=result.state,
+        batch=validation,
+        progress=lambda stage, percent, message, extra=None: progress_values.append(percent),
+    )
+    assert prediction.shape == (validation.size, H)
+    assert np.isfinite(prediction).all()
+    assert progress_values and progress_values[-1] == 100.0
+
+
 def test_xgboost_passes_early_stopping_to_estimator():
     params = dict(default_params("xgboost"))
     params["early_stopping_rounds"] = 2

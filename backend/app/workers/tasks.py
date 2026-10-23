@@ -28,9 +28,15 @@ from app.services.metrics import all_metrics, macro_average
 class ProgressReporter:
     """Buffers progress into the DB so any browser can observe real state."""
 
-    def __init__(self, job_id: str, experiment_id: str | None = None) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        experiment_id: str | None = None,
+        evaluation_id: str | None = None,
+    ) -> None:
         self.job_id = job_id
         self.experiment_id = experiment_id
+        self.evaluation_id = evaluation_id
         self.last_write = 0.0
         self.payload: dict[str, Any] = {}
 
@@ -60,6 +66,11 @@ class ProgressReporter:
                 execute(
                     "UPDATE experiments SET progress_json = ? WHERE experiment_id = ?",
                     (json_dumps(self.payload), self.experiment_id),
+                )
+            if self.evaluation_id:
+                execute(
+                    "UPDATE evaluations SET progress_json = ? WHERE evaluation_id = ?",
+                    (json_dumps(self.payload), self.evaluation_id),
                 )
         except Exception:
             pass
@@ -473,7 +484,7 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
     row = query_one("SELECT * FROM evaluations WHERE evaluation_id = ?", (evaluation_id,))
     if row is None:
         raise NotFound(f"评价 {evaluation_id} 不存在")
-    reporter = progress or ProgressReporter(job_id)
+    reporter = progress or ProgressReporter(job_id, evaluation_id=evaluation_id)
     protocol = json_loads(row["protocol_json"]) or {}
     bundle = load_dataset(row["dataset_id"])
     members = query_all(

@@ -11,6 +11,7 @@ functions again before touching the database.
 from __future__ import annotations
 
 import math
+import threading
 from typing import Any, Iterable
 
 from app.core.errors import Issue, error, warning
@@ -859,6 +860,32 @@ def validate_m5(
 # Environment / resource preflight
 # ---------------------------------------------------------------------------
 
+_RUNTIME_MODULE_INFO: dict[str, Any] | None = None
+_RUNTIME_MODULE_LOCK = threading.Lock()
+
+
+def _runtime_module_info() -> dict[str, Any]:
+    global _RUNTIME_MODULE_INFO
+    if _RUNTIME_MODULE_INFO is not None:
+        return dict(_RUNTIME_MODULE_INFO)
+    with _RUNTIME_MODULE_LOCK:
+        if _RUNTIME_MODULE_INFO is None:
+            try:
+                import torch
+
+                _RUNTIME_MODULE_INFO = {
+                    "torch": torch.__version__,
+                    "cuda_available": bool(torch.cuda.is_available()),
+                    "device_count": torch.cuda.device_count(),
+                }
+            except Exception:
+                _RUNTIME_MODULE_INFO = {
+                    "torch": None,
+                    "cuda_available": False,
+                    "device_count": 0,
+                }
+        return dict(_RUNTIME_MODULE_INFO)
+
 
 def environment_report() -> dict[str, Any]:
     import os
@@ -880,16 +907,7 @@ def environment_report() -> dict[str, Any]:
         report["disk_free_gb"] = round(disk.free / 1e9, 2)
     except Exception:  # pragma: no cover
         pass
-    try:
-        import torch
-
-        report["torch"] = torch.__version__
-        report["cuda_available"] = bool(torch.cuda.is_available())
-        report["device_count"] = torch.cuda.device_count()
-    except Exception:
-        report["torch"] = None
-        report["cuda_available"] = False
-        report["device_count"] = 0
+    report.update(_runtime_module_info())
     return report
 
 

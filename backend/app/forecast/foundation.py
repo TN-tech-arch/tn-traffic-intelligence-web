@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,10 @@ from app.forecast.base import (
     never_cancel,
     noop_progress,
 )
+
+_PIPELINE_CACHE: dict[tuple[Any, ...], Any] = {}
+_DEVICE_INFO_CACHE: dict[str, Any] | None = None
+_DEVICE_INFO_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -79,16 +84,22 @@ def _cached(checkpoint_id: str) -> bool:
 
 
 def _device_info() -> dict[str, Any]:
-    info: dict[str, Any] = {"cuda": False, "device": "cpu"}
-    try:
-        import torch
+    global _DEVICE_INFO_CACHE
+    if _DEVICE_INFO_CACHE is not None:
+        return dict(_DEVICE_INFO_CACHE)
+    with _DEVICE_INFO_LOCK:
+        if _DEVICE_INFO_CACHE is None:
+            info: dict[str, Any] = {"cuda": False, "device": "cpu", "torch": None}
+            try:
+                import torch
 
-        info["cuda"] = bool(torch.cuda.is_available())
-        info["device"] = "cuda" if info["cuda"] else "cpu"
-        info["torch"] = torch.__version__
-    except Exception:
-        info["torch"] = None
-    return info
+                info["cuda"] = bool(torch.cuda.is_available())
+                info["device"] = "cuda" if info["cuda"] else "cpu"
+                info["torch"] = torch.__version__
+            except Exception:
+                pass
+            _DEVICE_INFO_CACHE = info
+        return dict(_DEVICE_INFO_CACHE)
 
 
 def _status(key: str, checkpoints: list[CheckpointSpec], module_names: list[str]) -> dict[str, Any]:
@@ -188,9 +199,13 @@ class ChronosAdapter(_FoundationBase):
         if requested_device == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("参数 device=cuda 但当前环境没有可用的 CUDA 设备。")
         device_map = "cuda" if (requested_device == "cuda" and torch.cuda.is_available()) else "cpu"
-        pipeline = BaseChronosPipeline.from_pretrained(
-            spec.id, device_map=device_map, torch_dtype=torch_dtype
-        )
+        cache_key = ("chronos", spec.id, device_map, dtype)
+        pipeline = _PIPELINE_CACHE.get(cache_key)
+        if pipeline is None:
+            pipeline = BaseChronosPipeline.from_pretrained(
+                spec.id, device_map=device_map, torch_dtype=torch_dtype
+            )
+            _PIPELINE_CACHE[cache_key] = pipeline
         return pipeline, spec, dtype
 
     def fit(self, *, region, train, validation, progress=noop_progress, cancel=never_cancel) -> FitResult:
@@ -285,12 +300,16 @@ class TimesFMAdapter(_FoundationBase):
             device = "cuda"
         elif requested == "cuda":
             raise RuntimeError("参数 device=cuda 但当前环境没有可用的 CUDA 设备。")
-        model = None
-        loader, loader_name = self._resolve_loader()
-        try:
-            model = loader.from_pretrained(spec.id)
-        except Exception as exc:
-            raise RuntimeError(f"TimesFM 权重加载失败（{loader_name}）：{exc}") from exc
+        cache_key = ("timesfm", spec.id, device)
+        model = _PIPELINE_CACHE.get(cache_key)
+        loader_name = "cached"
+        if model is None:
+            loader, loader_name = self._resolve_loader()
+            try:
+                model = loader.from_pretrained(spec.id)
+            except Exception as exc:
+                raise RuntimeError(f"TimesFM 权重加载失败（{loader_name}）：{exc}") from exc
+            _PIPELINE_CACHE[cache_key] = model
         if device == "cuda":
             try:
                 model = model.cuda()

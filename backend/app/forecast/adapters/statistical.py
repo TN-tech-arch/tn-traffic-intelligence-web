@@ -152,6 +152,22 @@ class ProphetAdapter(Adapter):
             return "auto"
         return str(value).lower() == "true"
 
+    def _make_model(self, growth: str | None = None):
+        from prophet import Prophet
+
+        return Prophet(
+            growth=growth or self.params.get("growth", "linear"),
+            seasonality_mode=self.params.get("seasonality_mode", "additive"),
+            daily_seasonality=self._flag(self.params.get("daily_seasonality", "auto")),
+            weekly_seasonality=self._flag(self.params.get("weekly_seasonality", "auto")),
+            yearly_seasonality=False,
+            changepoint_prior_scale=float(self.params.get("changepoint_prior_scale", 0.05)),
+            seasonality_prior_scale=float(self.params.get("seasonality_prior_scale", 10.0)),
+            n_changepoints=int(self.params.get("n_changepoints", 25)),
+            interval_width=float(self.params.get("interval_width", 0.8)),
+            uncertainty_samples=0,
+        )
+
     def fit(
         self,
         *,
@@ -166,17 +182,7 @@ class ProphetAdapter(Adapter):
 
         progress("Fit", 5.0, "拟合 Prophet（仅训练段，含日/周周期）")
 
-        model = Prophet(
-            growth=self.params.get("growth", "linear"),
-            seasonality_mode=self.params.get("seasonality_mode", "additive"),
-            daily_seasonality=self._flag(self.params.get("daily_seasonality", "auto")),
-            weekly_seasonality=self._flag(self.params.get("weekly_seasonality", "auto")),
-            yearly_seasonality=False,
-            changepoint_prior_scale=float(self.params.get("changepoint_prior_scale", 0.05)),
-            seasonality_prior_scale=float(self.params.get("seasonality_prior_scale", 10.0)),
-            n_changepoints=int(self.params.get("n_changepoints", 25)),
-            interval_width=float(self.params.get("interval_width", 0.8)),
-        )
+        model = self._make_model()
         history = pd.DataFrame(
             {
                 "ds": pd.to_datetime(region.timestamps[: region.train_end_index + 1], unit="s"),
@@ -219,17 +225,7 @@ class ProphetAdapter(Adapter):
         from prophet import Prophet
 
         progress("Ready", 10.0, "Prophet 推理（使用训练段拟合的模型）")
-        model = Prophet(
-            growth=state.get("growth", "linear"),
-            seasonality_mode=self.params.get("seasonality_mode", "additive"),
-            daily_seasonality=self._flag(self.params.get("daily_seasonality", "auto")),
-            weekly_seasonality=self._flag(self.params.get("weekly_seasonality", "auto")),
-            yearly_seasonality=False,
-            changepoint_prior_scale=float(self.params.get("changepoint_prior_scale", 0.05)),
-            seasonality_prior_scale=float(self.params.get("seasonality_prior_scale", 10.0)),
-            n_changepoints=int(self.params.get("n_changepoints", 25)),
-            interval_width=float(self.params.get("interval_width", 0.8)),
-        )
+        model = self._make_model(state.get("growth", "linear"))
         series = np.asarray(region.series_full, dtype="float64")
         history = pd.DataFrame(
             {
@@ -241,12 +237,76 @@ class ProphetAdapter(Adapter):
             history["cap"] = state["cap"]
             model.cap = state["cap"]
         model.fit(history)
-        future = pd.DataFrame({"ds": pd.to_datetime(batch.target_timestamps.reshape(-1))})
-        if state.get("cap"):
-            future["cap"] = state["cap"]
-        forecast = model.predict(future)
-        values = np.asarray(forecast["yhat"], dtype="float64")
+        L = int(region.L)
+        H = int(region.H)
+        calibration_window = max(1, min(6, L))
+        refit_interval = int(self.params.get("refit_interval", 0) or 0)
+
+        def fitted_history(end_index: int):
+            frame = pd.DataFrame(
+                {
+                    "ds": pd.to_datetime(region.timestamps[: end_index + 1], unit="s"),
+                    "y": np.asarray(series[: end_index + 1], dtype="float64"),
+                }
+            )
+            if state.get("cap"):
+                frame["cap"] = state["cap"]
+            fresh = self._make_model(state.get("growth", "linear"))
+            if state.get("cap"):
+                fresh.cap = state["cap"]
+            fresh.fit(frame)
+            return fresh
+
+        def calibrated_batch(
+            current_model,
+            starts: np.ndarray,
+            target_timestamps: np.ndarray,
+        ) -> np.ndarray:
+            origins = starts.astype("int64") + L - 1
+            calibration_indices = origins[:, None] - np.arange(calibration_window - 1, -1, -1)[None, :]
+            calibration_indices = np.maximum(calibration_indices, 0)
+            calibration_frame = pd.DataFrame(
+                {"ds": pd.to_datetime(region.timestamps[calibration_indices].reshape(-1), unit="s")}
+            )
+            if state.get("cap"):
+                calibration_frame["cap"] = state["cap"]
+            calibration_prediction = np.asarray(
+                current_model.predict(calibration_frame)["yhat"], dtype="float64"
+            ).reshape(starts.size, calibration_window)
+            offsets = np.median(series[calibration_indices] - calibration_prediction, axis=1)
+
+            target_frame = pd.DataFrame(
+                {"ds": pd.to_datetime(target_timestamps.reshape(-1))}
+            )
+            if state.get("cap"):
+                target_frame["cap"] = state["cap"]
+            base = np.asarray(current_model.predict(target_frame)["yhat"], dtype="float64")
+            return base.reshape(starts.size, H) + offsets[:, None]
+
+        if refit_interval <= 0:
+            values = calibrated_batch(model, batch.starts, batch.target_timestamps)
+        else:
+            values = np.empty((batch.size, H), dtype="float64")
+            last_fit_origin = int(state["train_end_index"])
+            for row, start in enumerate(batch.starts):
+                if row % 25 == 0:
+                    self.check_cancel(cancel)
+                    progress(
+                        "Validation",
+                        100.0 * row / max(1, batch.size),
+                        f"Prophet rolling prediction {row}/{batch.size}",
+                    )
+                origin = int(start) + L - 1
+                if row % refit_interval == 0 and origin > last_fit_origin:
+                    model = fitted_history(origin)
+                    last_fit_origin = origin
+                values[row] = calibrated_batch(
+                    model,
+                    np.asarray([start], dtype="int64"),
+                    batch.target_timestamps[[row]],
+                )[0]
         self.check_cancel(cancel)
+        progress("Validation", 100.0, f"Prophet rolling prediction {batch.size}/{batch.size}")
         if values.size != batch.size * int(region.H):
             raise ValueError(
                 f"Prophet 输出数量 {values.size} 与期望 {batch.size * int(region.H)} 不一致"
