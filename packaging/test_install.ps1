@@ -51,6 +51,33 @@ if (-not $health.environment.native_runtime.loaded -or -not $health.environment.
 Write-Host ("[test] installed native runtime: torch={0}, runtime={1}" -f `
         $health.environment.torch, $health.environment.native_runtime.path)
 
+$modelRegistry = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/models/registry" -TimeoutSec 30
+$prophet = $modelRegistry.models | Where-Object { $_.key -eq "prophet" } | Select-Object -First 1
+$transformer = $modelRegistry.models | Where-Object { $_.key -eq "transformer" } | Select-Object -First 1
+$prophetDefaults = @{}
+$prophet.params | ForEach-Object { $prophetDefaults[$_.key] = $_.default }
+$transformerDefaults = @{}
+$transformer.params | ForEach-Object { $transformerDefaults[$_.key] = $_.default }
+if (-not $prophet -or -not $transformer) {
+    throw "installed model registry is missing Prophet or Transformer"
+}
+if ($prophetDefaults["refit_interval"] -ne 144 -or
+    $prophetDefaults["daily_fourier_order"] -ne 4 -or
+    $prophetDefaults["holiday_country"] -ne "auto" -or
+    $prophetDefaults["random_seed"] -ne 42 -or
+    $prophetDefaults.ContainsKey("interval_width")) {
+    throw "installed Prophet defaults are not the validated profile"
+}
+if ($transformerDefaults["d_model"] -ne 64 -or
+    $transformerDefaults["n_heads"] -ne 4 -or
+    $transformerDefaults["encoder_layers"] -ne 2 -or
+    $transformerDefaults["dim_feedforward"] -ne 128 -or
+    $transformerDefaults["learning_rate"] -ne 0.0005 -or
+    $transformerDefaults["patience"] -ne 8) {
+    throw "installed Transformer defaults are not the validated profile"
+}
+Write-Host "[test] installed Prophet and Transformer defaults match the validated profiles"
+
 $sources = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/data/sources" -TimeoutSec 20
 Write-Host ("[test] installed data baseline: sources={0} series_regions={1} gis_regions={2} no_data={3}" -f `
         $sources.totals.sources, $sources.totals.series_regions, $sources.totals.gis_regions, $sources.totals.no_data_regions)

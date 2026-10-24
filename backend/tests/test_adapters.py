@@ -5,6 +5,8 @@ present in the local cache; otherwise the test records them as Unavailable
 instead of pretending they ran (spec 8.4 / T17).
 """
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -193,3 +195,33 @@ def test_xgboost_passes_early_stopping_to_estimator():
     adapter = build_adapter("xgboost", params, "train")
     estimator = adapter._make_estimator()
     assert estimator.early_stopping_rounds == 2
+
+
+def test_validated_default_profiles_match_model_complexity():
+    prophet = default_params("prophet")
+    assert prophet["refit_interval"] == 144
+    assert prophet["daily_fourier_order"] == 4
+    assert prophet["holiday_country"] == "auto"
+    assert "calibration_days" not in prophet
+    assert prophet["random_seed"] == 42
+    assert "interval_width" not in prophet
+
+    transformer = default_params("transformer")
+    assert transformer["d_model"] == 64
+    assert transformer["n_heads"] == 4
+    assert transformer["encoder_layers"] == 2
+    assert transformer["dim_feedforward"] == 128
+    assert transformer["learning_rate"] == 0.0005
+    assert transformer["patience"] == 8
+
+
+def test_prophet_default_holiday_calendar_follows_data_source():
+    params = default_params("prophet")
+    adapter = build_adapter("prophet", params, "fit")
+    region = make_region()
+    assert adapter._holiday_country(replace(region, source_key="milano")) == "IT"
+    assert adapter._holiday_country(replace(region, source_key="trentino")) == "IT"
+    assert adapter._holiday_country(replace(region, source_key="zte")) == "CN"
+
+    disabled = build_adapter("prophet", {**params, "holiday_country": "none"}, "fit")
+    assert disabled._holiday_country(replace(region, source_key="milano")) is None

@@ -607,6 +607,76 @@ MODEL_BY_KEY = {m["key"]: m for m in MODELS}
 ALGORITHM_KEYS = [m["key"] for m in MODELS]
 
 
+def _apply_empirically_validated_defaults() -> None:
+    """Keep defaults aligned with the adapters and current CPU workload."""
+
+    prophet = MODEL_BY_KEY["prophet"]
+    # Prophet point forecasts do not produce uncertainty intervals here.
+    prophet["params"] = [item for item in prophet["params"] if item["key"] != "interval_width"]
+    prophet["params"].extend(
+        [
+            P(
+                "daily_fourier_order",
+                "Daily Fourier Order",
+                "日内傅里叶阶数",
+                "integer",
+                4,
+                level="advanced",
+                min=4,
+                max=24,
+                help_zh="日内周期的傅里叶阶数。阶数越高越能表达多峰和急促变化，过高可能过拟合。",
+                suggestion_zh="默认 4；数据呈现明显双峰时可尝试 6-8。",
+            ),
+            P(
+                "holiday_country",
+                "Holiday Calendar",
+                "节假日日历",
+                "enum",
+                "auto",
+                enum=["auto", "IT", "CN", "none"],
+                enum_labels=["自动按数据源", "意大利", "中国", "不使用"],
+                level="advanced",
+                help_zh="自动模式根据数据源选择意大利或中国节假日。",
+                suggestion_zh="默认自动。",
+            ),
+            P(
+                "random_seed",
+                "Random Seed",
+                "随机种子",
+                "integer",
+                42,
+                level="advanced",
+                min=0,
+                max=2**31 - 1,
+                help_zh="固定 Prophet/Stan 优化初始值，保证同一数据与参数可复现。",
+                suggestion_zh="默认 42。",
+            ),
+        ]
+    )
+    for item in prophet["params"]:
+        if item["key"] == "refit_interval":
+            item["default"] = 144
+            item["suggestion_zh"] = "144 对应 Milano 10 分钟数据的约一天滚动重拟合。"
+
+    transformer_defaults = {
+        "d_model": 64,
+        "n_heads": 4,
+        "encoder_layers": 2,
+        "dim_feedforward": 128,
+        "learning_rate": 0.0005,
+        "patience": 8,
+    }
+    for item in MODEL_BY_KEY["transformer"]["params"]:
+        if item["key"] in transformer_defaults:
+            item["default"] = transformer_defaults[item["key"]]
+    for item in MODEL_BY_KEY["transformer"]["params"]:
+        if item["key"] == "dim_feedforward":
+            item["suggestion_zh"] = "默认 128，与 64 维模型配合以降低 CPU 训练成本。"
+
+
+_apply_empirically_validated_defaults()
+
+
 def default_params(algorithm_key: str) -> dict[str, Any]:
     model = MODEL_BY_KEY[algorithm_key]
     return {p["key"]: p["default"] for p in model["params"]}

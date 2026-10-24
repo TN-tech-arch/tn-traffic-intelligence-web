@@ -152,21 +152,51 @@ class ProphetAdapter(Adapter):
             return "auto"
         return str(value).lower() == "true"
 
-    def _make_model(self, growth: str | None = None):
+    def _holiday_country(self, region: RegionContext | None) -> str | None:
+        requested = str(self.params.get("holiday_country", "auto") or "auto")
+        if requested.lower() == "none":
+            return None
+        if requested != "auto":
+            return requested.upper()
+        if region is None:
+            return None
+        source = region.source_key.lower()
+        if source in {"milano", "trentino"}:
+            return "IT"
+        if source == "zte":
+            return "CN"
+        return None
+
+    def _make_model(self, growth: str | None = None, region: RegionContext | None = None):
         from prophet import Prophet
 
-        return Prophet(
+        model = Prophet(
             growth=growth or self.params.get("growth", "linear"),
             seasonality_mode=self.params.get("seasonality_mode", "additive"),
-            daily_seasonality=self._flag(self.params.get("daily_seasonality", "auto")),
+            daily_seasonality=False,
             weekly_seasonality=self._flag(self.params.get("weekly_seasonality", "auto")),
             yearly_seasonality=False,
             changepoint_prior_scale=float(self.params.get("changepoint_prior_scale", 0.05)),
             seasonality_prior_scale=float(self.params.get("seasonality_prior_scale", 10.0)),
             n_changepoints=int(self.params.get("n_changepoints", 25)),
-            interval_width=float(self.params.get("interval_width", 0.8)),
             uncertainty_samples=0,
         )
+        daily_enabled = self._flag(self.params.get("daily_seasonality", "auto"))
+        if daily_enabled is not False:
+            model.add_seasonality(
+                name="daily_traffic",
+                period=1,
+                fourier_order=int(self.params.get("daily_fourier_order", 4)),
+            )
+        country = self._holiday_country(region)
+        if country:
+            try:
+                model.add_country_holidays(country_name=country)
+            except Exception:
+                # Holidays are auxiliary features; a missing calendar must not
+                # prevent otherwise valid Prophet forecasts.
+                country = None
+        return model
 
     def fit(
         self,
@@ -182,7 +212,7 @@ class ProphetAdapter(Adapter):
 
         progress("Fit", 5.0, "拟合 Prophet（仅训练段，含日/周周期）")
 
-        model = self._make_model()
+        model = self._make_model(region=region)
         history = pd.DataFrame(
             {
                 "ds": pd.to_datetime(region.timestamps[: region.train_end_index + 1], unit="s"),
@@ -193,7 +223,8 @@ class ProphetAdapter(Adapter):
             upper = float(np.nanmax(history["y"]) * 1.2)
             history["cap"] = upper
             model.cap = upper
-        model.fit(history)
+        seed = int(self.params.get("random_seed", 42))
+        model.fit(history, seed=seed)
         self.check_cancel(cancel)
         progress("Fit", 90.0, "Prophet 拟合完成")
         return FitResult(
@@ -203,12 +234,23 @@ class ProphetAdapter(Adapter):
                 "growth": self.params.get("growth", "linear"),
                 "cap": (float(np.nanmax(history["y"]) * 1.2) if self.params.get("growth") == "logistic" else None),
                 "changepoints": int(len(model.changepoints)) if model.changepoints is not None else 0,
-                "components": ["trend", "daily", "weekly"],
+                "daily_fourier_order": int(self.params.get("daily_fourier_order", 4)),
+                "holiday_country": self._holiday_country(region),
+                "random_seed": seed,
+                "components": ["trend", "daily", "weekly"]
+                + (["holidays"] if self._holiday_country(region) else []),
             },
-            history={"type": "fit", "no_epochs": True, "changepoints": int(model.changepoints.shape[0]) if model.changepoints is not None else 0},
+            history={
+                "type": "fit",
+                "no_epochs": True,
+                "changepoints": int(model.changepoints.shape[0]) if model.changepoints is not None else 0,
+                "daily_fourier_order": int(self.params.get("daily_fourier_order", 4)),
+                "holiday_country": self._holiday_country(region),
+                "random_seed": seed,
+            },
             notes=[
-                "Prophet 仅使用训练段拟合；预测阶段不做参数重估，因此不会读取测试期目标。",
-                "日/周周期为 auto 时由 Prophet 依据训练段跨度自动决定。",
+                "Prophet 的基础参数仅使用训练段拟合；启用滚动重拟合时，只读取每个预测起点之前的真实观测。",
+                "日周期使用显式傅里叶阶数，周周期由配置或训练段跨度决定，节假日按数据源日历注入。",
             ],
         )
 
@@ -225,7 +267,7 @@ class ProphetAdapter(Adapter):
         from prophet import Prophet
 
         progress("Ready", 10.0, "Prophet 推理（使用训练段拟合的模型）")
-        model = self._make_model(state.get("growth", "linear"))
+        model = self._make_model(state.get("growth", "linear"), region=region)
         series = np.asarray(region.series_full, dtype="float64")
         history = pd.DataFrame(
             {
@@ -236,10 +278,10 @@ class ProphetAdapter(Adapter):
         if state.get("cap"):
             history["cap"] = state["cap"]
             model.cap = state["cap"]
-        model.fit(history)
+        seed = int(self.params.get("random_seed", 42))
+        model.fit(history, seed=seed)
         L = int(region.L)
         H = int(region.H)
-        calibration_window = max(1, min(6, L))
         refit_interval = int(self.params.get("refit_interval", 0) or 0)
 
         def fitted_history(end_index: int):
@@ -251,10 +293,10 @@ class ProphetAdapter(Adapter):
             )
             if state.get("cap"):
                 frame["cap"] = state["cap"]
-            fresh = self._make_model(state.get("growth", "linear"))
+            fresh = self._make_model(state.get("growth", "linear"), region=region)
             if state.get("cap"):
                 fresh.cap = state["cap"]
-            fresh.fit(frame)
+            fresh.fit(frame, seed=seed)
             return fresh
 
         def calibrated_batch(
@@ -262,8 +304,9 @@ class ProphetAdapter(Adapter):
             starts: np.ndarray,
             target_timestamps: np.ndarray,
         ) -> np.ndarray:
-            origins = starts.astype("int64") + L - 1
-            calibration_indices = origins[:, None] - np.arange(calibration_window - 1, -1, -1)[None, :]
+            origins = np.asarray(starts, dtype="int64") + L - 1
+            recent_points = max(1, min(6, L))
+            calibration_indices = origins[:, None] - np.arange(recent_points - 1, -1, -1)[None, :]
             calibration_indices = np.maximum(calibration_indices, 0)
             calibration_frame = pd.DataFrame(
                 {"ds": pd.to_datetime(region.timestamps[calibration_indices].reshape(-1), unit="s")}
@@ -272,8 +315,11 @@ class ProphetAdapter(Adapter):
                 calibration_frame["cap"] = state["cap"]
             calibration_prediction = np.asarray(
                 current_model.predict(calibration_frame)["yhat"], dtype="float64"
-            ).reshape(starts.size, calibration_window)
-            offsets = np.median(series[calibration_indices] - calibration_prediction, axis=1)
+            ).reshape(origins.size, recent_points)
+            offsets = np.median(
+                np.asarray(series[calibration_indices], dtype="float64") - calibration_prediction,
+                axis=1,
+            )
 
             target_frame = pd.DataFrame(
                 {"ds": pd.to_datetime(target_timestamps.reshape(-1))}
@@ -281,30 +327,32 @@ class ProphetAdapter(Adapter):
             if state.get("cap"):
                 target_frame["cap"] = state["cap"]
             base = np.asarray(current_model.predict(target_frame)["yhat"], dtype="float64")
-            return base.reshape(starts.size, H) + offsets[:, None]
+            return base.reshape(origins.size, H) + offsets[:, None]
 
         if refit_interval <= 0:
             values = calibrated_batch(model, batch.starts, batch.target_timestamps)
         else:
             values = np.empty((batch.size, H), dtype="float64")
             last_fit_origin = int(state["train_end_index"])
-            for row, start in enumerate(batch.starts):
-                if row % 25 == 0:
-                    self.check_cancel(cancel)
-                    progress(
-                        "Validation",
-                        100.0 * row / max(1, batch.size),
-                        f"Prophet rolling prediction {row}/{batch.size}",
-                    )
-                origin = int(start) + L - 1
-                if row % refit_interval == 0 and origin > last_fit_origin:
+            row = 0
+            while row < batch.size:
+                self.check_cancel(cancel)
+                progress(
+                    "Validation",
+                    100.0 * row / max(1, batch.size),
+                    f"Prophet rolling prediction {row}/{batch.size}",
+                )
+                origin = int(batch.starts[row]) + L - 1
+                if origin > last_fit_origin:
                     model = fitted_history(origin)
                     last_fit_origin = origin
-                values[row] = calibrated_batch(
+                end = min(batch.size, row + refit_interval)
+                values[row:end] = calibrated_batch(
                     model,
-                    np.asarray([start], dtype="int64"),
-                    batch.target_timestamps[[row]],
-                )[0]
+                    batch.starts[row:end],
+                    batch.target_timestamps[row:end],
+                )
+                row = end
         self.check_cancel(cancel)
         progress("Validation", 100.0, f"Prophet rolling prediction {batch.size}/{batch.size}")
         if values.size != batch.size * int(region.H):

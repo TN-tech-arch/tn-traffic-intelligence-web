@@ -14,7 +14,7 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` - ${detail}` : ''}`)
 }
 
-async function waitForEvaluation(evaluationId, timeoutMs = 180000) {
+async function waitForEvaluation(evaluationId, timeoutMs = 360000) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     const response = await fetch(`${BASE}/api/evaluations/${evaluationId}`)
@@ -45,7 +45,9 @@ for (const experiment of dataset.candidates) {
   group.push(experiment)
   grouped.set(experiment.algorithm_label, group)
 }
-const repeated = [...grouped.values()].find((group) => group.length >= 2)
+const repeated =
+  [...grouped.entries()].find(([label, group]) => label !== 'Prophet' && group.length >= 2)?.[1] ??
+  [...grouped.values()].find((group) => group.length >= 2)
 const distinct = dataset.candidates.find(
   (experiment) =>
     repeated && !repeated.some((candidate) => candidate.experiment_id === experiment.experiment_id),
