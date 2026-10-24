@@ -5,8 +5,16 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.workers.tasks import _wall_duration_seconds
 
 client = TestClient(app)
+
+
+def test_experiment_wall_duration_matches_displayed_timestamps():
+    assert _wall_duration_seconds(
+        "2026-10-21T15:43:56Z",
+        "2026-10-21T15:44:02Z",
+    ) == 6.0
 
 
 def _experiments() -> list[dict]:

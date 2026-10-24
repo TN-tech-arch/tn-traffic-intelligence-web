@@ -50,6 +50,27 @@ async function setField(page, fieldPath, value) {
   await page.waitForTimeout(450)
 }
 
+async function chooseSelectOption(page, fieldPath, text) {
+  const field = page.locator(`[data-field="${fieldPath}"]`)
+  await field.locator('.ant-select-selector').click()
+  await page.locator('.ant-select-dropdown:visible').waitFor({ state: 'visible', timeout: 10000 })
+  await page.waitForTimeout(300)
+  const option = page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .filter({ hasText: text })
+    .first()
+  if (!(await option.count())) {
+    const holder = page.locator('.ant-select-dropdown:visible .rc-virtual-list-holder').first()
+    await holder.waitFor({ state: 'attached', timeout: 10000 })
+    await holder.evaluate((node, target) => {
+      node.scrollTop = target.includes('全部模型') ? 0 : node.scrollHeight
+    }, text)
+    await page.waitForTimeout(500)
+  }
+  await option.waitFor({ state: 'visible', timeout: 10000 })
+  await option.click()
+}
+
 /** Expand a category group in the algorithm list only when it is collapsed. */
 async function openAlgorithmGroup(page, label) {
   const header = page.locator('.ant-collapse-header', { hasText: label }).first()
@@ -276,8 +297,36 @@ try {
   const inputLengthError = await fieldErrorText(page, 'm3.input_length')
   record('T08/T48 L=0 在输入框下方报错', Boolean(inputLengthError && inputLengthError.includes('不能小于')), inputLengthError ?? 'no error')
   await setField(page, 'm3.input_length', 24)
-  await page.click('button:has-text("实时预览")')
-  await page.waitForTimeout(3500)
+  await page.waitForFunction(
+    () => {
+      const button = Array.from(document.querySelectorAll('button')).find((node) =>
+        node.textContent?.includes('实时预览'),
+      )
+      return button instanceof HTMLButtonElement && !button.disabled
+    },
+    undefined,
+    { timeout: 30000 },
+  )
+  const previewButton = page.locator('button').filter({ hasText: '实时预览' }).first()
+  const [previewResponse] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().includes('/api/datasets/preview') && response.request().method() === 'POST',
+      { timeout: 90000 },
+    ),
+    previewButton.click(),
+  ])
+  if (!previewResponse.ok()) {
+    throw new Error(`M3 preview returned HTTP ${previewResponse.status()}`)
+  }
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="sliding-window-preview"]')
+        ?.textContent?.includes('当前窗口 1 /'),
+    null,
+    { timeout: 90000 },
+  )
   const previewText = await page.locator('.tn-three-pane section').nth(1).innerText()
   record(
     'T08 中央按概览、时间划分、滑动窗口展示',
@@ -415,19 +464,35 @@ try {
   // ------------------------------------------------------------ Module 4
   await page.click('.tn-nav-item >> text=Training')
   await page.waitForTimeout(2500)
-  const m4Tabs = (await page.locator('.tn-pane-info .ant-tabs-tab').allInnerTexts()).map((t) => t.trim())
+  const m4Layout = page.locator('.tn-m4-layout')
+  const m4Columns = await m4Layout.evaluate((node) => getComputedStyle(node).gridTemplateColumns)
+  const m4Text = await page.locator('body').innerText()
   record(
-    'T31/T39 M4 三个右侧 Tab 齐全（含实验历史管理）',
-    ['Training Overview', 'Training Logs', 'Experiment History'].every((t) =>
-      m4Tabs.some((text) => text.includes(t)),
-    ),
-    m4Tabs.join('|'),
+    'T31/T39 M4 使用两栏布局并移除右侧独立面板',
+    m4Columns.split(' ').length === 2 &&
+      (await page.locator('.tn-pane-info').count()) === 0 &&
+      m4Text.includes('当前实验详情（Current Experiment Details）') &&
+      m4Text.includes('训练监控（Training Monitor）') &&
+      m4Text.includes('实验历史（Experiment History）'),
+    m4Columns,
   )
-  const allModelsEntry = await page.locator('text=全部模型（All Models，12 种）').count()
-  record('T12/T20 All Models 位于算法列表顶部且标注为批量编排', allModelsEntry > 0, `${allModelsEntry} matches`)
-  // transformer validation
-  await openAlgorithmGroup(page, '深度学习')
-  await page.locator('.tn-pane div[role="button"]', { hasText: 'Transformer' }).first().click()
+  const algorithmSelect = page.locator('[data-field="m4.algorithm_key"] .ant-select-selector')
+  await algorithmSelect.click()
+  await page.locator('.ant-select-dropdown:visible').waitFor({ state: 'visible', timeout: 10000 })
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .first()
+    .waitFor({ state: 'visible', timeout: 10000 })
+  const algorithmOptions = await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .allInnerTexts()
+  record(
+    'T12/T20 All Models 位于算法列表顶部且标注为批量编排',
+    algorithmOptions[0]?.includes('全部模型（All Models，12 种）'),
+    algorithmOptions.slice(0, 3).join(' | '),
+  )
+  await page.keyboard.press('Escape')
+  await chooseSelectOption(page, 'm4.algorithm_key', 'Transformer')
   await page.waitForTimeout(800)
   await setField(page, 'model_configs.transformer.params.d_model', 130)
   const headsError = await fieldErrorText(page, 'model_configs.transformer.params.n_heads')
@@ -436,8 +501,7 @@ try {
   const headsCleared = await fieldErrorText(page, 'model_configs.transformer.params.n_heads')
   record('T15 修正 d_model=128 后立即允许继续', !headsCleared, headsCleared ?? 'cleared')
   // dropout error + epochs warning must be separated
-  await openAlgorithmGroup(page, '深度学习')
-  await page.locator('.tn-pane div[role="button"]', { hasText: 'LSTM' }).first().click()
+  await chooseSelectOption(page, 'm4.algorithm_key', 'LSTM')
   await page.waitForTimeout(600)
   await setField(page, 'model_configs.lstm.params.dropout', 1.5)
   const dropoutError = await fieldErrorText(page, 'model_configs.lstm.params.dropout')
@@ -464,12 +528,23 @@ try {
   const runEnabled = await page.locator('button:has-text("开始训练")').first().isEnabled()
   record('T45/T46 错误修正后 Run 恢复可用（Warning 不阻止）', runEnabled === true, `run enabled: ${runEnabled}`)
   // All Models per algorithm view
-  await page.locator('div[role="button"]', { hasText: '全部模型（All Models，12 种）' }).first().click()
+  await chooseSelectOption(page, 'm4.algorithm_key', '全部模型（All Models，12 种）')
   await page.waitForTimeout(1200)
-  const modelGroups = await page.locator('.tn-pane .ant-collapse-item').count()
+  const modelGroups = await page.locator('.tn-m4-column .ant-collapse-item').count()
   record('T50 All Models 显示 12 个独立参数组', modelGroups >= 12, `${modelGroups} groups`)
-  const runnableTags = await page.locator('.tn-pane .ant-tag:has-text("可运行")').count()
-  record('T50 每个算法可定位到 Error/Warning 与可运行状态', runnableTags >= 12, `${runnableTags} runnable tags`)
+  await page.getByRole('button', { name: '重新检查' }).click()
+  await page.locator('.tn-m4-preflight').waitFor({ state: 'visible', timeout: 30000 })
+  await page.waitForFunction(
+    () => document.querySelector('.tn-m4-preflight')?.textContent?.includes('可运行模型'),
+    undefined,
+    { timeout: 30000 },
+  )
+  const batchPreflight = await page.locator('.tn-m4-preflight').innerText()
+  record(
+    'T50 全部模型显示真实预检汇总',
+    batchPreflight.includes('可运行模型') && batchPreflight.includes('阻断错误'),
+    batchPreflight.replace(/\n/g, ' | '),
+  )
   await page.screenshot({ path: path.join(SHOTS, '05-module4-training.png'), fullPage: true })
 
   // ------------------------------------------------------------ Module 5

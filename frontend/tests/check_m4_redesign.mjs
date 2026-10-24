@@ -119,7 +119,8 @@ check(
     detailText.includes('算法') &&
     detailText.includes('当前状态') &&
     detailText.includes('开始时间') &&
-    detailText.includes('运行时长'),
+    detailText.includes('实验总耗时') &&
+    detailText.includes('含收尾'),
 )
 check(
   '10 中央只有一个详情栏和训练监控，不重复快照/指标卡',
@@ -128,6 +129,10 @@ check(
 
 const monitorTable = page.locator('.tn-m4-monitor .ant-table')
 check('11 显示真实区域级训练状态', (await monitorTable.count()) >= 1 && (await monitorTable.first().locator('tbody tr').count()) >= 1)
+check(
+  '11.1 区分实验总耗时与区域训练耗时',
+  (await monitorTable.first().locator('thead').innerText()).includes('区域训练耗时'),
+)
 
 await page.getByTestId('m4-training-logs').waitFor({ state: 'visible', timeout: 30000 })
 const logsText = await page.getByTestId('m4-training-logs').innerText()

@@ -220,13 +220,14 @@ check(
 
 const rangeStart = page.locator('[data-field="m1.time_start"] input').first()
 const rangeEnd = page.locator('[data-field="m1.time_end"] input').first()
-await rangeStart.click()
-await rangeStart.fill('2013-11-03 00:00')
-await rangeStart.press('Enter')
 await rangeEnd.click()
 await rangeEnd.fill('2013-11-04 23:50')
 await rangeEnd.press('Enter')
 await page.waitForTimeout(5000)
+await rangeStart.click()
+await rangeStart.fill('2013-11-03 00:00')
+await rangeStart.press('Enter')
+await page.waitForTimeout(6000)
 const updatedSliderMin = Number(await slider.getAttribute('min'))
 const updatedSliderMax = Number(await slider.getAttribute('max'))
 check(

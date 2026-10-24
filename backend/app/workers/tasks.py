@@ -7,6 +7,7 @@ import platform
 import sys
 import time
 import traceback
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -83,11 +84,18 @@ def log_event(resource: str, resource_id: str, action: str, detail: dict[str, An
     )
 
 
-def append_log(experiment_id: str, level: str, message: str, **extra: Any) -> None:
+def append_log(
+    experiment_id: str,
+    level: str,
+    message: str,
+    *,
+    at: str | None = None,
+    **extra: Any,
+) -> None:
     """Append a structured log line to the experiment log file (spec 7.6)."""
     directory = ensure_dir("logs")
     path = directory / f"{experiment_id}.jsonl"
-    record = {"at": now_utc(), "level": level, "message": message}
+    record = {"at": at or now_utc(), "level": level, "message": message}
     record.update(extra)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -95,6 +103,13 @@ def append_log(experiment_id: str, level: str, message: str, **extra: Any) -> No
 
 def experiment_log_path(experiment_id: str) -> Path:
     return ensure_dir("logs") / f"{experiment_id}.jsonl"
+
+
+def _wall_duration_seconds(started_at: str, finished_at: str) -> float:
+    """Return the user-visible elapsed time between two stored UTC timestamps."""
+    start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    end = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+    return max(0.0, (end - start).total_seconds())
 
 
 def _region_batch(bundle, region_id: str, split: str) -> WindowBatch:
@@ -221,10 +236,11 @@ def run_experiment(
     region_experiment_ids = snapshot.get("region_experiment_ids") or {}
     regions = regions or bundle.region_ids
 
-    started = time.time()
+    started_at = now_utc()
+    started_monotonic = time.perf_counter()
     get_connection().execute(
         "UPDATE experiments SET status='Running', started_at=?, error=NULL WHERE experiment_id=?",
-        (now_utc(), experiment_id),
+        (started_at, experiment_id),
     )
     reporter("Preparing", 0.0, f"{model['label']} 开始：{len(regions)} 个区域")
     append_log(experiment_id, "info", f"experiment start algorithm={algorithm_key} mode={mode} regions={len(regions)}")
@@ -404,16 +420,20 @@ def run_experiment(
         status = "Failed"
     else:
         status = "Completed"
-    duration = round(time.time() - started, 3)
+    processing_seconds = round(time.perf_counter() - started_monotonic, 3)
+    environment = environment_snapshot()
+    finished_at = now_utc()
+    duration = round(_wall_duration_seconds(started_at, finished_at), 3)
     summary = {
         "regions_total": len(regions),
         "regions_completed": completed,
         "regions_failed": failed,
         "regions_skipped": skipped,
         "duration_seconds": duration,
+        "processing_seconds": processing_seconds,
         "macro_validation": macro_average(per_region_metrics) if per_region_metrics else {},
         "errors": errors[:50],
-        "environment": environment_snapshot(),
+        "environment": environment,
     }
     get_connection().execute(
         """
@@ -423,13 +443,18 @@ def run_experiment(
         (
             status,
             json_dumps(summary),
-            now_utc(),
+            finished_at,
             (json_dumps(errors[:10]) if errors and status in ("Failed", "Partial") else None),
             experiment_id,
         ),
     )
     reporter("Ready", 100.0, f"实验结束：{status}（成功 {completed} / 失败 {failed}）")
-    append_log(experiment_id, "info", f"experiment end status={status} duration={duration}s")
+    append_log(
+        experiment_id,
+        "info",
+        f"experiment end status={status} duration={duration}s processing={processing_seconds}s",
+        at=finished_at,
+    )
     log_event("experiment", experiment_id, "finished", {"status": status})
     return {"status": status, "completed": completed, "failed": failed}
 

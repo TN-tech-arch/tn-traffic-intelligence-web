@@ -222,6 +222,13 @@ if ($logs.logs.Count -eq 0) {
 if ($experiment.display_id -ne $run.experiment_id -or $experiment.dataset_display_id -ne $dataset_id) {
     throw "installed experiment detail does not expose DS/EXP display IDs"
 }
+$wallSeconds = ([datetimeoffset]::Parse($experiment.ended_at) - [datetimeoffset]::Parse($experiment.started_at)).TotalSeconds
+if ([math]::Abs($wallSeconds - [double]$experiment.metrics.duration_seconds) -gt 0.001) {
+    throw "installed experiment duration does not match its displayed start/end timestamps"
+}
+if ($null -eq $experiment.metrics.processing_seconds) {
+    throw "installed experiment detail is missing precise processing_seconds"
+}
 
 Write-Host "[test] deep verification: Module 5 full-test evaluation"
 $evaluationBody = @{

@@ -129,8 +129,9 @@ def main() -> int:
     for row in result["metrics_summary"].get("ranking", []):
         macro = row["macro"]
         r2 = "N/A" if macro["r2"] is None else round(macro["r2"], 4)
+        wape = "N/A" if macro.get("wape") is None else round(macro["wape"], 2)
         print(
-            f"  {row['rank']:>2}. {row['algorithm_label']:<14} RMSE={macro['rmse']:.4g} "
+            f"  {row['rank']:>2}. {row['algorithm_label']:<14} WAPE={wape} RMSE={macro['rmse']:.4g} "
             f"MAE={macro['mae']:.4g} sMAPE={macro['smape']:.2f} R2={r2}"
         )
     assert result["status"] == "Completed"

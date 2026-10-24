@@ -91,7 +91,13 @@ const moduleChecks = [
     title: '模块四｜预测模型训练',
     subtitle: 'Forecast Model Training',
     shot: '39-language-m4.png',
-    must: ['训练监控（Training Monitor）', '训练概览（Training Overview）', '训练日志（Training Logs）', '实验历史（Experiment History）'],
+    must: [
+      '当前实验详情（Current Experiment Details）',
+      '训练监控（Training Monitor）',
+      '训练过程（Training Process）',
+      '训练日志（Training Logs）',
+      '实验历史（Experiment History）',
+    ],
   },
   {
     nav: '预测评估',
@@ -114,6 +120,15 @@ for (const [index, module] of moduleChecks.entries()) {
   await page.waitForTimeout(waits[module.nav] ?? 3000)
   if (module.nav === '模型训练') {
     await page.locator('.tn-field-label .tn-help-trigger').first().waitFor({ state: 'visible', timeout: 30000 })
+    const openHistory = page
+      .locator('.tn-m4-history-item')
+      .first()
+      .getByRole('button')
+      .filter({ hasText: /打\s*开/ })
+    if (await openHistory.count()) {
+      await openHistory.click()
+      await page.locator('.tn-m4-monitor-section-title').first().waitFor({ state: 'visible', timeout: 30000 })
+    }
   }
   const moduleTitle = await page.locator('.tn-module-title').innerText()
   const moduleSubtitle = await page.locator('.tn-module-title-en').innerText()
@@ -138,7 +153,7 @@ await page.waitForTimeout(1000)
 const datasetLabels = await page.locator('.tn-field-label').allInnerTexts()
 check(
   '11 Module 3 参数标签默认使用中文',
-  ['数据源', '预测范围', '区域', '输入长度（L）', '输出长度（H）', '滑动步长（S）', '训练集比例', '验证集比例', '测试集比例'].every(
+  ['数据源', '区域', '输入长度（L）', '输出长度（H）', '滑动步长（S）', '训练集比例', '验证集比例', '测试集比例'].every(
     (text) => datasetLabels.some((label) => label.replace(/\s+/g, '').includes(text)),
   ) &&
     !datasetLabels.some((label) => /Dataset \/ Location|Prediction Scope|Temporal Resolution|Aggregation|Dataset Label|Train Ratio|Validation Ratio|Test Ratio/.test(label)),
@@ -148,14 +163,20 @@ check(
 await page.locator('.tn-nav-item').filter({ hasText: '模型训练' }).click()
 await page.waitForTimeout(1500)
 const trainingText = await page.locator('body').innerText()
+await page.locator('[data-field="m4.algorithm_key"] .ant-select-selector').click()
+await page.locator('.ant-select-dropdown:visible').waitFor({ state: 'visible', timeout: 10000 })
+const algorithmOptions = await page
+  .locator('.ant-select-dropdown:visible .ant-select-item-option')
+  .allInnerTexts()
 check(
   '12 Module 4 批量入口、训练按钮与状态提示已中文化',
-  trainingText.includes('全部模型（All Models，12 种）') &&
+  algorithmOptions[0]?.includes('全部模型（All Models，12 种）') &&
     trainingText.includes('开始训练') &&
     !trainingText.includes('Run Training') &&
     !trainingText.includes('Run All Models'),
   'training actions',
 )
+await page.keyboard.press('Escape')
 const rawStatuses = ['Queued', 'Created', 'Running', 'Stopping', 'Stopped', 'Completed', 'Partial', 'Failed', 'Skipped']
 const tags = await page.locator('.ant-tag').allInnerTexts()
 check(
@@ -164,7 +185,7 @@ check(
   tags.slice(0, 10).join(' | '),
 )
 
-const parameterHelp = page.locator('.tn-field-label .tn-help-trigger').first()
+const parameterHelp = page.locator('[data-field="model_configs.arima.params.p"] .tn-help-trigger').first()
 await parameterHelp.waitFor({ state: 'visible', timeout: 20000 })
 await parameterHelp.focus()
 const visibleHelp = page.locator('.tn-help-tooltip:visible .ant-tooltip-inner').first()

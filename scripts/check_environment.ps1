@@ -22,22 +22,22 @@ foreach ($file in @("milano_traffic_nid.csv","milano.geojson","trentino_traffic_
 }
 
 Write-Host "`n-- python packages --"
-& $python -c @"
+& $python -c @'
 import importlib
 modules = ['fastapi','uvicorn','pydantic','numpy','pandas','scipy','sklearn','statsmodels','joblib','pyarrow',
            'xgboost','lightgbm','torch','prophet','chronos','timesfm','psutil']
 for name in modules:
     try:
         module = importlib.import_module(name)
-        print(f'  [ok]   {name:<12} {getattr(module, "__version__", "unknown")}')
+        print('  [ok]   {:<12} {}'.format(name, getattr(module, '__version__', 'unknown')))
     except Exception as exc:
-        print(f'  [MISS] {name:<12} {type(exc).__name__}: {exc}')
+        print('  [MISS] {:<12} {}: {}'.format(name, type(exc).__name__, exc))
 try:
     import torch
-    print(f'  cuda available: {torch.cuda.is_available()}')
+    print('  cuda available: {}'.format(torch.cuda.is_available()))
 except Exception:
     print('  cuda available: unknown (torch missing)')
-"@
+'@
 
 Write-Host "`n-- ports --"
 foreach ($port in 8077, 5173) {

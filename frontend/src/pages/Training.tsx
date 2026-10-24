@@ -973,7 +973,7 @@ export default function Training() {
                   <strong>{currentStartedAt ? formatDateTime(currentStartedAt) : '排队中'}</strong>
                 </div>
                 <div className="tn-m4-detail-item">
-                  <span>运行时长</span>
+                  <span>实验总耗时（含收尾）</span>
                   <strong>{durationLabel(currentStartedAt, currentEndedAt)}</strong>
                 </div>
               </div>
@@ -1063,7 +1063,7 @@ export default function Training() {
                           { title: '开始', dataIndex: 'started_at', render: (value: string) => formatDateTime(value) },
                           { title: '结束', dataIndex: 'ended_at', render: (value: string) => formatDateTime(value) },
                           {
-                            title: '耗时',
+                            title: '区域训练耗时',
                             render: (_: unknown, row: any) =>
                               durationLabel(row.started_at, row.ended_at),
                           },
@@ -1098,7 +1098,7 @@ export default function Training() {
                           render: (value: string) => formatDateTime(value),
                         },
                         {
-                          title: '耗时',
+                          title: '区域训练耗时',
                           render: (_: unknown, row: any) =>
                             durationLabel(row.started_at, row.ended_at),
                         },

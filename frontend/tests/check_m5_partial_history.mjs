@@ -13,6 +13,8 @@ if (!response.ok) throw new Error(`Evaluation history request failed: ${response
 const evaluations = (await response.json()).evaluations ?? []
 const target = evaluations.find((item) => item.status === 'Partial')
 if (!target) throw new Error('No Partial evaluation is available for history regression')
+const targetIndex = evaluations.findIndex((item) => item.evaluation_id === target.evaluation_id)
+const targetPage = Math.floor(targetIndex / 6) + 1
 const datasets = (await (await fetch(`${BASE}/api/datasets?include_archived=true`)).json()).datasets ?? []
 let currentDataset = null
 let currentExperiment = null
@@ -55,6 +57,10 @@ try {
     datasetInfo: await setup.locator('.tn-m5-dataset-mini').innerText(),
   })
   const setupBefore = await setupSnapshot()
+  if (targetPage > 1) {
+    await page.locator(`.ant-pagination-item-${targetPage}`).click()
+    await page.waitForTimeout(600)
+  }
   const row = page.locator(`[data-evaluation-id="${target.evaluation_id}"]`)
   await row.waitFor({ state: 'visible', timeout: 60000 })
   if (!(await row.innerText()).includes('部分完成')) {
