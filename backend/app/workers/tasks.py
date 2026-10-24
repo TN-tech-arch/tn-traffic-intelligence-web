@@ -694,8 +694,8 @@ def run_evaluation(evaluation_id: str, *, job_id: str, cancel_requested, progres
             }
         )
 
-    ranked = [r for r in experiment_reports if r["macro"].get("rmse") is not None]
-    ranking = sorted(ranked, key=lambda r: r["macro"]["rmse"])
+    ranked = [r for r in experiment_reports if r["macro"].get("wape") is not None]
+    ranking = sorted(ranked, key=lambda r: r["macro"]["wape"])
     summary = {
         "experiments": experiment_reports,
         "ranking": [

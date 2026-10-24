@@ -250,6 +250,16 @@ await page.waitForFunction(
 )
 const overviewText = await page.getByTestId('m5-evaluation-overview').innerText()
 const overviewRows = await page.getByTestId('m5-evaluation-overview').locator('tbody tr').count()
+const overviewHeaders = await page
+  .getByTestId('m5-evaluation-overview')
+  .locator('thead th')
+  .allInnerTexts()
+const overviewWapeValues = await page
+  .getByTestId('m5-evaluation-overview')
+  .locator('tbody tr')
+  .evaluateAll((rows) =>
+    rows.map((row) => Number.parseFloat(row.children[5]?.textContent?.replace('%', '') ?? 'NaN')),
+  )
 check(
   '12 overview contains real overall metrics and EXP IDs',
   overviewText.includes('整体指标') &&
@@ -259,6 +269,15 @@ check(
     .filter((experiment) => !overviewText.includes(experiment.display_id))
     .map((experiment) => experiment.display_id)
     .join(',')}`,
+)
+check(
+  '12.1 overview columns and default WAPE ranking are correct',
+  JSON.stringify(overviewHeaders.map((value) => value.trim())) ===
+    JSON.stringify(['排名', '模型', 'EXP ID', 'MAE', 'RMSE', 'WAPE', 'sMAPE', 'R²', '有效样本']) &&
+    overviewText.includes('排序：WAPE') &&
+    overviewWapeValues.every(Number.isFinite) &&
+    overviewWapeValues.every((value, index) => index === 0 || overviewWapeValues[index - 1] <= value),
+  `headers=${overviewHeaders.join('|')} wape=${overviewWapeValues.join('|')}`,
 )
 
 await page.goto(`${BASE}/evaluation?dataset=${encodeURIComponent(dataset.item.dataset_id)}`, {

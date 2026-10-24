@@ -118,3 +118,7 @@ def test_m5_overall_and_per_horizon_metrics_use_all_horizons():
     assert [item["horizon_step"] for item in per_horizon] == [1, 2, 3]
     assert all(item["n_samples"] == truth.shape[0] for item in per_horizon)
     assert overall["mae"] == pytest.approx(np.mean(np.abs(truth - prediction)))
+    assert overall["wape"] == pytest.approx(
+        100.0 * np.sum(np.abs(truth - prediction)) / np.sum(np.abs(truth))
+    )
+    assert all("wape" in item for item in per_horizon)

@@ -31,7 +31,8 @@ Module 5 现采用两栏布局：
 - 自定义范围必须位于测试集内，worker 会真实裁剪测试窗口。
 - 预测值按目标时间戳对齐；同一实验、h 和目标时间的重复记录保留最早预测窗口。
 - 整体指标使用全部有效测试窗口和 h=1 至 h=H 的全部预测。
-- 每个 horizon step 单独计算 MAE、RMSE、sMAPE、R² 和有效样本数。
+- 每个 horizon step 单独计算 MAE、RMSE、WAPE、sMAPE、R² 和有效样本数。
+- 评估概览按 MAE、RMSE、WAPE、sMAPE、R² 展示，默认按 WAPE 升序排名。
 - 预测对比中的 h 选择器只改变当前展示，不改变 H、模型和评估结果。
 
 ## 历史记录

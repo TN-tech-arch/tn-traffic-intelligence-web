@@ -316,6 +316,20 @@ if ($multiEvaluationState.scope -ne "single" -or $multiEvaluationState.region_id
     @($multiEvaluationState.experiments).Count -ne $successfulBatchExperiments.Count) {
     throw "installed Module 5 multi-model evaluation does not contain the expected single-region members"
 }
+$evaluatedWape = @($multiEvaluationState.metrics_summary.experiments | ForEach-Object { $_.macro.wape })
+$rankedWape = @($multiEvaluationState.metrics_summary.ranking | ForEach-Object { $_.macro.wape })
+if ($evaluatedWape.Count -ne $successfulBatchExperiments.Count -or
+    @($evaluatedWape | Where-Object { $_ -eq $null }).Count -ne 0) {
+    throw "installed Module 5 evaluation does not expose WAPE for every completed model"
+}
+if ($rankedWape.Count -ne $successfulBatchExperiments.Count) {
+    throw "installed Module 5 WAPE ranking does not contain every completed model"
+}
+for ($i = 1; $i -lt $rankedWape.Count; $i++) {
+    if ([double]$rankedWape[$i - 1] -gt [double]$rankedWape[$i]) {
+        throw "installed Module 5 ranking is not sorted ascending by WAPE"
+    }
+}
 Write-Host ("[test] installed multi-model evaluation: {0}, members={1}, predictions={2}" -f `
         $multiEvaluationState.evaluation_id, @($multiEvaluationState.experiments).Count,
         $multiEvaluationState.prediction_count)

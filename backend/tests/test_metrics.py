@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from app.services.metrics import all_metrics, mae, macro_average, r2, rmse, smape
+from app.services.metrics import all_metrics, mae, macro_average, r2, rmse, smape, wape
 
 
 def test_mae_rmse_hand_computed():
@@ -30,6 +30,15 @@ def test_smape_zero_over_zero_contributes_zero():
     assert not math.isnan(value)
 
 
+def test_wape_hand_computed():
+    value = wape([100.0, 50.0, 10.0], [110.0, 40.0, 10.0])
+    assert value == pytest.approx(100 * 20 / 160)
+
+
+def test_wape_undefined_when_truth_sum_is_zero():
+    assert wape([0.0, 0.0], [1.0, -1.0]) is None
+
+
 def test_r2_undefined_for_constant_truth():
     assert r2([5.0, 5.0, 5.0], [5.0, 6.0, 4.0]) is None
 
@@ -43,15 +52,17 @@ def test_non_finite_pairs_are_ignored_not_zeroed():
     result = all_metrics([1.0, np.nan, 3.0], [1.0, 5.0, 4.0])
     assert result["n_samples"] == 2
     assert result["mae"] == pytest.approx(0.5)
+    assert result["wape"] == pytest.approx(100 * 1 / 4)
 
 
 def test_macro_average_is_equal_weight_per_region():
     per_region = [
-        {"mae": 1.0, "rmse": 1.0, "smape": 10.0, "r2": 0.9, "n_samples": 10},
-        {"mae": 3.0, "rmse": 3.0, "smape": 30.0, "r2": None, "n_samples": 1000},
+        {"mae": 1.0, "rmse": 1.0, "wape": 2.0, "smape": 10.0, "r2": 0.9, "n_samples": 10},
+        {"mae": 3.0, "rmse": 3.0, "wape": 4.0, "smape": 30.0, "r2": None, "n_samples": 1000},
     ]
     macro = macro_average(per_region)
     assert macro["mae"] == pytest.approx(2.0)
+    assert macro["wape"] == pytest.approx(3.0)
     assert macro["smape"] == pytest.approx(20.0)
     assert macro["r2"] == pytest.approx(0.9)  # None values excluded, not treated as 0
     assert macro["n_regions"] == 2

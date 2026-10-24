@@ -584,8 +584,8 @@ Prediction output by one region:
 
 右侧上方设计以下三个 Tab：
 
-1. **`Metrics Overview`**：MAE、RMSE、sMAPE、R²，支持多个模型并排，给出逆变换前后标识、实际样本数、Full Test/Selected Range 标识、评价协议说明。
-2. **`Model Ranking`**：默认按 RMSE 升序；可以按 MAE、sMAPE、R² 切换；显示算法名、Fit/Zero-shot/Fine-tuned、兼容共同区域/共同目标时间覆盖、失败/跳过原因。
+1. **`Metrics Overview`**：MAE、RMSE、WAPE、sMAPE、R²，支持多个模型并排，给出逆变换前后标识、实际样本数、Full Test/Selected Range 标识、评价协议说明。
+2. **`Model Ranking`**：默认按 WAPE 升序；可以按 MAE、RMSE、sMAPE、R² 切换；显示算法名、Fit/Zero-shot/Fine-tuned、兼容共同区域/共同目标时间覆盖、失败/跳过原因。
 3. **`Regional Performance`**：Single 查看当前区域详细评分；All 查看每区域模型名、最优模型、各区域指标、最好/最差区域、Coverage 与缺失情况。按实际指标排名，不让无数据区域填 0 混入。
 
 右侧**三个功能 Tab 下面放置可折叠 `Evaluation History / Management`**（不要替换 Tab）：历史 Evaluation ID、对应 Batch/Experiment、状态、创建时间、View、Export、Delete；底部 `Reset Selection`。删除 Evaluation 只删自己的 prediction/metrics/cache 和元数据，不删上游 Experiment 或 Dataset。涉及删除弹确认窗，并且操作后刷新历史列表。
@@ -597,10 +597,12 @@ Prediction output by one region:
 ```text
 MAE  = mean(abs(y - yhat))
 RMSE = sqrt(mean((y - yhat)^2))
+WAPE = 100% × sum(abs(y - yhat)) / sum(abs(y))
 sMAPE = 100% × mean(2 × abs(y - yhat) / (abs(y) + abs(yhat)))
 R²   = 1 - sum((y-yhat)^2) / sum((y-mean(y))^2)
 ```
 
+- WAPE 在真实值绝对值总和为 0 时显示 `N/A`，不得伪造数值。
 - sMAPE 对 `abs(y)+abs(yhat)=0` 的项统一定义为 0 贡献，其他接近 0 的项需按固定 epsilon 规则保护并在评价快照记录；**ZTE 的真零不得删除**。
 - 当真实值全为常量而 R² 分母为 0 时显示 `N/A` 并解释，不能随意给 0 或 1。
 - All Regions 的默认整体排名指标是 **每个成功区域等权宏平均 (Macro)**，另可查看逐预测点合并的 **Pooled/Micro**；两者需分别命名，显示覆盖区域数量及统计量。

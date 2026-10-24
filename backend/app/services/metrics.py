@@ -43,6 +43,17 @@ def smape(y_true, y_pred) -> float | None:
     return float(100.0 * np.mean(ratio))
 
 
+def wape(y_true, y_pred) -> float | None:
+    """100 * sum(|y-yhat|) / sum(|y|); undefined when all truth values are zero."""
+    a, b = _as_float_arrays(y_true, y_pred)
+    if a.size == 0:
+        return None
+    denominator = float(np.sum(np.abs(a)))
+    if denominator <= SMAPE_EPSILON:
+        return None
+    return float(100.0 * np.sum(np.abs(a - b)) / denominator)
+
+
 def r2(y_true, y_pred) -> float | None:
     """R^2; returns None (rendered as N/A) when the truth is constant."""
     a, b = _as_float_arrays(y_true, y_pred)
@@ -59,6 +70,7 @@ def all_metrics(y_true, y_pred, *, sample_count: int | None = None) -> dict[str,
     return {
         "mae": mae(a, b),
         "rmse": rmse(a, b),
+        "wape": wape(a, b),
         "smape": smape(a, b),
         "r2": r2(a, b),
         "n_samples": int(a.size) if sample_count is None else int(sample_count),
@@ -69,7 +81,7 @@ def all_metrics(y_true, y_pred, *, sample_count: int | None = None) -> dict[str,
 def macro_average(per_group: list[dict[str, object]]) -> dict[str, object]:
     """Equal-weight macro average across regions (spec 9.5)."""
     out: dict[str, object] = {}
-    for key in ("mae", "rmse", "smape"):
+    for key in ("mae", "rmse", "wape", "smape"):
         values = [g[key] for g in per_group if g.get(key) is not None]
         out[key] = float(np.mean(values)) if values else None
     r2_values = [g["r2"] for g in per_group if g.get("r2") is not None]

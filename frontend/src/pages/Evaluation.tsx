@@ -20,13 +20,14 @@ import {
   unitDisplayLabel,
 } from '../i18n/terms'
 
-type MetricKey = 'mae' | 'rmse' | 'smape' | 'r2'
+type MetricKey = 'mae' | 'rmse' | 'wape' | 'smape' | 'r2'
 type HorizonMetricKey = 'mae' | 'rmse'
 const EVALUATION_HISTORY_PAGE_SIZE = 6
 
 const METRIC_LABELS: Record<MetricKey, string> = {
   mae: 'MAE',
   rmse: 'RMSE',
+  wape: 'WAPE',
   smape: 'sMAPE',
   r2: 'R²',
 }
@@ -37,6 +38,18 @@ function isNumber(value: unknown): value is number {
 
 function formatMetric(value: unknown, digits = 2): string {
   return isNumber(value) ? value.toFixed(digits) : '不适用'
+}
+
+function wapeFromRows(rows: any[]): number | null {
+  const pairs = rows.filter((row) => isNumber(row.y_true) && isNumber(row.y_pred))
+  if (!pairs.length) return null
+  const truthSum = pairs.reduce((sum, row) => sum + Math.abs(Number(row.y_true)), 0)
+  if (truthSum <= 1e-9) return null
+  const absoluteError = pairs.reduce(
+    (sum, row) => sum + Math.abs(Number(row.y_pred) - Number(row.y_true)),
+    0,
+  )
+  return (100 * absoluteError) / truthSum
 }
 
 function formatParams(params: Record<string, unknown> | undefined): string {
@@ -64,13 +77,14 @@ function rowByTarget(rows: any[]): Map<string, any> {
 
 function fallbackHorizonMetrics(rows: any[], horizon: number): any {
   const subset = rows.filter((row) => Number(row.horizon_step) === horizon && isNumber(row.y_true) && isNumber(row.y_pred))
-  if (!subset.length) return { horizon_step: horizon, mae: null, rmse: null, smape: null, r2: null, n_samples: 0 }
+  if (!subset.length) return { horizon_step: horizon, mae: null, rmse: null, wape: null, smape: null, r2: null, n_samples: 0 }
   const truth = subset.map((row) => Number(row.y_true))
   const prediction = subset.map((row) => Number(row.y_pred))
   const errors = prediction.map((value, index) => value - truth[index])
   const meanTruth = truth.reduce((sum, value) => sum + value, 0) / truth.length
   const variance = truth.reduce((sum, value) => sum + (value - meanTruth) ** 2, 0)
   const denominator = truth.map((value, index) => Math.abs(value) + Math.abs(prediction[index]))
+  const truthSum = truth.reduce((sum, value) => sum + Math.abs(value), 0)
   const smapeValues = errors.map((_, index) =>
     denominator[index] <= 1e-9 ? 0 : (2 * Math.abs(errors[index])) / denominator[index],
   )
@@ -78,6 +92,7 @@ function fallbackHorizonMetrics(rows: any[], horizon: number): any {
     horizon_step: horizon,
     mae: errors.reduce((sum, value) => sum + Math.abs(value), 0) / errors.length,
     rmse: Math.sqrt(errors.reduce((sum, value) => sum + value ** 2, 0) / errors.length),
+    wape: truthSum <= 1e-9 ? null : (100 * errors.reduce((sum, value) => sum + Math.abs(value), 0)) / truthSum,
     smape: (100 * smapeValues.reduce((sum, value) => sum + value, 0)) / smapeValues.length,
     r2: variance <= 0 ? null : 1 - errors.reduce((sum, value) => sum + value ** 2, 0) / variance,
     n_samples: subset.length,
@@ -130,7 +145,7 @@ export default function Evaluation() {
   const [seriesByExperiment, setSeriesByExperiment] = useState<Record<string, any[]>>({})
   const [horizonStep, setHorizonStep] = useState(1)
   const [horizonMetric, setHorizonMetric] = useState<HorizonMetricKey>('mae')
-  const [rankingMetric, setRankingMetric] = useState<MetricKey>('rmse')
+  const [rankingMetric, setRankingMetric] = useState<MetricKey>('wape')
   const [viewingHistory, setViewingHistory] = useState(false)
   const [busy, setBusy] = useState(false)
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
@@ -567,9 +582,24 @@ export default function Evaluation() {
     [experimentReports, seriesByExperiment, horizonMetric, horizonSteps.join(','), experimentColorMap],
   )
 
+  const overviewReports = useMemo(
+    () =>
+      experimentReports.map((report: any) => {
+        if (isNumber(report.macro?.wape)) return report
+        return {
+          ...report,
+          macro: {
+            ...(report.macro ?? {}),
+            wape: wapeFromRows(seriesByExperiment[report.experiment_id] ?? []),
+          },
+        }
+      }),
+    [experimentReports, seriesByExperiment],
+  )
+
   const ranking = useMemo(
     () =>
-      experimentReports
+      overviewReports
         .filter((report: any) => isNumber(report.macro?.[rankingMetric]))
         .slice()
         .sort((left: any, right: any) =>
@@ -577,7 +607,7 @@ export default function Evaluation() {
             ? Number(right.macro[rankingMetric]) - Number(left.macro[rankingMetric])
             : Number(left.macro[rankingMetric]) - Number(right.macro[rankingMetric]),
         ),
-    [experimentReports, rankingMetric],
+    [overviewReports, rankingMetric],
   )
 
   const testBoundary = currentDataset?.split_boundaries?.[2]
@@ -1091,6 +1121,7 @@ export default function Evaluation() {
                   { title: 'EXP ID', render: (_: unknown, row: any) => row.display_id ?? row.experiment_id },
                   { title: 'MAE', render: (_: unknown, row: any) => formatMetric(row.macro?.mae) },
                   { title: 'RMSE', render: (_: unknown, row: any) => formatMetric(row.macro?.rmse) },
+                  { title: 'WAPE', render: (_: unknown, row: any) => isNumber(row.macro?.wape) ? `${row.macro.wape.toFixed(2)}%` : '不适用' },
                   { title: 'sMAPE', render: (_: unknown, row: any) => isNumber(row.macro?.smape) ? `${row.macro.smape.toFixed(2)}%` : '不适用' },
                   { title: 'R²', render: (_: unknown, row: any) => formatMetric(row.macro?.r2, 4) },
                   { title: '有效样本', render: (_: unknown, row: any) => row.macro?.n_samples ?? 0 },
@@ -1102,7 +1133,7 @@ export default function Evaluation() {
                   showIcon
                   style={{ marginTop: 8 }}
                   message="部分实验没有有效整体指标，未进入排名"
-                  description={experimentReports
+                  description={overviewReports
                     .filter((item: any) => !isNumber(item.macro?.[rankingMetric]))
                     .map((item: any) => `${item.display_id ?? item.experiment_id}：无有效 ${METRIC_LABELS[rankingMetric]}`)
                     .join('；')}
