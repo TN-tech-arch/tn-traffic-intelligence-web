@@ -208,9 +208,9 @@ class ProphetAdapter(Adapter):
         cancel: CancelCallback = never_cancel,
     ) -> FitResult:
         import pandas as pd
-        from prophet import Prophet
+        from prophet.serialize import model_to_json
 
-        progress("Fit", 5.0, "拟合 Prophet（仅训练段，含日/周周期）")
+        progress("Fit", 5.0, "拟合 Prophet（仅使用训练段，完成后序列化模型）")
 
         model = self._make_model(region=region)
         history = pd.DataFrame(
@@ -226,6 +226,7 @@ class ProphetAdapter(Adapter):
         seed = int(self.params.get("random_seed", 42))
         model.fit(history, seed=seed)
         self.check_cancel(cancel)
+        model_json = model_to_json(model)
         progress("Fit", 90.0, "Prophet 拟合完成")
         return FitResult(
             state={
@@ -237,6 +238,7 @@ class ProphetAdapter(Adapter):
                 "daily_fourier_order": int(self.params.get("daily_fourier_order", 4)),
                 "holiday_country": self._holiday_country(region),
                 "random_seed": seed,
+                "model_json": model_json,
                 "components": ["trend", "daily", "weekly"]
                 + (["holidays"] if self._holiday_country(region) else []),
             },
@@ -249,7 +251,7 @@ class ProphetAdapter(Adapter):
                 "random_seed": seed,
             },
             notes=[
-                "Prophet 的基础参数仅使用训练段拟合；启用滚动重拟合时，只读取每个预测起点之前的真实观测。",
+                "Prophet 仅在训练段拟合一次并序列化模型；验证和测试加载该模型执行点预测。",
                 "日周期使用显式傅里叶阶数，周周期由配置或训练段跨度决定，节假日按数据源日历注入。",
             ],
         )
@@ -264,97 +266,31 @@ class ProphetAdapter(Adapter):
         cancel: CancelCallback = never_cancel,
     ) -> np.ndarray:
         import pandas as pd
-        from prophet import Prophet
+        from prophet.serialize import model_from_json
 
-        progress("Ready", 10.0, "Prophet 推理（使用训练段拟合的模型）")
-        model = self._make_model(state.get("growth", "linear"), region=region)
-        series = np.asarray(region.series_full, dtype="float64")
-        history = pd.DataFrame(
-            {
-                "ds": pd.to_datetime(region.timestamps[: int(state["train_end_index"]) + 1], unit="s"),
-                "y": series[: int(state["train_end_index"]) + 1],
-            }
+        progress("Ready", 10.0, "Prophet 加载训练阶段已拟合模型")
+        model_json = state.get("model_json")
+        if not model_json:
+            raise ValueError(
+                "Prophet 历史模型产物缺少已拟合模型；请重新训练该实验后再评估。"
+            )
+        model = model_from_json(str(model_json))
+        H = int(region.H)
+        flat_timestamps = pd.to_datetime(batch.target_timestamps.reshape(-1), unit="s")
+        unique_timestamps = pd.DatetimeIndex(flat_timestamps.unique()).sort_values()
+        target_frame = pd.DataFrame(
+            {"ds": unique_timestamps}
         )
         if state.get("cap"):
-            history["cap"] = state["cap"]
-            model.cap = state["cap"]
-        seed = int(self.params.get("random_seed", 42))
-        model.fit(history, seed=seed)
-        L = int(region.L)
-        H = int(region.H)
-        refit_interval = int(self.params.get("refit_interval", 0) or 0)
-
-        def fitted_history(end_index: int):
-            frame = pd.DataFrame(
-                {
-                    "ds": pd.to_datetime(region.timestamps[: end_index + 1], unit="s"),
-                    "y": np.asarray(series[: end_index + 1], dtype="float64"),
-                }
-            )
-            if state.get("cap"):
-                frame["cap"] = state["cap"]
-            fresh = self._make_model(state.get("growth", "linear"), region=region)
-            if state.get("cap"):
-                fresh.cap = state["cap"]
-            fresh.fit(frame, seed=seed)
-            return fresh
-
-        def calibrated_batch(
-            current_model,
-            starts: np.ndarray,
-            target_timestamps: np.ndarray,
-        ) -> np.ndarray:
-            origins = np.asarray(starts, dtype="int64") + L - 1
-            recent_points = max(1, min(6, L))
-            calibration_indices = origins[:, None] - np.arange(recent_points - 1, -1, -1)[None, :]
-            calibration_indices = np.maximum(calibration_indices, 0)
-            calibration_frame = pd.DataFrame(
-                {"ds": pd.to_datetime(region.timestamps[calibration_indices].reshape(-1), unit="s")}
-            )
-            if state.get("cap"):
-                calibration_frame["cap"] = state["cap"]
-            calibration_prediction = np.asarray(
-                current_model.predict(calibration_frame)["yhat"], dtype="float64"
-            ).reshape(origins.size, recent_points)
-            offsets = np.median(
-                np.asarray(series[calibration_indices], dtype="float64") - calibration_prediction,
-                axis=1,
-            )
-
-            target_frame = pd.DataFrame(
-                {"ds": pd.to_datetime(target_timestamps.reshape(-1))}
-            )
-            if state.get("cap"):
-                target_frame["cap"] = state["cap"]
-            base = np.asarray(current_model.predict(target_frame)["yhat"], dtype="float64")
-            return base.reshape(origins.size, H) + offsets[:, None]
-
-        if refit_interval <= 0:
-            values = calibrated_batch(model, batch.starts, batch.target_timestamps)
-        else:
-            values = np.empty((batch.size, H), dtype="float64")
-            last_fit_origin = int(state["train_end_index"])
-            row = 0
-            while row < batch.size:
-                self.check_cancel(cancel)
-                progress(
-                    "Validation",
-                    100.0 * row / max(1, batch.size),
-                    f"Prophet rolling prediction {row}/{batch.size}",
-                )
-                origin = int(batch.starts[row]) + L - 1
-                if origin > last_fit_origin:
-                    model = fitted_history(origin)
-                    last_fit_origin = origin
-                end = min(batch.size, row + refit_interval)
-                values[row:end] = calibrated_batch(
-                    model,
-                    batch.starts[row:end],
-                    batch.target_timestamps[row:end],
-                )
-                row = end
+            target_frame["cap"] = state["cap"]
+        unique_values = np.asarray(model.predict(target_frame)["yhat"], dtype="float64")
+        values = (
+            pd.Series(unique_values, index=unique_timestamps)
+            .reindex(flat_timestamps)
+            .to_numpy(dtype="float64")
+        )
         self.check_cancel(cancel)
-        progress("Validation", 100.0, f"Prophet rolling prediction {batch.size}/{batch.size}")
+        progress("Ready", 100.0, f"Prophet 批量点预测完成 {batch.size}/{batch.size}")
         if values.size != batch.size * int(region.H):
             raise ValueError(
                 f"Prophet 输出数量 {values.size} 与期望 {batch.size * int(region.H)} 不一致"

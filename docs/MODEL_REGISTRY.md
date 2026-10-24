@@ -31,7 +31,7 @@
 | 算法 | Basic | Advanced（节选） | 跨字段 / 环境规则 |
 |---|---|---|---|
 | ARIMA | p=3, d=1, q=2 | trend=n, enforce_stationarity, enforce_invertibility, maxiter, refit_interval | `trend` 必须与差分阶数兼容：d=0 允许 n/c/t/ct；d=1 只允许 n/t；d≥2 只允许 n（违反 → Error `TREND_INCOMPATIBLE_WITH_DIFFERENCING`） |
-| Prophet | growth=linear, seasonality_mode=additive, daily/weekly=auto | changepoint_prior_scale, seasonality_prior_scale, n_changepoints, interval_width, refit_interval | logistic 需要 cap/floor（由数据自动取上限并在快照记录） |
+| Prophet | growth=linear, seasonality_mode=additive, daily/weekly=auto | changepoint_prior_scale, seasonality_prior_scale, n_changepoints, daily_fourier_order=4, holiday_country=auto, random_seed=42 | 训练段仅拟合一次并序列化；测试直接加载该模型，不提供滚动重拟合、残差校准或不确定性区间参数；logistic 需要 cap/floor（由数据自动取上限并在快照记录） |
 | Random Forest | n_estimators=200, max_depth=10, min_samples_split=2 | max_features, min_samples_leaf, bootstrap, random_state, n_jobs, multi_output_strategy | 无 epoch 概念（不显示训练曲线） |
 | XGBoost | n_estimators=300, max_depth=6, learning_rate=0.05 | subsample, colsample_bytree, reg_lambda, reg_alpha, tree_method, early_stopping_rounds | 记录真实迭代指标；无 eval_set 时不伪造曲线 |
 | LightGBM | n_estimators=300, num_leaves=31, learning_rate=0.05 | max_depth, feature_fraction, bagging_fraction/freq, min_child_samples, early_stopping_rounds | `num_leaves ≤ 2^max_depth`（否则 Error）；bagging_freq=0 时 bagging_fraction 不生效 → Warning |

@@ -61,10 +61,11 @@ $transformer.params | ForEach-Object { $transformerDefaults[$_.key] = $_.default
 if (-not $prophet -or -not $transformer) {
     throw "installed model registry is missing Prophet or Transformer"
 }
-if ($prophetDefaults["refit_interval"] -ne 144 -or
-    $prophetDefaults["daily_fourier_order"] -ne 4 -or
+if ($prophetDefaults["daily_fourier_order"] -ne 4 -or
     $prophetDefaults["holiday_country"] -ne "auto" -or
     $prophetDefaults["random_seed"] -ne 42 -or
+    $prophetDefaults.ContainsKey("refit_interval") -or
+    $prophetDefaults.ContainsKey("calibration_days") -or
     $prophetDefaults.ContainsKey("interval_width")) {
     throw "installed Prophet defaults are not the validated profile"
 }

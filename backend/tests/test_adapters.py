@@ -8,6 +8,7 @@ instead of pretending they ran (spec 8.4 / T17).
 from dataclasses import replace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from app.forecast.adapters import build_adapter
@@ -169,14 +170,23 @@ def test_prophet_predict_accepts_explicit_false_seasonality():
     assert np.isfinite(prediction).all()
 
 
-def test_prophet_refit_interval_uses_origin_specific_targets():
+def test_prophet_predict_reuses_serialized_training_model(monkeypatch):
     region = make_region()
     params = dict(default_params("prophet"))
-    params.update({"daily_seasonality": False, "weekly_seasonality": False, "refit_interval": 2})
+    params.update({"daily_seasonality": False, "weekly_seasonality": False})
     adapter = build_adapter("prophet", params, "fit")
     train = make_batch(region, "train")
     validation = make_batch(region, "validation")
     result = adapter.fit(region=region, train=train, validation=validation)
+    assert isinstance(result.state.get("model_json"), str)
+
+    from prophet import Prophet
+    from prophet.serialize import model_from_json
+
+    def fail_if_refit(*args, **kwargs):
+        raise AssertionError("Prophet must not fit during prediction")
+
+    monkeypatch.setattr(Prophet, "fit", fail_if_refit)
     progress_values = []
     prediction = adapter.predict(
         region=region,
@@ -187,6 +197,23 @@ def test_prophet_refit_interval_uses_origin_specific_targets():
     assert prediction.shape == (validation.size, H)
     assert np.isfinite(prediction).all()
     assert progress_values and progress_values[-1] == 100.0
+
+    trained_model = model_from_json(result.state["model_json"])
+    expected = []
+    for timestamps in validation.target_timestamps:
+        frame = pd.DataFrame(
+            {"ds": pd.to_datetime(timestamps, unit="s")}
+        )
+        expected.append(
+            np.asarray(trained_model.predict(frame)["yhat"], dtype="float64")
+        )
+    expected = np.vstack(expected)
+    assert np.allclose(prediction, expected, rtol=1e-9, atol=1e-9)
+
+    missing_model_state = dict(result.state)
+    missing_model_state.pop("model_json")
+    with pytest.raises(ValueError):
+        adapter.predict(region=region, state=missing_model_state, batch=validation)
 
 
 def test_xgboost_passes_early_stopping_to_estimator():
@@ -199,11 +226,12 @@ def test_xgboost_passes_early_stopping_to_estimator():
 
 def test_validated_default_profiles_match_model_complexity():
     prophet = default_params("prophet")
-    assert prophet["refit_interval"] == 144
     assert prophet["daily_fourier_order"] == 4
     assert prophet["holiday_country"] == "auto"
-    assert "calibration_days" not in prophet
     assert prophet["random_seed"] == 42
+    assert "refit_interval" not in prophet
+    assert "calibration_days" not in prophet
+    assert not any("calibration" in key for key in prophet)
     assert "interval_width" not in prophet
 
     transformer = default_params("transformer")
@@ -225,3 +253,19 @@ def test_prophet_default_holiday_calendar_follows_data_source():
 
     disabled = build_adapter("prophet", {**params, "holiday_country": "none"}, "fit")
     assert disabled._holiday_country(replace(region, source_key="milano")) is None
+
+
+def test_removed_prophet_parameters_are_ignored_by_new_validation():
+    from app.services.validation import check_model_params
+
+    params = {
+        **default_params("prophet"),
+        "refit_interval": 144,
+        "calibration_days": 6,
+        "interval_width": 0.8,
+    }
+    issues, coerced = check_model_params("prophet", params, mode="fit")
+    assert not [issue for issue in issues if issue["severity"] == "error"]
+    assert "refit_interval" not in coerced
+    assert "calibration_days" not in coerced
+    assert "interval_width" not in coerced

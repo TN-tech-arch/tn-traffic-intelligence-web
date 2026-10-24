@@ -191,13 +191,6 @@ MODELS: list[dict[str, Any]] = [
               help_zh="季节项强度。", suggestion_zh="默认 10 偏强，可与 1 比较。"),
             P("n_changepoints", "Changepoints", "变点数量", "integer", 25, level="advanced", min=0, max=200,
               help_zh="自动识别的趋势变点数量。", suggestion_zh="较短序列可减少到 5-15。"),
-            P("interval_width", "Interval Width", "不确定性区间宽度", "number", 0.8, level="advanced",
-              min=0.5, max=0.999,
-              help_zh="不确定性区间置信水平；本平台评价使用点预测，不参与指标计算。",
-              suggestion_zh="默认 0.8 即可。"),
-            P("refit_interval", "Refit Interval", "参数重估间隔", "integer", 0, level="advanced", min=0, max=1000,
-              unit_zh="个预测起点", help_zh="0 表示只用训练段拟合一次，测试阶段不做参数重估（不读取未来值）。",
-              suggestion_zh="保持 0 兼顾速度与无泄漏要求。"),
         ],
     },
     {
@@ -611,8 +604,6 @@ def _apply_empirically_validated_defaults() -> None:
     """Keep defaults aligned with the adapters and current CPU workload."""
 
     prophet = MODEL_BY_KEY["prophet"]
-    # Prophet point forecasts do not produce uncertainty intervals here.
-    prophet["params"] = [item for item in prophet["params"] if item["key"] != "interval_width"]
     prophet["params"].extend(
         [
             P(
@@ -653,10 +644,6 @@ def _apply_empirically_validated_defaults() -> None:
             ),
         ]
     )
-    for item in prophet["params"]:
-        if item["key"] == "refit_interval":
-            item["default"] = 144
-            item["suggestion_zh"] = "144 对应 Milano 10 分钟数据的约一天滚动重拟合。"
 
     transformer_defaults = {
         "d_model": 64,

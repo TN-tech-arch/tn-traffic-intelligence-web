@@ -94,7 +94,7 @@ predict(region, state, batch) -> y_hat [N, H]
 | 算法 | 实现要点 | 输出空间 |
 |---|---|---|
 | ARIMA | statsmodels；参数仅用训练段估计，测试阶段用已观测值 `append(refit=False)` 更新状态 | 源单位 |
-| Prophet | 训练段拟合；预测时用最近已观测残差校准，`refit_interval>0` 时按预测起点滚动重拟合 | 源单位 |
+| Prophet | 训练段仅拟合一次并序列化；验证和测试直接加载已拟合模型做批量点预测，不做滚动重拟合或残差校准 | 源单位 |
 | Random Forest | sklearn，多输出或逐 horizon 直接回归 | 标准化空间（评价前逆变换） |
 | XGBoost / LightGBM | 逐 horizon 直接回归（H 个子模型），记录真实迭代指标 | 标准化空间 |
 | MLP / RNN / LSTM / GRU / Transformer | PyTorch 真实训练循环、真实 epoch 损失、早停、梯度裁剪、权重保存 | 标准化空间 |
