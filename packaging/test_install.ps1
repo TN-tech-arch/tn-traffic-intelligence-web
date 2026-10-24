@@ -321,6 +321,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "installed Module 2-5 history-panel regression failed"
     }
+    & node "tests\check_m1_layout.mjs"
+    if ($LASTEXITCODE -ne 0) {
+        throw "installed Module 1 layout and comparison-color regression failed"
+    }
     & node "tests\check_m5_redesign.mjs"
     if ($LASTEXITCODE -ne 0) {
         throw "installed Module 5 redesign regression failed"

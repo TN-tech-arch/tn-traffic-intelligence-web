@@ -197,6 +197,45 @@ check(
     (await page.locator('[data-testid="m5-horizon-analysis"] tbody tr').count()) === 0,
   `steps=${await horizonChart.getAttribute('data-horizon-count')} series=${await horizonChart.getAttribute('data-series-count')}`,
 )
+await page.waitForFunction(
+  () => {
+    const prediction = document.querySelector('[data-testid="m5-prediction-chart"]')
+    const errorChart = document.querySelector('[data-testid="m5-error-chart"]')
+    return (
+      JSON.parse(prediction?.getAttribute('data-series-colors') ?? '[]').length > 1 &&
+      JSON.parse(errorChart?.getAttribute('data-series-colors') ?? '[]').length > 0
+    )
+  },
+  undefined,
+  { timeout: 60000 },
+)
+const predictionColors = JSON.parse(
+  (await page.getByTestId('m5-prediction-chart').getAttribute('data-series-colors')) ?? '[]',
+)
+const errorColors = JSON.parse(
+  (await page.getByTestId('m5-error-chart').getAttribute('data-series-colors')) ?? '[]',
+)
+const horizonColors = JSON.parse(
+  (await horizonChart.getAttribute('data-series-colors')) ?? '[]',
+)
+const modelColors = predictionColors.slice(1)
+const errorIds = JSON.parse(
+  (await page.getByTestId('m5-error-chart').getAttribute('data-series-experiment-ids')) ?? '[]',
+)
+const horizonIds = JSON.parse(
+  (await horizonChart.getAttribute('data-series-experiment-ids')) ?? '[]',
+)
+const expectedColorByExperiment = new Map(
+  selectedExperiments.map((experiment, index) => [experiment.experiment_id, modelColors[index]]),
+)
+check(
+  '11.1 comparison charts use distinct colors with stable model mapping',
+  modelColors.length >= 2 &&
+    new Set(modelColors).size === modelColors.length &&
+    errorIds.every((id, index) => expectedColorByExperiment.get(id) === errorColors[index]) &&
+    horizonIds.every((id, index) => expectedColorByExperiment.get(id) === horizonColors[index]),
+  `models=${modelColors.join('|')} error=${errorIds.map((id, index) => `${id}:${errorColors[index]}`).join('|')} horizon=${horizonIds.map((id, index) => `${id}:${horizonColors[index]}`).join('|')}`,
+)
 await page.locator('[data-testid="m5-evaluation-overview"] tbody tr').first().waitFor({ timeout: 60000 })
 await page.waitForFunction(
   ({ ids, rowCount }) => {

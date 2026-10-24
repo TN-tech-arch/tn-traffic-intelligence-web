@@ -7,9 +7,9 @@ import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Pan
 import DateTimeField from '../components/DateTimeField'
 import StatusTag from '../components/StatusTag'
 import { BarChart, LineChart } from '../components/Charts'
-import { BLUE_PALETTE } from '../components/MapView'
 import { useGroupValidation } from '../validation/useValidation'
 import { formatShanghaiDateTime } from '../utils/shanghaiDateTime'
+import { comparisonLineColor } from '../utils/chartPalette'
 import {
   ACTION_LABELS,
   MODULE_META,
@@ -414,6 +414,10 @@ export default function Evaluation() {
         : selectedExperiments,
     [viewingHistory, evaluationMembers, selectedExperiments],
   )
+  const experimentColorMap = useMemo(
+    () => new Map(displayedExperimentIds.map((experimentId, index) => [experimentId, comparisonLineColor(index)])),
+    [displayedExperimentIds],
+  )
 
   const selectedDetails = useMemo(
     () =>
@@ -491,14 +495,14 @@ export default function Evaluation() {
                   const value = group.byTarget.get(timestamp)?.y_pred
                   return isNumber(value) ? Number(value) : null
                 }),
-                color: BLUE_PALETTE[index % BLUE_PALETTE.length],
+                color: experimentColorMap.get(group.experimentId) ?? comparisonLineColor(index),
               }
             }),
           ]
         : [],
       groups,
     }
-  }, [displayedExperimentIds, seriesByExperiment, horizonStep, reportLookup, selectedDetails])
+  }, [displayedExperimentIds, seriesByExperiment, horizonStep, reportLookup, selectedDetails, experimentColorMap])
 
   const errorData = useMemo(() => {
     const timestamps = comparisonData.x
@@ -513,11 +517,11 @@ export default function Evaluation() {
             const row = group.byTarget.get(timestamp)
             return isNumber(row?.y_pred) && isNumber(row?.y_true) ? Number(row.y_pred) - Number(row.y_true) : null
           }),
-          color: BLUE_PALETTE[index % BLUE_PALETTE.length],
+          color: experimentColorMap.get(group.experimentId) ?? comparisonLineColor(index),
         }
       }),
     }
-  }, [comparisonData, reportLookup, selectedDetails])
+  }, [comparisonData, reportLookup, selectedDetails, experimentColorMap])
 
   const errorComparison = useMemo(
     () =>
@@ -557,10 +561,10 @@ export default function Evaluation() {
         return {
           name: `${report.algorithm_label} · ${report.display_id ?? report.experiment_id}`,
           data: metrics.map((item: any) => (isNumber(item?.[horizonMetric]) ? item[horizonMetric] : null)),
-          color: BLUE_PALETTE[index % BLUE_PALETTE.length],
+          color: experimentColorMap.get(report.experiment_id) ?? comparisonLineColor(index),
         }
       }),
-    [experimentReports, seriesByExperiment, horizonMetric, horizonSteps.join(',')],
+    [experimentReports, seriesByExperiment, horizonMetric, horizonSteps.join(','), experimentColorMap],
   )
 
   const ranking = useMemo(
@@ -960,6 +964,7 @@ export default function Evaluation() {
                 data-testid="m5-prediction-chart"
                 data-point-count={comparisonData.x.length}
                 data-series-count={comparisonData.series.length}
+                data-series-colors={JSON.stringify(comparisonData.series.map((item: any) => item.color))}
               >
                 <LineChart
                   height={320}
@@ -993,6 +998,8 @@ export default function Evaluation() {
                 data-testid="m5-horizon-chart"
                 data-horizon-count={horizonSteps.length}
                 data-series-count={horizonSeries.length}
+                data-series-colors={JSON.stringify(horizonSeries.map((item: any) => item.color))}
+                data-series-experiment-ids={JSON.stringify(experimentReports.map((item: any) => item.experiment_id))}
               >
                 <LineChart
                   height={280}
@@ -1017,6 +1024,8 @@ export default function Evaluation() {
                 data-testid="m5-error-chart"
                 data-point-count={errorData.x.length}
                 data-series-count={errorData.series.length}
+                data-series-colors={JSON.stringify(errorData.series.map((item: any) => item.color))}
+                data-series-experiment-ids={JSON.stringify(comparisonData.groups.map((item: any) => item.experimentId))}
               >
                 <LineChart
                   height={270}

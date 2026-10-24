@@ -141,6 +141,15 @@ await page
   )
   .catch(() => undefined)
 const centerAfterAdd = await centerPane.innerText()
+const multiRegionColors = JSON.parse(
+  (await page.getByTestId('m1-multi-region-series').getAttribute('data-series-colors')) ?? '[]',
+)
+check(
+  '15a multi-region lines use distinct qualitative colors',
+  multiRegionColors.length >= 2 &&
+    new Set(multiRegionColors).size === multiRegionColors.length,
+  multiRegionColors.join(' | '),
+)
 const rowCount = await centerPane.locator('table tbody tr').count()
 check('15 增加区域后中央统计出现两行', rowCount === 2, `${rowCount} rows`)
 check('16 多区域 Insights 出现区域间比较', /平均流量最高的是/.test(centerAfterAdd) && /最低的是/.test(centerAfterAdd), 'comparison insight')

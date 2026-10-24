@@ -15,6 +15,7 @@ import HelpTip from '../components/HelpTip'
 import BiLabel from '../components/BiLabel'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
+import { comparisonLineColor } from '../utils/chartPalette'
 import {
   ACTION_LABELS, MODULE_META, bilingual, localizeSourceNames, regionDisplayLabel,
   sourceDisplayName, unitDisplayLabel,
@@ -547,9 +548,9 @@ export default function Exploration() {
     const chartSeries = result.series.map((item: any, index: number) => ({
       name: item.region_id,
       data: item.values,
-      color: BLUE_PALETTE[index % BLUE_PALETTE.length],
-      width: item.region_id === primaryId ? 2.4 : 1.1,
-      opacity: item.region_id === primaryId ? 1 : 0.55,
+      color: comparisonLineColor(index),
+      width: item.region_id === primaryId ? 2.6 : 1.35,
+      opacity: item.region_id === primaryId ? 1 : 0.9,
     }))
     return { x: result.series[0].timestamps, series: chartSeries }
   }, [result, primaryId])
@@ -846,7 +847,11 @@ export default function Exploration() {
               <span className="tn-muted">地图颜色 = 当前时间截面该区域的真实观测值（越深越大）</span>
             </div>
             <Card size="small" title="多区域时序曲线（Multi-Region Time Series）" style={{ marginTop: 10 }}>
-              <div className={stale ? 'tn-stale' : undefined}>
+              <div
+                className={stale ? 'tn-stale' : undefined}
+                data-testid="m1-multi-region-series"
+                data-series-colors={JSON.stringify(seriesChart.series.map((item: any) => item.color))}
+              >
                 <LineChart
                   loading={loading && !result}
                   empty={!result}
