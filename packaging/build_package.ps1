@@ -96,6 +96,8 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "payload\launch_tn.bat") -Destin
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "payload\stop_tn.bat") -Destination (Join-Path $appDir "stop_tn.bat") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "payload\first_run.ps1") -Destination (Join-Path $appDir "first_run.ps1") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "payload\prefetch_models.ps1") -Destination (Join-Path $appDir "prefetch_models.ps1") -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "payload\tn.ico") -Destination (Join-Path $appDir "tn.ico") -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "runtime\MicrosoftEdgeWebView2Setup.exe") -Destination (Join-Path $appDir "MicrosoftEdgeWebView2Setup.exe") -Force
 
 $size = (Get-ChildItem $build -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
 Write-Host ("[pack] stage size: {0:N0} MB" -f $size)

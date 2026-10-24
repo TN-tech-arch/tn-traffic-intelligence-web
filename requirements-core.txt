@@ -13,3 +13,4 @@ httpx
 pytest
 pyarrow
 psutil
+pywebview==6.2.1

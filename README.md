@@ -8,7 +8,7 @@
 
 ## 1. 这是什么
 
-一个可以真正运行的 Web 全栈系统，使用三组真实的区域流量数据完成闭环：
+一个可独立安装运行的 Windows 桌面应用，内部使用本地 WebView2 窗口承载界面，并使用三组真实的区域流量数据完成闭环：
 
 **探索性时空分析 → 功能区聚类 → 预测数据集构建 → 12 种算法训练（含 All Models 批处理） → held-out Test 公平评价**
 
@@ -26,7 +26,7 @@
 
 | 交付物 | 位置 |
 |---|---|
-| Windows 安装包（正式交付路线 A） | `packaging/dist/TN-Traffic-Intelligence-Setup-3.2.0.exe`（约 255 MB，含便携 Python 运行时与全部依赖，可离线安装） |
+| Windows 安装包（正式交付路线 A） | `packaging/dist/TN-Traffic-Intelligence-Setup-3.2.0.exe`（约 1.1 GB，含便携 Python、WebView2 桌面外壳、全部依赖和基础模型缓存） |
 | 完整源代码 | `backend/`（FastAPI + 真实算法）、`frontend/`（React + TS + Vite）、`scripts/`、`packaging/` |
 | 文档 | `docs/`（USER_GUIDE、ARCHITECTURE、API、MODEL_REGISTRY、DEPLOYMENT、TEST_REPORT、IMPLEMENTATION_STATUS、ACCEPTANCE_REPORT、LICENSE_NOTICES） |
 | 测试证据 | `docs/TEST_REPORT.md`、`docs/ACCEPTANCE_REPORT.md`、`data/screenshots/`、`data/logs/` |
@@ -38,8 +38,9 @@
 
 1. 双击 `packaging/dist/TN-Traffic-Intelligence-Setup-3.2.0.exe`。
 2. 安装向导会：安装便携 Python 运行时与依赖 → 初始化数据库 → 导入并校验六个数据文件 → 创建开始菜单 / 桌面快捷方式。
-3. 开始菜单 → **启动 TN Traffic Intelligence**：后台启动 Worker 与 API，并自动打开 <http://127.0.0.1:8077/>。
-4. 停止服务用 **停止服务** 快捷方式；卸载用 **卸载 TN Traffic Intelligence**（同时清理运行时与数据目录）。
+3. 开始菜单或桌面 → **启动 TN Traffic Intelligence**：打开独立 WebView2 桌面窗口，同时后台启动本机 Worker 与 API，不调用系统浏览器。
+4. 关闭桌面窗口会同步停止 API 与 Worker；如果异常退出，可使用 **停止服务** 快捷方式清理后台进程。
+5. 卸载使用 **卸载 TN Traffic Intelligence**（同时清理运行时与数据目录）。
 
 可选：安装时可勾选“立即下载预训练大模型权重”（Chronos ≈ 35 MB + TimesFM ≈ 800 MB）。
 未勾选时，可在应用内 **Training → Check Compatibility** 处按需下载；默认使用官方镜像 `HF_ENDPOINT=https://hf-mirror.com`。

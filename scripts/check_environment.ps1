@@ -25,7 +25,7 @@ Write-Host "`n-- python packages --"
 & $python -c @'
 import importlib
 modules = ['fastapi','uvicorn','pydantic','numpy','pandas','scipy','sklearn','statsmodels','joblib','pyarrow',
-           'xgboost','lightgbm','torch','prophet','chronos','timesfm','psutil']
+           'xgboost','lightgbm','torch','prophet','chronos','timesfm','psutil','pywebview','pythonnet']
 for name in modules:
     try:
         module = importlib.import_module(name)

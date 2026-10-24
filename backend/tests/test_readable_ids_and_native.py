@@ -3,14 +3,32 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 
 from fastapi.testclient import TestClient
 
-from app.core.ids import batch_id, cluster_run_id, dataset_id, experiment_id, region_experiment_ids
+from app.core.ids import (
+    _next_sequence,
+    batch_id,
+    cluster_run_id,
+    dataset_id,
+    experiment_id,
+    region_experiment_ids,
+)
 from app.main import app
 from app.services.validation import check_module
 
 client = TestClient(app)
+
+
+def test_sequence_allocation_reconciles_existing_business_ids():
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE clusters (display_id TEXT)")
+    conn.execute("INSERT INTO clusters(display_id) VALUES ('CLUS-MILANO-KMEANS-0042')")
+
+    assert _next_sequence("CLUS|MILANO|KMEANS", conn=conn) == 43
+    assert _next_sequence("CLUS|MILANO|KMEANS", conn=conn) == 44
 
 
 def test_readable_ids_follow_the_required_patterns_and_never_repeat():

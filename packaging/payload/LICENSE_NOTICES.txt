@@ -18,6 +18,8 @@
 | chronos-forecasting | 2.3.2 | Apache-2.0 | Chronos 官方实现 |
 | timesfm（官方包） | 3.0.2 | Apache-2.0 | TimesFM 官方推理代码 |
 | React / Ant Design / ECharts / Leaflet / Vite | 18.3 / 5.22 / 5.5 / 1.9 / 5.4 | MIT / BSD-3 | 前端栈 |
+| pywebview / pythonnet | 6.2.1 / 3.2.1 | BSD-3 / MIT | Windows WebView2 独立桌面窗口 |
+| Microsoft Edge WebView2 Evergreen Bootstrapper | 1.3.299.15 | Microsoft redistribution terms | 缺失 WebView2 Runtime 时由安装程序安装 |
 
 ## 预训练模型权重（必须单独确认许可）
 

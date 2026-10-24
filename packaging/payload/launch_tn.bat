@@ -3,6 +3,7 @@ rem Launch the installed TN Traffic Intelligence application.
 setlocal
 set "APPDIR=%~dp0"
 set "PY=%APPDIR%python\python.exe"
+set "PYW=%APPDIR%python\pythonw.exe"
 
 if not exist "%PY%" (
   echo [TN] bundled Python runtime not found: %PY%
@@ -27,18 +28,7 @@ if not exist "%APPDIR%data\tn_traffic.db" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%APPDIR%first_run.ps1"
 )
 
-echo [TN] starting background worker and API...
-start "TN Worker" /MIN "%PY%" -m app.workers.runner
-start "TN API" /MIN "%PY%" -m uvicorn app.main:app --host %TN_HOST% --port %TN_PORT%
-
-echo [TN] waiting for the API to become ready...
-for /l %%i in (1,1,40) do (
-  timeout /t 1 /nobreak >nul
-  powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8077/api/health' -TimeoutSec 2; exit 0 } catch { exit 1 }" >nul 2>&1
-  if not errorlevel 1 goto ready
-)
-echo [TN] API did not answer in time - opening the browser anyway.
-:ready
-start "" "http://127.0.0.1:8077/"
-echo [TN] UI should now be open in your browser. Use stop_tn.bat to stop the services.
+echo [TN] starting desktop application...
+start "" /B "%PYW%" -m app.desktop
+echo [TN] The desktop window manages its own local API and worker processes.
 endlocal

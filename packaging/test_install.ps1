@@ -9,6 +9,46 @@ $installer = Join-Path $PSScriptRoot "dist\TN-Traffic-Intelligence-Setup-3.2.0.e
 $logDir = Join-Path $root "data\logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
+function Stop-TNServiceProcesses {
+    param([int]$Port)
+
+    $services = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -in @("python.exe", "pythonw.exe") -and
+            $_.CommandLine -and
+            $_.CommandLine -match "app\.workers\.runner|uvicorn.*app\.main:app|app\.desktop"
+        }
+    foreach ($service in $services) {
+        Write-Host ("[test] stopping existing TN service: pid={0}, command={1}" -f `
+                $service.ProcessId, $service.CommandLine)
+        Stop-Process -Id $service.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Stop-PortListener -Port $Port
+    Start-Sleep -Seconds 2
+}
+
+function Stop-PortListener {
+    param([int]$Port)
+
+    $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($listener in $listeners) {
+        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+        Write-Host ("[test] freeing port {0}: pid={1}, command={2}" -f `
+                $Port, $listener.OwningProcess, $processInfo.CommandLine)
+        Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
+    }
+    for ($i = 0; $i -lt 20; $i++) {
+        if (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "port $Port is still occupied after stopping existing services"
+}
+
+Write-Host "[test] ensuring the installed application has an exclusive local runtime"
+Stop-TNServiceProcesses -Port 8077
+
 if (-not (Test-Path $installer)) { throw "installer not found: $installer" }
 if (Test-Path $Target) {
     $resolved = (Resolve-Path -LiteralPath $Target).Path
@@ -28,11 +68,26 @@ Write-Host "[test] installed tree OK (python + database present)"
 Get-ChildItem $Target | Select-Object Name | ForEach-Object { Write-Host "   $($_.Name)" }
 
 Write-Host "[test] starting the installed application (API + worker)"
-Start-Process -FilePath $python -ArgumentList "-m", "app.workers.runner" -WorkingDirectory $Target -WindowStyle Hidden
-Start-Process -FilePath $python -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
-    "--port", "8077" -WorkingDirectory $Target -WindowStyle Hidden
+$oldDataDir = $env:TN_DATA_DIR
+$oldModelCache = $env:TN_MODEL_CACHE
+$oldDbPath = $env:TN_DB_PATH
+$oldPythonPath = $env:PYTHONPATH
+try {
+    $env:TN_DATA_DIR = Join-Path $Target "data"
+    $env:TN_MODEL_CACHE = Join-Path $Target "models_cache"
+    $env:TN_DB_PATH = $db
+    $env:PYTHONPATH = Join-Path $Target "backend"
+    $workerProcess = Start-Process -FilePath $python -ArgumentList "-m", "app.workers.runner" `
+        -WorkingDirectory $Target -WindowStyle Hidden -PassThru
+    $apiProcess = Start-Process -FilePath $python -ArgumentList "-m", "uvicorn", "app.main:app", `
+        "--host", "127.0.0.1", "--port", "8077" -WorkingDirectory $Target -WindowStyle Hidden -PassThru
+} finally {
+    $env:TN_DATA_DIR = $oldDataDir
+    $env:TN_MODEL_CACHE = $oldModelCache
+    $env:TN_DB_PATH = $oldDbPath
+    $env:PYTHONPATH = $oldPythonPath
+}
 
-$env:PYTHONPATH = Join-Path $Target "backend"
 $healthy = $false
 for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Seconds 2
@@ -43,6 +98,19 @@ for ($i = 0; $i -lt 40; $i++) {
     } catch { }
 }
 if (-not $healthy) { throw "installed application did not answer on /api/health" }
+foreach ($serviceProcess in @($workerProcess, $apiProcess)) {
+    $running = Get-Process -Id $serviceProcess.Id -ErrorAction SilentlyContinue
+    if (-not $running -or $running.Path -notlike "$Target*") {
+        throw "installed service process is not running from the installed runtime: pid=$($serviceProcess.Id)"
+    }
+}
+$expectedDbPath = [System.IO.Path]::GetFullPath($db)
+if ([System.IO.Path]::GetFullPath([string]$health.database.path) -ne $expectedDbPath) {
+    throw "health response is not served by the installed database: $($health.database.path)"
+}
+if ($health.environment.native_runtime.path -notlike "$Target*") {
+    throw "health response is not served by the installed native runtime: $($health.environment.native_runtime.path)"
+}
 Write-Host ("[test] installed app healthy: version {0}, db_ok={1}, sources={2}" -f `
         $health.version, $health.database.ok, $health.database.counts.data_sources)
 if (-not $health.environment.native_runtime.loaded -or -not $health.environment.torch) {
@@ -471,6 +539,53 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
     Where-Object { $_.CommandLine -like "*$Target*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
+
+Write-Host "[test] desktop WebView2 window lifecycle"
+Stop-PortListener -Port 8077
+$pythonw = Join-Path $Target "python\pythonw.exe"
+if (-not (Test-Path $pythonw)) { throw "installed pythonw runtime missing" }
+& $python -c "import webview, pythonnet; print('webview desktop runtime OK')"
+if ($LASTEXITCODE -ne 0) { throw "installed desktop runtime is not importable" }
+Start-Process -FilePath $pythonw -ArgumentList "-m", "app.desktop" -WorkingDirectory $Target
+$desktopWindow = $null
+for ($i = 0; $i -lt 80; $i++) {
+    Start-Sleep -Milliseconds 500
+    $desktopWindow = Get-Process pythonw -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.MainWindowTitle -eq "TianNuo Traffic Intelligence" -and
+            $_.Path -like "$Target*"
+        } |
+        Select-Object -First 1
+    if ($desktopWindow) { break }
+}
+if (-not $desktopWindow -or $desktopWindow.MainWindowHandle -eq 0) {
+    throw "installed desktop application did not create a native WebView2 window"
+}
+$desktopHealth = $null
+for ($i = 0; $i -lt 120; $i++) {
+    try {
+        $desktopHealth = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/health" -TimeoutSec 3
+        if ($desktopHealth.status -eq "ok") { break }
+    } catch { }
+    Start-Sleep -Milliseconds 500
+}
+if (-not $desktopHealth -or $desktopHealth.status -ne "ok") {
+    throw "desktop shell local API is not healthy"
+}
+if ([System.IO.Path]::GetFullPath([string]$desktopHealth.database.path) -ne $expectedDbPath) {
+    throw "desktop shell is not using the installed database: $($desktopHealth.database.path)"
+}
+if ($desktopHealth.environment.native_runtime.path -notlike "$Target*") {
+    throw "desktop shell is not using the installed native runtime: $($desktopHealth.environment.native_runtime.path)"
+}
+Write-Host ("[test] desktop window OK: pid={0}, title={1}" -f `
+        $desktopWindow.Id, $desktopWindow.MainWindowTitle)
+$closed = $desktopWindow.CloseMainWindow()
+if (-not $closed) { throw "desktop window did not accept a close request" }
+Start-Sleep -Seconds 6
+$listener = Get-NetTCPConnection -LocalPort 8077 -State Listen -ErrorAction SilentlyContinue
+if ($listener) { throw "desktop window close did not stop the local API" }
+Write-Host "[test] closing the desktop window stopped its API and worker"
 
 Write-Host "[test] uninstalling"
 $uninstaller = Join-Path $Target "unins000.exe"

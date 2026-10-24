@@ -66,6 +66,56 @@ def _ensure_sequence_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _observable_ids(prefix: str) -> list[tuple[str, str]]:
+    """Business tables that may contain a readable ID for this namespace."""
+    sources: dict[str, list[tuple[str, str]]] = {
+        "DS": [("dataset_versions", "display_id")],
+        "CLUS": [("clusters", "display_id")],
+        "EXP": [
+            ("experiments", "display_id"),
+            ("experiment_region_models", "region_experiment_id"),
+        ],
+        "BATCH": [("batches", "display_id")],
+        "EVAL": [("evaluations", "evaluation_id")],
+    }
+    return sources.get(prefix, [])
+
+
+def _observed_next_value(
+    conn: sqlite3.Connection,
+    prefix: str,
+    parts: list[str],
+) -> int:
+    """Return one past the largest readable ID already stored in business tables.
+
+    The sequence table can legitimately be behind when a database was restored,
+    migrated, or populated by an older version. Reconciling before allocation
+    prevents an otherwise valid historical ID from being issued twice.
+    """
+    stem = "-".join([prefix, *_normalized_parts(parts)])
+    prefix_text = f"{stem}-"
+    maximum = 0
+    for table, column in _observable_ids(prefix):
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if exists is None:
+            continue
+        rows = conn.execute(
+            f"SELECT {column} AS value FROM {table} WHERE {column} LIKE ?",
+            (f"{prefix_text}%",),
+        ).fetchall()
+        for row in rows:
+            value = row["value"] if hasattr(row, "keys") else row[0]
+            if not value or not str(value).startswith(prefix_text):
+                continue
+            suffix = str(value)[len(prefix_text) :]
+            if suffix.isdigit():
+                maximum = max(maximum, int(suffix))
+    return maximum + 1
+
+
 def _next_sequence(key: str, conn: sqlite3.Connection | None = None) -> int:
     """Allocate the next sequence for ``key`` without reusing deleted numbers.
 
@@ -81,16 +131,21 @@ def _next_sequence(key: str, conn: sqlite3.Connection | None = None) -> int:
     try:
         conn.execute("PRAGMA busy_timeout=30000")
         _ensure_sequence_table(conn)
+        parts = key.split("|")
+        observed_next = _observed_next_value(conn, parts[0], parts[1:])
         row = conn.execute(
             """
             INSERT INTO readable_id_sequences (sequence_key, next_value, updated_at)
-            VALUES (?, 2, ?)
+            VALUES (?, ?, ?)
             ON CONFLICT(sequence_key) DO UPDATE
-                SET next_value = readable_id_sequences.next_value + 1,
+                SET next_value = MAX(
+                        readable_id_sequences.next_value + 1,
+                        excluded.next_value
+                    ),
                     updated_at = excluded.updated_at
             RETURNING next_value - 1
             """,
-            (key, now_utc()),
+            (key, observed_next + 1, now_utc()),
         ).fetchone()
         if row is None:  # pragma: no cover - SQLite >= 3.35 always returns a row
             raise RuntimeError(f"无法分配 ID 序号: {key}")
@@ -163,17 +218,8 @@ def readable_ids(prefix: str, parts_list: list[list[str]]) -> list[str]:
         for parts in parts_list:
             normalized = _normalized_parts(parts)
             key = _sequence_key(prefix, parts)
-            row = conn.execute(
-                """
-                INSERT INTO readable_id_sequences (sequence_key, next_value, updated_at)
-                VALUES (?, 2, ?)
-                ON CONFLICT(sequence_key) DO UPDATE
-                    SET next_value = readable_id_sequences.next_value + 1,
-                        updated_at = excluded.updated_at
-                RETURNING next_value - 1
-                """,
-                (key, now_utc()),
-            ).fetchone()
+            sequence = _next_sequence(key, conn=conn)
+            row = (sequence,)
             if row is None:  # pragma: no cover
                 raise RuntimeError(f"无法分配 ID 序号: {key}")
             output.append("-".join([prefix, *normalized, f"{int(row[0]):04d}"]))

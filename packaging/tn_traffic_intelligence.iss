@@ -45,16 +45,17 @@ Source: "{#StageDir}\python\*"; DestDir: "{app}\python"; Flags: ignoreversion re
 Source: "{#StageDir}\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "data\tn_traffic.db"
 
 [Icons]
-Name: "{group}\启动 TN Traffic Intelligence"; Filename: "{app}\launch_tn.bat"; WorkingDir: "{app}"; IconFilename: "{app}\python\python.exe"
+Name: "{group}\启动 TN Traffic Intelligence"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m app.desktop"; WorkingDir: "{app}"; IconFilename: "{app}\tn.ico"; AppUserModelID: "TianNuo.TrafficIntelligence"
 Name: "{group}\停止服务"; Filename: "{app}\stop_tn.bat"; WorkingDir: "{app}"
 Name: "{group}\用户指南 (README)"; Filename: "{app}\README.md"
 Name: "{group}\卸载 TN Traffic Intelligence"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\TN Traffic Intelligence"; Filename: "{app}\launch_tn.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\TN Traffic Intelligence"; Filename: "{app}\python\pythonw.exe"; Parameters: "-m app.desktop"; WorkingDir: "{app}"; IconFilename: "{app}\tn.ico"; AppUserModelID: "TianNuo.TrafficIntelligence"; Tasks: desktopicon
 
 [Run]
+Filename: "{app}\MicrosoftEdgeWebView2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "正在检查 WebView2 桌面运行环境..."; Flags: runhidden waituntilterminated; Check: NeedsWebView2Runtime
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\first_run.ps1"""; StatusMsg: "正在初始化数据库并导入六个原始数据文件..."; Flags: runhidden waituntilterminated
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\prefetch_models.ps1"""; StatusMsg: "正在下载 TimesFM / Chronos 预训练权重（约 850MB）..."; Flags: runhidden waituntilterminated; Tasks: prefetchmodels
-Filename: "{app}\launch_tn.bat"; Description: "立即启动 TN Traffic Intelligence"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\python\pythonw.exe"; Parameters: "-m app.desktop"; WorkingDir: "{app}"; Description: "立即启动 TN Traffic Intelligence"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{app}\stop_tn.bat"; Flags: runhidden
@@ -69,6 +70,19 @@ Type: filesandordirs; Name: "{app}\models_cache"
 Type: filesandordirs; Name: "{app}\data\processed"
 Type: filesandordirs; Name: "{app}\data\artifacts"
 Type: filesandordirs; Name: "{app}\data\logs"
+Type: filesandordirs; Name: "{app}\data\webview"
 Type: files; Name: "{app}\data\tn_traffic.db*"
 Type: files; Name: "{app}\data\raw\*"
 Type: files; Name: "{app}\bootstrap_data.py"
+Type: files; Name: "{app}\MicrosoftEdgeWebView2Setup.exe"
+Type: files; Name: "{app}\tn.ico"
+
+[Code]
+function NeedsWebView2Runtime: Boolean;
+begin
+  Result := not (
+    RegKeyExists(HKLM64, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') or
+    RegKeyExists(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') or
+    RegKeyExists(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}')
+  );
+end;

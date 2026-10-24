@@ -1,15 +1,16 @@
-﻿TianNuo Traffic Intelligence 3.1 - 安装说明
+﻿TianNuo Traffic Intelligence 3.2 - 安装说明
 ================================================
 
 本安装包会安装：
   1. 便携版 Python 3.12 运行时与全部依赖（离线可用，约 1.4 GB 安装后占用）
   2. 后端服务（FastAPI + 真实算法 Worker）
-  3. 前端生产构建（静态资源由后端直接提供）
+  3. Windows WebView2 独立桌面窗口与前端生产构建
   4. 六个原始数据文件（Milano / Trentino / ZTE）
 
 安装完成后会自动：
   * 初始化 SQLite 数据库并校验数据指纹与区域映射
-  * 生成开始菜单与桌面快捷方式，可一键启动、停止、卸载
+  * 生成开始菜单与桌面快捷方式，启动后不调用系统浏览器
+  * 关闭桌面窗口时自动停止本地 API 与 Worker
 
 预训练大模型权重：
   * Chronos (amazon/chronos-bolt-tiny, Apache-2.0) 约 35 MB
