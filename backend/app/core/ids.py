@@ -231,7 +231,7 @@ def batch_id(
 
 
 def evaluation_id() -> str:
-    return f"EVAL-{ulid()[:16]}"
+    return readable_id("EVAL", [])
 
 
 def job_id() -> str:

@@ -118,3 +118,13 @@ codex10.16/
 * 已实现并实测：P0–P8 的功能主体（见 `docs/IMPLEMENTATION_STATUS.md`）。
 * 51 项验收的逐项结论与证据：`docs/ACCEPTANCE_REPORT.md`。
 * 已知未完成项：TimesFM / Chronos 的 Fine-tuning（版本未确证、保持 Disabled）、公网部署（缺授权）、含 GPU 的性能数据（本机无独显）。
+
+## 8. 清空模块历史
+
+开发环境可执行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\reset_all_history.py --apply
+```
+
+该命令删除模块二至五的聚类、数据集、实验、批次、评估、预测明细、作业、历史映射和专属工件，并重置 DS、CLUS、EXP、BATCH、EVAL 序号。原始交通数据、GIS、数据源和处理后的基础序列保持不变。

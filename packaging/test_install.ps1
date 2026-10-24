@@ -79,6 +79,19 @@ if ($transformerDefaults["d_model"] -ne 64 -or
 }
 Write-Host "[test] installed Prophet and Transformer defaults match the validated profiles"
 
+$initialDashboard = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/dashboard" -TimeoutSec 30
+$initialHistory = @{
+    clusters = [int]$initialDashboard.counts.cluster_runs
+    datasets = [int]$initialDashboard.counts.datasets
+    experiments = [int]$initialDashboard.counts.experiments
+    batches = [int]$initialDashboard.counts.batches
+    evaluations = [int]$initialDashboard.counts.evaluations
+}
+if (@($initialHistory.Values | Where-Object { $_ -ne 0 }).Count -ne 0) {
+    throw "fresh installation contains module history: $($initialHistory | ConvertTo-Json -Compress)"
+}
+Write-Host "[test] fresh installation has zero Module 2-5 history records"
+
 $sources = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/data/sources" -TimeoutSec 20
 Write-Host ("[test] installed data baseline: sources={0} series_regions={1} gis_regions={2} no_data={3}" -f `
         $sources.totals.sources, $sources.totals.series_regions, $sources.totals.gis_regions, $sources.totals.no_data_regions)
@@ -169,7 +182,8 @@ $dataset_id = $built.dataset_id
 if (-not $dataset_id -or $built.status -ne "Built") {
     throw "installed dataset build failed"
 }
-if ($dataset_id -notmatch "^DS-MILANO-ADRIANO-\d{4,}$") {
+if ($dataset_id -ne "DS-MILANO-ADRIANO-0001" -or
+    $dataset_id -notmatch "^DS-MILANO-ADRIANO-\d{4,}$") {
     throw "installed dataset ID is not readable: $dataset_id"
 }
 if ($built.label -ne $dataset_id) {
@@ -200,7 +214,7 @@ $experimentBody = @{
 } | ConvertTo-Json -Depth 6
 $run = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/experiments/run" `
     -ContentType "application/json" -Body $experimentBody -TimeoutSec 60
-if ($run.experiment_id -notmatch "^EXP-MILANO-ADRIANO-RANDOM[-_]FOREST-\d{4,}$") {
+if ($run.experiment_id -ne "EXP-MILANO-ADRIANO-RANDOM-FOREST-0001") {
     throw "installed experiment ID is not readable: $($run.experiment_id)"
 }
 if ($run.display_id -ne $run.experiment_id) {
@@ -240,6 +254,9 @@ $evaluationBody = @{
 } | ConvertTo-Json -Depth 6
 $evaluation = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8077/api/evaluations/run" `
     -ContentType "application/json" -Body $evaluationBody -TimeoutSec 60
+if ($evaluation.evaluation_id -ne "EVAL-0001") {
+    throw "installed first evaluation ID did not start at EVAL-0001: $($evaluation.evaluation_id)"
+}
 $evaluationState = $null
 for ($i = 0; $i -lt 120; $i++) {
     Start-Sleep -Seconds 2
@@ -286,6 +303,9 @@ for ($i = 0; $i -lt 1800; $i++) {
 }
 if (-not $batchState -or $batchState.status -notin @("Completed", "Partial")) {
     throw "installed one-region all-models batch did not finish successfully: $($batchState.status)"
+}
+if ($batchState.display_id -ne "BATCH-MILANO-ADRIANO-MODELS-0001") {
+    throw "installed first batch ID did not start at 0001: $($batchState.display_id)"
 }
 if ($batchState.scope -ne "single" -or $batchState.region_count -ne 1 -or
     @($batchState.experiments).Count -ne 12 -or

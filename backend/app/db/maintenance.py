@@ -353,3 +353,107 @@ def purge_all_region_history() -> dict[str, Any]:
         "artifact_paths_deleted": removed,
         "file_errors": errors,
     }
+
+
+HISTORY_TABLES = (
+    "evaluation_predictions",
+    "evaluation_experiments",
+    "evaluations",
+    "experiment_region_models",
+    "experiments",
+    "jobs",
+    "batches",
+    "clusters",
+    "dataset_versions",
+    "history_id_migration_issues",
+    "history_id_migrations",
+    "audit_events",
+    "readable_id_sequences",
+)
+
+HISTORY_ARTIFACT_DIRS = (
+    "clusters",
+    "datasets",
+    "experiments",
+    "evaluations",
+    "logs",
+)
+
+
+def _existing_tables(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+
+
+def _history_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    tables = _existing_tables(conn)
+    counts = {
+        table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+        for table in HISTORY_TABLES
+        if table in tables
+    }
+    for table in ("data_sources", "regions", "schema_migrations"):
+        counts[table] = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+    return counts
+
+
+def _clear_history_artifacts() -> tuple[list[str], list[str]]:
+    data_root = settings.data_dir.resolve()
+    removed: list[str] = []
+    errors: list[str] = []
+    for name in HISTORY_ARTIFACT_DIRS:
+        root = (settings.artifacts_dir / name).resolve()
+        try:
+            root.relative_to(data_root)
+        except ValueError:
+            errors.append(f"unsafe artifact directory skipped: {root}")
+            continue
+        if not root.exists():
+            continue
+        for entry in root.iterdir():
+            try:
+                if entry.is_dir():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+                removed.append(str(entry.resolve()))
+            except Exception as exc:
+                errors.append(f"{entry}: {exc}")
+    return removed, errors
+
+
+def clear_all_history() -> dict[str, Any]:
+    """Delete every module history record and reset readable-ID allocation.
+
+    Original sources, normalized source series, GIS regions and schema
+    migrations are preserved.  Backups are intentionally outside this reset
+    because they are disaster-recovery files, not active module history.
+    """
+    conn = get_connection()
+    before = _history_counts(conn)
+    tables = _existing_tables(conn)
+    with transaction() as tx:
+        for table in HISTORY_TABLES:
+            if table in tables:
+                tx.execute(f"DELETE FROM {table}")
+        if "sqlite_sequence" in tables:
+            tx.execute("DELETE FROM sqlite_sequence")
+    conn.execute("VACUUM")
+    after = _history_counts(conn)
+    removed, errors = _clear_history_artifacts()
+    return {
+        "before": before,
+        "after": after,
+        "artifact_paths_deleted": removed,
+        "artifact_file_errors": errors,
+        "next_readable_sequences": "1",
+        "preserved": {
+            "data_sources": after.get("data_sources", 0),
+            "regions": after.get("regions", 0),
+            "schema_migrations": after.get("schema_migrations", 0),
+        },
+    }
