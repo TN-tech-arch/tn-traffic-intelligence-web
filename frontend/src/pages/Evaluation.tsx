@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Checkbox, Popconfirm, Select, Table, Tag, message } from 'antd'
+import { Alert, Button, Card, Checkbox, Pagination, Popconfirm, Select, Table, Tag, message } from 'antd'
 import { useSearchParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
@@ -22,6 +22,7 @@ import {
 
 type MetricKey = 'mae' | 'rmse' | 'smape' | 'r2'
 type HorizonMetricKey = 'mae' | 'rmse'
+const EVALUATION_HISTORY_PAGE_SIZE = 6
 
 const METRIC_LABELS: Record<MetricKey, string> = {
   mae: 'MAE',
@@ -125,6 +126,7 @@ export default function Evaluation() {
   const [evaluation, setEvaluation] = useState<any>(null)
   const [historyDataset, setHistoryDataset] = useState<any>(null)
   const [evaluations, setEvaluations] = useState<any[]>([])
+  const [historyPage, setHistoryPage] = useState(1)
   const [seriesByExperiment, setSeriesByExperiment] = useState<Record<string, any[]>>({})
   const [horizonStep, setHorizonStep] = useState(1)
   const [horizonMetric, setHorizonMetric] = useState<HorizonMetricKey>('mae')
@@ -592,6 +594,12 @@ export default function Evaluation() {
     const end = dayjs(testBoundary.end_at)
     return current.isBefore(start, 'day') || current.isAfter(end, 'day')
   }
+  const historyPageCount = Math.max(1, Math.ceil(evaluations.length / EVALUATION_HISTORY_PAGE_SIZE))
+  const currentHistoryPage = Math.min(historyPage, historyPageCount)
+  const visibleEvaluations = evaluations.slice(
+    (currentHistoryPage - 1) * EVALUATION_HISTORY_PAGE_SIZE,
+    currentHistoryPage * EVALUATION_HISTORY_PAGE_SIZE,
+  )
 
   return (
     <div>
@@ -799,46 +807,65 @@ export default function Evaluation() {
 
             <Card
               size="small"
+              className="tn-history-panel"
               title={`评价历史（Evaluation History） · ${evaluations.length}`}
               data-testid="m5-history"
             >
-              {evaluations.length ? evaluations.map((item) => (
-                <div
-                  className="tn-history-row tn-m5-history-row"
-                  key={item.evaluation_id}
-                  data-evaluation-id={item.evaluation_id}
-                >
-                  <div>
-                    <div className="tn-code">{item.evaluation_id}</div>
-                    <div className="tn-muted">
-                      {item.dataset_display_id ?? item.dataset_id} · {item.region_id ?? '—'} · {item.experiments?.length ?? 0} 个模型
-                    </div>
-                    <div className="tn-muted">{formatShanghaiDateTime(item.created_at)}</div>
+              {evaluations.length ? (
+                <>
+                  <div className="tn-history-list">
+                    {visibleEvaluations.map((item) => (
+                      <div
+                        className="tn-history-item"
+                        key={item.evaluation_id}
+                        data-evaluation-id={item.evaluation_id}
+                      >
+                        <div className="tn-history-head">
+                          <span className="tn-history-id">{item.evaluation_id}</span>
+                          <StatusTag status={item.status} error={item.error} />
+                        </div>
+                        <div className="tn-history-meta">
+                          <span><b>数据集</b>{item.dataset_display_id ?? item.dataset_id}</span>
+                          <span><b>范围</b>{item.region_id ?? '—'} · {item.experiments?.length ?? 0} 个模型</span>
+                          <span><b>创建</b>{formatShanghaiDateTime(item.created_at)}</span>
+                        </div>
+                        <div className="tn-history-actions">
+                          <Button size="small" onClick={() => openEvaluation(item.evaluation_id)}>
+                            {ACTION_LABELS.open}
+                          </Button>
+                          <Popconfirm
+                            title="删除这条评价记录？"
+                            description="仅删除该评价的预测、指标和任务记录，不删除数据集、训练实验或模型文件。"
+                            onConfirm={async () => {
+                              try {
+                                await api.del(ENDPOINTS.evaluationDelete(item.evaluation_id))
+                                messageApi.success('评价记录已删除')
+                                loadHistory()
+                                if (evaluation?.evaluation_id === item.evaluation_id) clearResult()
+                              } catch (error) {
+                                messageApi.error(error instanceof ApiError ? error.message : String(error))
+                              }
+                            }}
+                          >
+                            <Button size="small" danger>{ACTION_LABELS.deleteRecord}</Button>
+                          </Popconfirm>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="tn-inline">
-                    <StatusTag status={item.status} error={item.error} />
-                    <Button size="small" onClick={() => openEvaluation(item.evaluation_id)}>
-                      查看
-                    </Button>
-                    <Popconfirm
-                      title="删除这条评价记录？"
-                      description="仅删除该评价的预测、指标和任务记录，不删除数据集、训练实验或模型文件。"
-                      onConfirm={async () => {
-                        try {
-                          await api.del(ENDPOINTS.evaluationDelete(item.evaluation_id))
-                          messageApi.success('评价记录已删除')
-                          loadHistory()
-                          if (evaluation?.evaluation_id === item.evaluation_id) clearResult()
-                        } catch (error) {
-                          messageApi.error(error instanceof ApiError ? error.message : String(error))
-                        }
-                      }}
-                    >
-                      <Button size="small" danger>{ACTION_LABELS.deleteRecord}</Button>
-                    </Popconfirm>
-                  </div>
-                </div>
-              )) : <EmptyState text="暂无评价历史。" />}
+                  {evaluations.length > EVALUATION_HISTORY_PAGE_SIZE ? (
+                    <Pagination
+                      className="tn-history-pagination"
+                      size="small"
+                      current={currentHistoryPage}
+                      pageSize={EVALUATION_HISTORY_PAGE_SIZE}
+                      total={evaluations.length}
+                      showSizeChanger={false}
+                      onChange={setHistoryPage}
+                    />
+                  ) : null}
+                </>
+              ) : <EmptyState text="暂无评价历史。" />}
             </Card>
               </div>
             )

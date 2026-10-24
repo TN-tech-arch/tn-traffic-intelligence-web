@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Card, Collapse, Input, Popconfirm, Select, Switch, Table, Tabs, Tag, Tooltip, message,
+  Alert, Button, Card, Collapse, Input, Pagination, Popconfirm, Select, Switch, Table, Tabs, Tag, Tooltip, message,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
@@ -14,6 +14,7 @@ import InsightCard from '../components/InsightCard'
 import StatusTag from '../components/StatusTag'
 import BiLabel from '../components/BiLabel'
 import DateTimeField from '../components/DateTimeField'
+import { formatShanghaiDateTime } from '../utils/shanghaiDateTime'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
@@ -102,6 +103,7 @@ export default function Clustering() {
   const [clusterFilter, setClusterFilter] = useState('all')
   const [tab, setTab] = useState('overview')
   const [busy, setBusy] = useState(false)
+  const [historyPage, setHistoryPage] = useState(1)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [serverIssues, setServerIssues] = useState<Issue[]>([])
   const skipSourceDateReset = useRef(false)
@@ -601,6 +603,13 @@ export default function Clustering() {
       compact
     />
   )
+  const historyPageSize = 6
+  const historyPageCount = Math.max(1, Math.ceil(runs.length / historyPageSize))
+  const currentHistoryPage = Math.min(historyPage, historyPageCount)
+  const visibleRuns = runs.slice(
+    (currentHistoryPage - 1) * historyPageSize,
+    currentHistoryPage * historyPageSize,
+  )
 
   return (
     <div>
@@ -722,39 +731,67 @@ export default function Clustering() {
                 ⚠ {w.message}
               </div>
             ))}
-            <div className="tn-section-title">{bilingual('聚类历史', 'Clustering History')}</div>
-            {runs.length === 0 ? (
-              <EmptyState text="暂无聚类记录（真实空态）" />
-            ) : (
-              runs.slice(0, 10).map((run) => (
-                <div className="tn-history-row" key={run.cluster_run_id}>
-                  <div>
-                    <div style={{ fontSize: 12 }}>{run.algorithm_label} · {run.cluster_count} 簇</div>
-                    <div className="tn-muted">{run.display_id ?? run.cluster_run_id}</div>
-                    <div className="tn-muted">{run.created_at}</div>
+            <Card
+              size="small"
+              className="tn-history-panel"
+              title={`${bilingual('聚类历史', 'Clustering History')} · ${runs.length}`}
+              data-testid="m2-cluster-history"
+            >
+              {runs.length === 0 ? (
+                <EmptyState text="暂无聚类记录（真实空态）" />
+              ) : (
+                <>
+                  <div className="tn-history-list">
+                    {visibleRuns.map((run) => (
+                      <div
+                        className="tn-history-item tn-history-row"
+                        key={run.cluster_run_id}
+                        data-history-id={run.cluster_run_id}
+                      >
+                        <div className="tn-history-head">
+                          <span className="tn-history-id">{run.display_id ?? run.cluster_run_id}</span>
+                          <StatusTag status={run.status} error={run.error} />
+                        </div>
+                        <div className="tn-history-meta">
+                          <span><b>数据源</b>{String(run.source_id ?? '—').replace(/^SRC-/, '')}</span>
+                          <span><b>算法</b>{run.algorithm_label} · {run.cluster_count} 簇</span>
+                          <span><b>创建</b>{formatShanghaiDateTime(run.created_at)}</span>
+                        </div>
+                        <div className="tn-history-actions">
+                          <Button size="small" onClick={() => openRun(run.cluster_run_id)}>{ACTION_LABELS.open}</Button>
+                          <Popconfirm
+                            title="删除该聚类记录？"
+                            description="只删除本次聚类结果，不影响原始数据。"
+                            onConfirm={async () => {
+                              try {
+                                await api.del(ENDPOINTS.clusterGet(run.cluster_run_id))
+                                messageApi.success('已删除')
+                                loadRuns()
+                              } catch (err) {
+                                messageApi.error(err instanceof ApiError ? err.message : String(err))
+                              }
+                            }}
+                          >
+                            <Button size="small" danger>{ACTION_LABELS.deleteRecord}</Button>
+                          </Popconfirm>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="tn-inline">
-                    <StatusTag status={run.status} error={run.error} />
-                    <Button size="small" onClick={() => openRun(run.cluster_run_id)}>{ACTION_LABELS.open}</Button>
-                    <Popconfirm
-                      title="删除该聚类记录？"
-                      description="只删除本次聚类结果，不影响原始数据。"
-                      onConfirm={async () => {
-                        try {
-                          await api.del(ENDPOINTS.clusterGet(run.cluster_run_id))
-                          messageApi.success('已删除')
-                          loadRuns()
-                        } catch (err) {
-                          messageApi.error(err instanceof ApiError ? err.message : String(err))
-                        }
-                      }}
-                    >
-                      <Button size="small" danger>{ACTION_LABELS.deleteRecord}</Button>
-                    </Popconfirm>
-                  </div>
-                </div>
-              ))
-            )}
+                  {runs.length > historyPageSize ? (
+                    <Pagination
+                      className="tn-history-pagination"
+                      size="small"
+                      current={currentHistoryPage}
+                      pageSize={historyPageSize}
+                      total={runs.length}
+                      showSizeChanger={false}
+                      onChange={setHistoryPage}
+                    />
+                  ) : null}
+                </>
+              )}
+            </Card>
           </>
         }
         visual={

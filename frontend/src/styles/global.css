@@ -251,6 +251,34 @@ body {
   gap: 8px;
 }
 
+.tn-history-panel {
+  min-width: 0;
+  border: 1px solid var(--tn-line);
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.tn-pane > .tn-history-panel {
+  margin-top: 10px;
+}
+
+.tn-history-panel .ant-card-head {
+  min-height: 40px;
+  padding: 0 10px;
+  border-bottom: 1px dashed var(--tn-line);
+}
+
+.tn-history-panel .ant-card-head-title {
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.tn-history-panel .ant-card-body {
+  padding: 10px;
+}
+
+.tn-history-filters,
 .tn-m4-history-filters {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -258,16 +286,19 @@ body {
   margin-bottom: 8px;
 }
 
+.tn-history-filters .ant-select,
 .tn-m4-history-filters .ant-select {
   min-width: 0;
 }
 
+.tn-history-list,
 .tn-m4-history-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
 
+.tn-history-item,
 .tn-m4-history-item {
   min-width: 0;
   padding: 8px 9px;
@@ -276,6 +307,7 @@ body {
   background: #fbfdff;
 }
 
+.tn-history-head,
 .tn-m4-history-head {
   display: flex;
   align-items: flex-start;
@@ -283,6 +315,7 @@ body {
   gap: 8px;
 }
 
+.tn-history-id,
 .tn-m4-history-id {
   min-width: 0;
   color: var(--tn-text);
@@ -293,6 +326,7 @@ body {
   overflow-wrap: anywhere;
 }
 
+.tn-history-meta,
 .tn-m4-history-meta {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(90px, auto);
@@ -302,6 +336,7 @@ body {
   font-size: 10.5px;
 }
 
+.tn-history-meta span,
 .tn-m4-history-meta span {
   min-width: 0;
   overflow: hidden;
@@ -309,22 +344,31 @@ body {
   white-space: nowrap;
 }
 
+.tn-history-meta span:last-child,
 .tn-m4-history-meta span:last-child {
   grid-column: 1 / -1;
   font-family: "Cascadia Mono", "Consolas", monospace;
 }
 
+.tn-history-meta b,
 .tn-m4-history-meta b {
   margin-right: 5px;
   color: #64728d;
   font-weight: 600;
 }
 
+.tn-history-actions,
 .tn-m4-history-actions {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
   margin-top: 7px;
+}
+
+.tn-history-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 9px;
 }
 
 .tn-m4-detail-grid {
@@ -539,16 +583,6 @@ body {
 
 .tn-m5-actions {
   margin-top: 10px;
-}
-
-.tn-m5-history-row {
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.tn-m5-history-row > .tn-inline {
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 .tn-m5-detail-banner {
@@ -1070,29 +1104,6 @@ body {
 
 .ant-tabs-tab-active .tn-bi-label-en {
   color: #3c6fd8;
-}
-
-.tn-history-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 0;
-  border-bottom: 1px dashed var(--tn-line);
-}
-
-.tn-m3-dataset-row {
-  padding: 7px 0;
-  border-bottom: 1px dashed var(--tn-line);
-  min-width: 0;
-}
-
-.tn-m3-dataset-row .tn-code {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tn-empty {

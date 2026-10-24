@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Collapse, InputNumber, Popconfirm, Spin, Tooltip, message } from 'antd'
+import { Alert, Button, Card, Collapse, InputNumber, Pagination, Popconfirm, Spin, Tooltip, message } from 'antd'
 import { ENDPOINTS, ApiError, api, type Issue } from '../api/client'
 import { EmptyState, ModuleHeader, PaneHead, ThreePane } from '../components/Panes'
 import ParamField from '../components/ParamField'
 import StatusTag from '../components/StatusTag'
 import { LineChart } from '../components/Charts'
+import { formatShanghaiDateTime } from '../utils/shanghaiDateTime'
 import { useGroupValidation } from '../validation/useValidation'
 import { fieldDisabledReason, visibleFields, type FieldSpec } from '../validation/engine'
 import {
@@ -429,50 +430,72 @@ export default function DatasetPage() {
               <Button onClick={runPreview} loading={busy}>{ACTION_LABELS.preview}</Button>
               <Button type="primary" onClick={build} loading={busy} disabled={!valid}>{ACTION_LABELS.buildDataset}</Button>
             </div>
-            <div className="tn-section-title">数据集管理（Dataset Management）</div>
-            {visibleDatasets.length ? (
-              <>
-                {visibleDatasets.map((row: any) => (
-                  <div className="tn-m3-dataset-row" key={row.dataset_id}>
-                    <div className="tn-inline" style={{ justifyContent: 'space-between' }}>
-                      <span className="tn-code">{row.display_id ?? row.dataset_id}</span>
-                      <StatusTag status={row.status} />
-                    </div>
-                    <div className="tn-muted">
-                      单区域 · {row.region_count} 个区域 · L/H/S = {row.L}/{row.H}/{row.S}
-                    </div>
-                    <div className="tn-muted">{row.created_at}</div>
-                    <div className="tn-inline" style={{ marginTop: 5 }}>
-                      <Button size="small" onClick={() => openDataset(row.dataset_id)}>{ACTION_LABELS.open}</Button>
-                      <Popconfirm
-                        title="删除该数据集？"
-                        description="仅当未被引用时可删除；被引用时会返回依赖保护错误。"
-                        onConfirm={async () => {
-                          try {
-                            await api.del(ENDPOINTS.datasetDelete(row.dataset_id))
-                            messageApi.success('已删除')
-                            loadDatasets()
-                          } catch (err) {
-                            messageApi.error(err instanceof ApiError ? err.message : String(err))
-                          }
-                        }}
+            <Card
+              size="small"
+              className="tn-history-panel"
+              title={`${bilingual('数据集管理', 'Dataset Management')} · ${datasets.length}`}
+              data-testid="m3-dataset-history"
+            >
+              {visibleDatasets.length ? (
+                <>
+                  <div className="tn-history-list">
+                    {visibleDatasets.map((row: any) => (
+                      <div
+                        className="tn-history-item tn-m3-dataset-row"
+                        key={row.dataset_id}
+                        data-history-id={row.dataset_id}
                       >
-                        <Tooltip title={row.is_referenced ? '已被实验或评价引用，不能删除' : '删除会同时移除工件目录'}>
-                          <Button size="small" danger disabled={row.is_referenced}>{ACTION_LABELS.deleteRecord}</Button>
-                        </Tooltip>
-                      </Popconfirm>
-                    </div>
+                        <div className="tn-history-head">
+                          <span className="tn-history-id">{row.display_id ?? row.dataset_id}</span>
+                          <StatusTag status={row.status} />
+                        </div>
+                        <div className="tn-history-meta">
+                          <span><b>数据源</b>{sourceDisplayName(row.source_key, row.source_display_name)}</span>
+                          <span>
+                            <b>范围</b>
+                            {(row.region_ids ?? []).join(' / ') || `${row.region_count} 个区域`} · L/H/S {row.L}/{row.H}/{row.S}
+                          </span>
+                          <span><b>创建</b>{formatShanghaiDateTime(row.created_at)}</span>
+                        </div>
+                        <div className="tn-history-actions">
+                          <Button size="small" onClick={() => openDataset(row.dataset_id)}>{ACTION_LABELS.open}</Button>
+                          <Popconfirm
+                            title="删除该数据集？"
+                            description="仅当未被引用时可删除；被引用时会返回依赖保护错误。"
+                            onConfirm={async () => {
+                              try {
+                                await api.del(ENDPOINTS.datasetDelete(row.dataset_id))
+                                messageApi.success('已删除')
+                                loadDatasets()
+                              } catch (err) {
+                                messageApi.error(err instanceof ApiError ? err.message : String(err))
+                              }
+                            }}
+                          >
+                            <Tooltip title={row.is_referenced ? '已被实验或评价引用，不能删除' : '删除会同时移除工件目录'}>
+                              <Button size="small" danger disabled={row.is_referenced}>{ACTION_LABELS.deleteRecord}</Button>
+                            </Tooltip>
+                          </Popconfirm>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-                <div className="tn-inline" style={{ justifyContent: 'space-between', marginTop: 6 }}>
-                  <Button size="small" disabled={currentDatasetPage <= 0} onClick={() => setDatasetPage(currentDatasetPage - 1)}>上一页</Button>
-                  <span className="tn-muted">{currentDatasetPage + 1} / {datasetPageCount}</span>
-                  <Button size="small" disabled={currentDatasetPage >= datasetPageCount - 1} onClick={() => setDatasetPage(currentDatasetPage + 1)}>下一页</Button>
-                </div>
-              </>
-            ) : (
-              <EmptyState text="暂无已保存数据集。" />
-            )}
+                  {datasets.length > datasetPageSize ? (
+                    <Pagination
+                      className="tn-history-pagination"
+                      size="small"
+                      current={currentDatasetPage + 1}
+                      pageSize={datasetPageSize}
+                      total={datasets.length}
+                      showSizeChanger={false}
+                      onChange={(page) => setDatasetPage(page - 1)}
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <EmptyState text="暂无已保存数据集。" />
+              )}
+            </Card>
           </>
         }
         visual={

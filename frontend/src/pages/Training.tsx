@@ -871,10 +871,11 @@ export default function Training() {
 
           <Card
             size="small"
-            className="tn-m4-card"
-            title="实验历史（Experiment History）"
+            className="tn-m4-card tn-history-panel"
+            title={`实验历史（Experiment History） · ${filteredExperiments.length}`}
+            data-testid="m4-experiment-history"
           >
-            <div className="tn-m4-history-filters">
+            <div className="tn-history-filters tn-m4-history-filters">
               <Select
                 size="small"
                 value={historyDataset}
@@ -894,20 +895,20 @@ export default function Training() {
                 onChange={setHistoryStatus}
               />
             </div>
-            <div className="tn-m4-history-list" data-testid="m4-experiment-history">
+            <div className="tn-history-list tn-m4-history-list">
               {visibleExperiments.length ? (
                 visibleExperiments.map((item) => (
-                  <div className="tn-m4-history-item" key={item.experiment_id}>
-                    <div className="tn-m4-history-head">
-                      <span className="tn-m4-history-id">{item.display_id ?? item.experiment_id}</span>
+                  <div className="tn-history-item tn-m4-history-item" key={item.experiment_id}>
+                    <div className="tn-history-head tn-m4-history-head">
+                      <span className="tn-history-id tn-m4-history-id">{item.display_id ?? item.experiment_id}</span>
                       <StatusTag status={item.status} error={item.error} />
                     </div>
-                    <div className="tn-m4-history-meta">
+                    <div className="tn-history-meta tn-m4-history-meta">
                       <span><b>数据集</b>{item.dataset_display_id ?? item.dataset_id}</span>
                       <span><b>算法</b>{item.algorithm_label}</span>
                       <span><b>开始</b>{formatDateTime(item.started_at ?? item.created_at)}</span>
                     </div>
-                    <div className="tn-m4-history-actions">
+                    <div className="tn-history-actions tn-m4-history-actions">
                       <Button
                         size="small"
                         loading={loadingId === item.experiment_id}
@@ -935,6 +936,7 @@ export default function Training() {
             </div>
             {filteredExperiments.length > HISTORY_PAGE_SIZE ? (
               <Pagination
+                className="tn-history-pagination"
                 size="small"
                 current={historyPage}
                 pageSize={HISTORY_PAGE_SIZE}

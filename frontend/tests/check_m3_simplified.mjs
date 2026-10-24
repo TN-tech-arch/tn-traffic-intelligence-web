@@ -91,7 +91,7 @@ try {
   )
 
   await page.goto(`${BASE}/training`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await page.locator('.ant-tabs-tab').filter({ hasText: '实验历史' }).first().waitFor({
+  await page.getByTestId('m4-experiment-history').waitFor({
     state: 'visible',
     timeout: 60000,
   })
@@ -100,7 +100,7 @@ try {
   check(
     '6 模块四继承 DS ID，仅显示数据频率且不显示高级开关',
     trainingText.includes('DS-MILANO-ADRIANO-') &&
-      trainingText.includes('数据频率') &&
+      trainingText.includes('采样频率') &&
       trainingText.includes('原生频率') &&
       !trainingText.includes('数据频率 / 聚合') &&
       !trainingText.includes('（继承自数据集）') &&

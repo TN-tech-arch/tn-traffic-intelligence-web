@@ -228,7 +228,7 @@ await page.getByTestId('m5-history').waitFor({ state: 'visible', timeout: 60000 
 const historyRow = page.locator(`[data-evaluation-id="${created.evaluation_id}"]`)
 await historyRow.waitFor({ state: 'visible', timeout: 60000 })
 const setupBeforeHistory = await page.getByTestId('m5-evaluation-setup').innerText()
-await historyRow.getByRole('button').filter({ hasText: /查\s*看/ }).click()
+await historyRow.getByRole('button').first().click()
 await page.getByTestId('m5-forecast-details').getByText('正在查看历史评价').waitFor({ timeout: 30000 })
 await page.waitForFunction(
   () => {
