@@ -797,6 +797,11 @@ body {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--tn-line);
+  background-color: #f4f8ff;
+  background-image:
+    linear-gradient(rgba(36, 103, 232, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 103, 232, 0.055) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 .tn-map-compact {

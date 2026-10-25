@@ -492,46 +492,146 @@ if ($scopeAudit.datasets -ne 0 -or $scopeAudit.experiments -ne 0 -or
 }
 Write-Host "[test] installed database cleanup audit: zero non-single records, zero foreign-key violations"
 
-Write-Host "[test] packaged history-ID migration against pre-migration snapshot"
-$legacyBackup = Get-ChildItem -LiteralPath (Join-Path $root "data\backups") `
-    -Filter "tn_traffic-before-history-id-migration-*.db" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if ($legacyBackup) {
-    $migrationDir = Join-Path $Target "migration-check"
-    New-Item -ItemType Directory -Force -Path $migrationDir | Out-Null
-    $migrationDb = Join-Path $migrationDir "legacy.db"
-    Copy-Item -LiteralPath $legacyBackup.FullName -Destination $migrationDb -Force
-    $oldDbPath = $env:TN_DB_PATH
-    $oldDataDir = $env:TN_DATA_DIR
-    $oldPythonPath = $env:PYTHONPATH
-    try {
-        $env:TN_DB_PATH = $migrationDb
-        $env:TN_DATA_DIR = $migrationDir
-        $env:PYTHONPATH = Join-Path $Target "backend"
-        $migrationJson = & $python -c "from app.db.migrate import run_migrations; from app.db.history_ids import migrate_readable_history_ids; import json; run_migrations(); print(json.dumps(migrate_readable_history_ids()))"
-        if ($LASTEXITCODE -ne 0) { throw "packaged history-ID migration process failed" }
-        $migrationResult = ($migrationJson | Select-Object -Last 1) | ConvertFrom-Json
-        if ($migrationResult.after.issues -ne 0 -or $migrationResult.after.datasets -ne 15 -or `
-            $migrationResult.after.clusters -ne 10 -or $migrationResult.after.experiments -ne 96 -or `
-            $migrationResult.after.batches -ne 6) {
-            throw "packaged history-ID migration counts or issues are unexpected"
-        }
-        Write-Host ("[test] packaged migration: datasets={0}, clusters={1}, experiments={2}, region_experiments={3}, batches={4}, mappings={5}, issues={6}" -f `
-                $migrationResult.after.datasets, $migrationResult.after.clusters, $migrationResult.after.experiments, `
-                $migrationResult.after.region_experiments, $migrationResult.after.batches, `
-                $migrationResult.after.mappings, $migrationResult.after.issues)
-    } finally {
-        $env:TN_DB_PATH = $oldDbPath
-        $env:TN_DATA_DIR = $oldDataDir
-        $env:PYTHONPATH = $oldPythonPath
-        $resolvedMigration = (Resolve-Path -LiteralPath $migrationDir).Path
-        if ((Split-Path -Parent $resolvedMigration) -ne (Resolve-Path -LiteralPath $Target).Path) {
-            throw "refusing to remove migration-check outside install target"
-        }
-        Remove-Item -LiteralPath $resolvedMigration -Recurse -Force
+Write-Host "[test] packaged history-ID migration against generated legacy snapshot"
+$migrationDir = Join-Path $Target "migration-check"
+New-Item -ItemType Directory -Force -Path $migrationDir | Out-Null
+$migrationDb = Join-Path $migrationDir "legacy.db"
+$oldDbPath = $env:TN_DB_PATH
+$oldDataDir = $env:TN_DATA_DIR
+$oldPythonPath = $env:PYTHONPATH
+try {
+    $env:TN_DB_PATH = $migrationDb
+    $env:TN_DATA_DIR = $migrationDir
+    $env:PYTHONPATH = Join-Path $Target "backend"
+    $legacyFixture = @'
+import json
+
+from app.core.ids import now_utc
+from app.db.connection import get_connection, json_dumps
+from app.db.history_ids import migrate_readable_history_ids
+from app.db.migrate import run_migrations
+
+run_migrations()
+conn = get_connection()
+now = now_utc()
+conn.execute(
+    """
+    INSERT INTO data_sources (
+        source_id, key, display_name, csv_path, geojson_path, unit_label,
+        native_frequency, native_frequency_minutes, fingerprint_csv,
+        fingerprint_geojson, fingerprint, time_point_count, region_count_series,
+        region_count_gis, imported_at
+    ) VALUES (
+        'SRC-MILANO', 'milano', 'Milano', 'milano.csv', 'milano.geojson',
+        'vehicles', 'native', 10, 'legacy-csv', 'legacy-geojson', 'legacy',
+        1, 1, 1, ?
+    )
+    """,
+    (now,),
+)
+conn.execute(
+    """
+    INSERT INTO dataset_versions (
+        dataset_id, display_id, source_id, label, scope, region_ids_json,
+        frequency, frequency_minutes, aggregation, input_length, output_length,
+        step, train_ratio, val_ratio, test_ratio, split_boundaries_json,
+        preprocess_json, artifact_ref, window_counts_json,
+        region_window_summary_json, quality_json, status, hash, created_at
+    ) VALUES (
+        '01LEGACY000000000000000001', NULL, 'SRC-MILANO', 'legacy', 'single',
+        '["ADRIANO"]', 'native', 10, 'mean', 24, 6, 1, 0.7, 0.15, 0.15,
+        '[]', '{}', '', '{}', '{}', '{}', 'Built', 'legacy-hash', ?
+    )
+    """,
+    (now,),
+)
+conn.execute(
+    """
+    INSERT INTO clusters (
+        cluster_run_id, display_id, source_id, algorithm_key, params_json,
+        features_json, frequency, aggregation, region_count, cluster_count,
+        noise_count, status, created_at
+    ) VALUES (
+        '01LEGACY000000000000000002', NULL, 'SRC-MILANO', 'kmeans', '{}',
+        '{}', 'native', 'mean', 1, 1, 0, 'Completed', ?
+    )
+    """,
+    (now,),
+)
+conn.execute(
+    """
+    INSERT INTO batches (
+        batch_id, display_id, dataset_id, scope, algorithm_count,
+        region_count, planned_tasks, policy_json, params_snapshot_json,
+        task_summary_json, status, created_at
+    ) VALUES (
+        '01LEGACY000000000000000003', NULL,
+        '01LEGACY000000000000000001', 'single', 12, 1, 12, '{}', '{}',
+        '{}', 'Completed', ?
+    )
+    """,
+    (now,),
+)
+snapshot = {
+    "region_ids": ["ADRIANO"],
+    "region_experiment_ids": {
+        "ADRIANO": "01LEGACY000000000000000004"
+    },
+}
+conn.execute(
+    """
+    INSERT INTO experiments (
+        experiment_id, dataset_id, batch_id, algorithm_key, algorithm_label,
+        display_id, category, mode, scope, params_json, snapshot_json, status,
+        region_total, region_completed, region_failed, created_at, started_at,
+        ended_at
+    ) VALUES (
+        '01LEGACY000000000000000004', '01LEGACY000000000000000001',
+        '01LEGACY000000000000000003', 'random_forest', 'Random Forest', NULL,
+        'machine_learning', 'direct', 'single', '{}', ?, 'Completed',
+        1, 1, 0, ?, ?, ?
+    )
+    """,
+    (json_dumps(snapshot), now, now, now),
+)
+conn.execute(
+    """
+    INSERT INTO experiment_region_models (
+        experiment_id, region_id, region_experiment_id, status,
+        started_at, ended_at
+    ) VALUES (
+        '01LEGACY000000000000000004', 'ADRIANO',
+        '01LEGACY000000000000000004', 'Completed', ?, ?
+    )
+    """,
+    (now, now),
+)
+print(json.dumps(migrate_readable_history_ids(), ensure_ascii=False))
+'@
+    $fixturePath = Join-Path $migrationDir "create_legacy_history.py"
+    Set-Content -LiteralPath $fixturePath -Value $legacyFixture -Encoding UTF8
+    $migrationJson = & $python $fixturePath
+    if ($LASTEXITCODE -ne 0) { throw "packaged history-ID migration process failed" }
+    $migrationResult = ($migrationJson | Select-Object -Last 1) | ConvertFrom-Json
+    if ($migrationResult.after.issues -ne 0 -or $migrationResult.after.datasets -ne 1 -or `
+        $migrationResult.after.clusters -ne 1 -or $migrationResult.after.experiments -ne 1 -or `
+        $migrationResult.after.region_experiments -ne 1 -or $migrationResult.after.batches -ne 1 -or `
+        $migrationResult.after.mappings -ne 5) {
+        throw "packaged history-ID migration counts or issues are unexpected"
     }
-} else {
-    throw "pre-migration backup missing; packaged migration could not be verified"
+    Write-Host ("[test] packaged migration: datasets={0}, clusters={1}, experiments={2}, region_experiments={3}, batches={4}, mappings={5}, issues={6}" -f `
+            $migrationResult.after.datasets, $migrationResult.after.clusters, $migrationResult.after.experiments, `
+            $migrationResult.after.region_experiments, $migrationResult.after.batches, `
+            $migrationResult.after.mappings, $migrationResult.after.issues)
+} finally {
+    $env:TN_DB_PATH = $oldDbPath
+    $env:TN_DATA_DIR = $oldDataDir
+    $env:PYTHONPATH = $oldPythonPath
+    $resolvedMigration = (Resolve-Path -LiteralPath $migrationDir).Path
+    if ((Split-Path -Parent $resolvedMigration) -ne (Resolve-Path -LiteralPath $Target).Path) {
+        throw "refusing to remove migration-check outside install target"
+    }
+    Remove-Item -LiteralPath $resolvedMigration -Recurse -Force
 }
 
 Write-Host "[test] stopping installed services"

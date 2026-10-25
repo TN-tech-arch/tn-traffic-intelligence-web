@@ -71,18 +71,11 @@ export default function MapView({
     if (!containerRef.current || mapRef.current) return
     const map = L.map(containerRef.current, {
       zoomControl: true,
-      attributionControl: true,
+      attributionControl: false,
       preferCanvas: true,
       center: [45.46, 9.19],
       zoom: 10,
     })
-    // Standard OSM tiles (no API key / watermark). They are drawn semi
-    // transparent so the thematic polygon colours stay readable.
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      opacity: 0.55,
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(map)
     mapRef.current = map
     setReady(true)
     return () => {
