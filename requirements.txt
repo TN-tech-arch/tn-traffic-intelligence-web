@@ -1,7 +1,12 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 streamlit>=1.41,<2
 numpy>=1.26,<3
 pandas>=2.0,<4
 scikit-learn>=1.5,<2
+statsmodels>=0.14,<1
+prophet>=1.1,<2
+torch==2.14.1+cpu
 xgboost>=2.1,<4
 lightgbm>=4.5,<5
 pyarrow>=17,<27

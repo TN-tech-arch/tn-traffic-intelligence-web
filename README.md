@@ -12,13 +12,14 @@ pinned: false
 
 ## 网页版
 
-本目录是独立的 Hugging Face Spaces 网页部署版本，保留 React、FastAPI、真实数据、真实算法和完整业务页面。
+本目录包含独立的 Docker 网页部署版本和 Streamlit Community Cloud 最大功能演示版，均使用真实数据与真实算法。
 
 - 公开访问不需要登录。
 - 每个浏览器会话使用独立临时数据库、训练产物和日志。
 - 同一会话刷新会保留历史；新浏览器会话、Cookie 清除或 2 小时空闲后重新进入时，历史为空且编号从 `0001` 开始。
 - TimesFM 与 Chronos 权重由服务器后台预取并供所有匿名会话共享。
-- 详细说明见 `docs/WEB_DEPLOYMENT.md`。
+- Docker 部署说明见 `docs/WEB_DEPLOYMENT.md`。
+- 当前 Streamlit Community Cloud 最大功能版说明见 `docs/STREAMLIT_DEMO.md`。
 
 本地构建和运行：
 
