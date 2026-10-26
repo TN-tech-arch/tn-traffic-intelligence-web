@@ -15,9 +15,7 @@ def test_streamlit_builds_real_dataset_and_trains_first_algorithm():
     assert not app.exception
     assert any("DS-MILANO-ADRIANO-0001" in item.value for item in app.success)
 
-    algorithm_selector = next(widget for widget in app.multiselect if widget.label == "算法")
-    algorithm_selector.set_value(["arima", "prophet", "random_forest", "xgboost", "lightgbm", "mlp", "rnn", "lstm", "gru", "transformer"]).run()
-    train = next(button for button in app.button if button.label == "开始训练")
+    train = next(button for button in app.button if button.label == "全部 10 种自动排队")
     train.click().run()
     assert not app.exception
     assert len(app.session_state.experiments) == 10

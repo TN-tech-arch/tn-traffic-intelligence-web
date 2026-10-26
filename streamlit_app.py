@@ -1114,9 +1114,17 @@ def training_tab() -> None:
         st.info("请先在“数据集构建”中创建数据集。")
         return
     dataset_id = st.selectbox("训练数据集", list(st.session_state.datasets), key="train_dataset")
+    queue_active = bool(st.session_state.training_queue)
     action_left, action_right = st.columns([1, 3])
-    if action_left.button("选择全部 10 种", width="stretch"):
-        st.session_state.training_algorithms = list(ALGORITHMS)
+    if action_left.button(
+        "全部 10 种自动排队",
+        width="stretch",
+        disabled=queue_active,
+    ):
+        st.session_state.training_queue = list(ALGORITHMS)
+        st.session_state.training_dataset = dataset_id
+        st.session_state.last_training_message = None
+        persist_session()
         st.rerun()
     action_right.caption(
         "全部模型按顺序真实训练；每个完成的实验会立即写入当前匿名会话，单个算法失败不会伪造结果。"
@@ -1132,9 +1140,8 @@ def training_tab() -> None:
     st.caption(
         "免费演示版限制训练窗口和网络规模；ARIMA、Prophet 与四种深度学习模型耗时更长。"
     )
-    queue_active = bool(st.session_state.training_queue)
     if st.button(
-        "开始训练",
+        "训练所选模型",
         type="primary",
         width="stretch",
         disabled=not algorithms or queue_active,
