@@ -15,10 +15,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.core.config import settings
 from app.core.errors import NotFound
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.core.ids import now_utc
+from app.runtime_paths import current_processed_dir, current_raw_dir
 
 # Expected values from PROJECT_SPEC 2.1.  They are assertions only: a mismatch is
 # reported, never silently repaired.
@@ -79,11 +79,11 @@ def sha256_file(path: Path) -> str:
 
 
 def _npz_path(source_key: str) -> Path:
-    return settings.processed_dir / f"{source_key}_series.npz"
+    return current_processed_dir() / f"{source_key}_series.npz"
 
 
 def _quality_path(source_key: str) -> Path:
-    return settings.processed_dir / f"{source_key}_quality.json"
+    return current_processed_dir() / f"{source_key}_quality.json"
 
 
 @dataclass
@@ -165,8 +165,8 @@ def _to_epoch_seconds(series: pd.Series) -> np.ndarray:
 
 def inspect_source(definition: dict[str, Any], *, write_cache: bool = True) -> dict[str, Any]:
     """Import one source: read raw files, verify structure, cache series matrix."""
-    csv_path = settings.raw_dir / definition["csv"]
-    geo_path = settings.raw_dir / definition["geojson"]
+    csv_path = current_raw_dir() / definition["csv"]
+    geo_path = current_raw_dir() / definition["geojson"]
     if not csv_path.exists():
         raise NotFound(f"缺少原始数据文件: {csv_path}", code="RAW_FILE_MISSING")
     if not geo_path.exists():
@@ -334,7 +334,7 @@ def inspect_source(definition: dict[str, Any], *, write_cache: bool = True) -> d
     }
 
     if write_cache:
-        settings.ensure_dirs()
+        current_processed_dir().mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
             _npz_path(definition["key"]),
             timestamps=timestamps,
@@ -399,8 +399,8 @@ def _upsert_source(
                 source_id,
                 definition["key"],
                 definition["display_name"],
-                str(settings.raw_dir / definition["csv"]),
-                str(settings.raw_dir / definition["geojson"]),
+                str(current_raw_dir() / definition["csv"]),
+                str(current_raw_dir() / definition["geojson"]),
                 definition["unit_label"],
                 definition["native_frequency"],
                 definition["native_frequency_minutes"],

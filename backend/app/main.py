@@ -32,11 +32,32 @@ from app.core.errors import Conflict, NotFound, RequestRejected
 from app.db.history_ids import migrate_readable_history_ids
 from app.db.maintenance import purge_all_region_history, purge_legacy_dbscan_history
 from app.db.migrate import run_migrations
+from app.runtime_paths import (
+    current_artifacts_dir,
+    current_data_dir,
+    current_model_cache_dir,
+    current_processed_dir,
+    current_raw_dir,
+)
 from app.services.ingest import SOURCE_DEFINITIONS, import_all, sources_summary
+from app.web_sessions import (
+    SecurityHeadersMiddleware,
+    SessionIsolationMiddleware,
+    initialize_session_manager,
+    shutdown_session_manager,
+)
 
 
 def bootstrap() -> dict:
-    settings.ensure_dirs()
+    for path in (
+        current_data_dir(),
+        current_processed_dir(),
+        current_artifacts_dir(),
+        current_model_cache_dir(),
+        current_data_dir() / "logs",
+        current_data_dir() / "backups",
+    ):
+        path.mkdir(parents=True, exist_ok=True)
     applied = run_migrations()
     history_ids = migrate_readable_history_ids()
     all_region_cleanup = purge_all_region_history()
@@ -45,7 +66,7 @@ def bootstrap() -> dict:
     missing: list[str] = []
     if not sources_summary():
         for definition in SOURCE_DEFINITIONS:
-            csv_path = settings.raw_dir / definition["csv"]
+            csv_path = current_raw_dir() / definition["csv"]
             if not csv_path.exists():
                 missing.append(str(csv_path))
         if not missing:
@@ -63,8 +84,15 @@ def bootstrap() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    bootstrap()
-    yield
+    if settings.web_mode:
+        initialize_session_manager(bootstrap)
+    else:
+        bootstrap()
+    try:
+        yield
+    finally:
+        if settings.web_mode:
+            shutdown_session_manager()
 
 
 app = FastAPI(
@@ -82,6 +110,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SessionIsolationMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.exception_handler(RequestRejected)

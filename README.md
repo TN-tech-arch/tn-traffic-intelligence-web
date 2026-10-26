@@ -1,4 +1,44 @@
+---
+title: TN Traffic Intelligence
+emoji: 🚦
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # TianNuo Traffic Intelligence ｜ 智能流量分析与预测平台
+
+## 网页版
+
+本目录是独立的 Hugging Face Spaces 网页部署版本，保留 React、FastAPI、真实数据、真实算法和完整业务页面。
+
+- 公开访问不需要登录。
+- 每个浏览器会话使用独立临时数据库、训练产物和日志。
+- 同一会话刷新会保留历史；新浏览器会话、Cookie 清除或 2 小时空闲后重新进入时，历史为空且编号从 `0001` 开始。
+- TimesFM 与 Chronos 权重由服务器后台预取并供所有匿名会话共享。
+- 详细说明见 `docs/WEB_DEPLOYMENT.md`。
+
+本地构建和运行：
+
+```powershell
+cd frontend
+npm ci
+npm run build
+cd ..
+$env:PYTHONPATH = "$PWD\backend"
+$env:TN_WEB_MODE = "1"
+$env:TN_SESSIONS_DIR = "$PWD\data\sessions"
+$env:TN_DATA_DIR = "$PWD\data\sessions\base\data"
+$env:TN_DB_PATH = "$PWD\data\sessions\base\data\tn_traffic.db"
+$env:TN_RAW_DIR = "$PWD\data\raw"
+$env:TN_MODEL_CACHE = "$PWD\data\web-model-cache"
+$env:TN_COOKIE_SECURE = "0"
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8088
+```
+
+以下内容保留原有桌面安装版的业务说明；网页版以本文档和 `Dockerfile` 为准。
 
 **PROJECT_SPEC v3.1 的完整实现**：真实数据、真实算法、真实评价，带 Windows 安装包。
 

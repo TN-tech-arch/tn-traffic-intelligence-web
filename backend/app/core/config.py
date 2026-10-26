@@ -25,6 +25,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 @dataclass(frozen=True)
 class Settings:
     project_root: Path = PROJECT_ROOT
+    raw_dir_override: Path | None = field(
+        default_factory=lambda: _env_path("TN_RAW_DIR", PROJECT_ROOT / "data" / "raw")
+        if os.environ.get("TN_RAW_DIR")
+        else None
+    )
     data_dir: Path = field(default_factory=lambda: _env_path("TN_DATA_DIR", PROJECT_ROOT / "data"))
     model_cache_dir: Path = field(
         default_factory=lambda: _env_path("TN_MODEL_CACHE", PROJECT_ROOT / "models_cache")
@@ -46,11 +51,21 @@ class Settings:
     hf_endpoint: str = field(
         default_factory=lambda: os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
     )
+    web_mode: bool = field(
+        default_factory=lambda: os.environ.get("TN_WEB_MODE", "0").lower() in {"1", "true", "yes"}
+    )
+    sessions_root: Path = field(
+        default_factory=lambda: _env_path("TN_SESSIONS_DIR", PROJECT_ROOT / "data" / "sessions")
+    )
+    cookie_secure: bool = field(
+        default_factory=lambda: os.environ.get("TN_COOKIE_SECURE", "1").lower()
+        in {"1", "true", "yes"}
+    )
     max_upload_mb: int = 25
 
     @property
     def raw_dir(self) -> Path:
-        return self.data_dir / "raw"
+        return self.raw_dir_override or (self.data_dir / "raw")
 
     @property
     def processed_dir(self) -> Path:

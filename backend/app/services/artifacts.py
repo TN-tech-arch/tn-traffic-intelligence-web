@@ -5,12 +5,12 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from app.core.config import settings
 from app.core.errors import Conflict
+from app.runtime_paths import current_artifacts_dir
 
 
 def artifact_root() -> Path:
-    root = settings.artifacts_dir.resolve()
+    root = current_artifacts_dir().resolve()
     root.mkdir(parents=True, exist_ok=True)
     return root
 

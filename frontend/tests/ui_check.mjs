@@ -242,6 +242,41 @@ try {
   await page.screenshot({ path: path.join(SHOTS, '03-module2-clustering.png'), fullPage: true })
 
   // ------------------------------------------------------------ Module 3
+  const datasetCount = await page.evaluate(async () => {
+    const response = await fetch('/api/datasets?include_archived=true')
+    return (await response.json()).datasets.length
+  })
+  if (datasetCount === 0) {
+    const buildResponse = await page.evaluate(async () => {
+      const response = await fetch('/api/datasets/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          values: {
+            source_key: 'milano',
+            scope: 'single',
+            region_id: 'ADRIANO',
+            frequency: 'native',
+            aggregation: 'mean',
+            input_length: 24,
+            output_length: 6,
+            step: 1,
+            train_ratio: 0.7,
+            val_ratio: 0.15,
+            test_ratio: 0.15,
+            missing_mode: 'automatic',
+            scaling: 'standard',
+            time_start: '2013-11-01 00:00:00',
+            time_end: '2013-11-07 23:50:00',
+          },
+        }),
+      })
+      return { status: response.status, body: await response.json() }
+    })
+    if (buildResponse.status !== 200) {
+      throw new Error(`Unable to seed Module 3 dataset: ${JSON.stringify(buildResponse.body)}`)
+    }
+  }
   await page.click('.tn-nav-item >> text=Dataset')
   await page.waitForTimeout(2000)
   await page

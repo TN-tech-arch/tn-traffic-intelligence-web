@@ -8,6 +8,7 @@ from app import __version__
 from app.core.config import settings
 from app.db.connection import query_one
 from app.db.migrate import schema_version
+from app.runtime_paths import current_db_path, current_session_id
 from app.services.validation import environment_report
 
 router = APIRouter(tags=["health"])
@@ -43,8 +44,9 @@ def health() -> dict:
         "status": "ok" if db_ok else "degraded",
         "version": __version__,
         "uptime_seconds": round(time.time() - _started_at, 1),
-        "database": {"ok": db_ok, "path": str(settings.db_path), "schema_version": schema_version(),
+        "database": {"ok": db_ok, "path": str(current_db_path()), "schema_version": schema_version(),
                      "error": db_error, "counts": counts},
+        "session": {"id": current_session_id(), "ephemeral": current_session_id() != "local"},
         "worker": {"pending_jobs": running_jobs, "last_heartbeat": worker_row["last"] if worker_row else None},
         "environment": env,
         "notes": {

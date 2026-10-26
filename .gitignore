@@ -16,6 +16,9 @@ data/screenshots/
 data/backups/
 data/tn_traffic.db*
 data/webview/
+data/sessions/
+data/sessions-test/
+data/web-model-cache/
 
 # Model weights (multi-GB, never commit)
 models_cache/

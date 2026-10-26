@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from app.core.config import settings
+from app.runtime_paths import current_db_path
 
 
 _local = threading.local()
@@ -30,11 +30,30 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = getattr(_local, "conn", None)
+    connections = getattr(_local, "connections", None)
+    if connections is None:
+        connections = {}
+        _local.connections = connections
+    key = str(current_db_path().resolve())
+    conn = connections.get(key)
     if conn is None:
-        conn = _connect(settings.db_path)
-        _local.conn = conn
+        conn = _connect(current_db_path())
+        connections[key] = conn
     return conn
+
+
+def close_current_connections() -> None:
+    """Close only the database connections owned by the current thread."""
+    connections = getattr(_local, "connections", None)
+    if not connections:
+        return
+    for conn in connections.values():
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.close()
+        except sqlite3.Error:
+            pass
+    connections.clear()
 
 
 @contextmanager

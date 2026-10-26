@@ -11,10 +11,10 @@ from typing import Any
 
 import numpy as np
 
-from app.core.config import settings
 from app.core.errors import Conflict, NotFound, RequestRejected
 from app.core.ids import dataset_id as make_dataset_id, now_utc, ulid
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
+from app.runtime_paths import current_artifacts_dir
 from app.services import windows as win
 from app.services.ingest import load_series, source_row
 from app.services.series import resolve_frequency_minutes, resample, valid_region_ids
@@ -22,7 +22,7 @@ from app.services.time_range import has_blocking, resolve_range
 
 
 def dataset_dir(dataset_id: str) -> Path:
-    return settings.artifacts_dir / "datasets" / dataset_id
+    return current_artifacts_dir() / "datasets" / dataset_id
 
 
 def _pack_bits(flags: np.ndarray) -> bytes:
@@ -546,7 +546,9 @@ def create_dataset(payload: dict[str, Any]) -> dict[str, Any]:
         payload.get("region_id"),
     )
     target_dir = dataset_dir(new_id)
-    tmp_dir = Path(tempfile.mkdtemp(prefix=f".build-{ulid()[:8]}-", dir=str(settings.artifacts_dir)))
+    artifacts_dir = current_artifacts_dir()
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f".build-{ulid()[:8]}-", dir=str(artifacts_dir)))
     data = computed["data"]
     pre = computed["pre"]
     try:
@@ -795,7 +797,7 @@ def delete_dataset(dataset_id: str) -> dict[str, Any]:
     else:
         conn.execute("COMMIT")
     target = Path(row["artifact_ref"])
-    root = settings.artifacts_dir.resolve()
+    root = current_artifacts_dir().resolve()
     try:
         resolved = target.resolve()
         if root in resolved.parents and resolved.exists():

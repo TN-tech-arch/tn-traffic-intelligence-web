@@ -8,15 +8,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.core.config import settings
 from app.db.connection import get_connection, query_all, transaction
+from app.runtime_paths import (
+    current_artifacts_dir,
+    current_data_dir,
+    current_model_cache_dir,
+)
 
 
 def _remove_cluster_artifacts(cluster_ids: set[str], artifact_refs: list[str]) -> list[str]:
     """Remove only paths under data/artifacts or data/logs that name a target run."""
     if not cluster_ids:
         return []
-    roots = [settings.artifacts_dir, settings.data_dir / "logs"]
+    roots = [current_artifacts_dir(), current_data_dir() / "logs"]
     candidates: set[Path] = set()
     for raw in artifact_refs:
         if not raw:
@@ -104,7 +108,7 @@ def purge_legacy_dbscan_history() -> dict[str, Any]:
 
 
 def _backup_before_all_region_cleanup() -> Path:
-    backup_dir = settings.data_dir / "backups"
+    backup_dir = current_data_dir() / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     target = backup_dir / f"tn_traffic-before-all-region-cleanup-{stamp}.db"
@@ -119,8 +123,8 @@ def _backup_before_all_region_cleanup() -> Path:
 
 def _remove_all_region_files(ids: set[str], extra_refs: list[str]) -> tuple[list[str], list[str]]:
     roots = [
-        settings.artifacts_dir.resolve(),
-        settings.model_cache_dir.resolve(),
+        current_artifacts_dir().resolve(),
+        current_model_cache_dir().resolve(),
     ]
     candidates: set[Path] = set()
     for raw in extra_refs:
@@ -402,11 +406,11 @@ def _history_counts(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def _clear_history_artifacts() -> tuple[list[str], list[str]]:
-    data_root = settings.data_dir.resolve()
+    data_root = current_data_dir().resolve()
     removed: list[str] = []
     errors: list[str] = []
     for name in HISTORY_ARTIFACT_DIRS:
-        root = (settings.artifacts_dir / name).resolve()
+        root = (current_artifacts_dir() / name).resolve()
         try:
             root.relative_to(data_root)
         except ValueError:

@@ -1,40 +1,16 @@
-# 可选的容器化部署（正式交付路线 B 的基础，尚未在公网验证）。
-# 用法：docker compose up -d --build
 services:
-  api:
+  web:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8077"]
-    environment:
-      TN_DATA_DIR: /data
-      TN_DB_PATH: /data/tn_traffic.db
-      TN_MODEL_CACHE: /models
-      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
-    volumes:
-      - ./data:/data
-      - ./models_cache:/models
     ports:
-      - "8077:8077"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8077/api/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: ["python", "-m", "app.workers.runner"]
+      - "8088:7860"
     environment:
-      TN_DATA_DIR: /data
-      TN_DB_PATH: /data/tn_traffic.db
-      TN_MODEL_CACHE: /models
-      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+      TN_COOKIE_SECURE: "0"
+      TN_PRELOAD_FOUNDATION: "0"
+      TN_SESSION_TTL_SECONDS: "7200"
+      TN_MAX_SESSIONS: "8"
+      TN_MAX_MODEL_JOBS: "2"
     volumes:
-      - ./data:/data
-      - ./models_cache:/models
-    depends_on:
-      api:
-        condition: service_started
+      - ./models_cache:/tmp/tn-model-cache
+    restart: unless-stopped

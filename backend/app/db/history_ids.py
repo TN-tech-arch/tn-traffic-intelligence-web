@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.core.config import settings
 from app.core.ids import (
     now_utc,
     readable_id_on_connection,
@@ -16,6 +15,7 @@ from app.core.ids import (
     slug,
 )
 from app.db.connection import get_connection, json_loads
+from app.runtime_paths import current_data_dir
 
 _HISTORY_TABLES = {
     "dataset": ("dataset_versions", "dataset_id"),
@@ -73,7 +73,7 @@ def _record_mapping(
 
 
 def _backup_database() -> Path:
-    backup_dir = settings.data_dir / "backups"
+    backup_dir = current_data_dir() / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     target = backup_dir / f"tn_traffic-before-history-id-migration-{stamp}.db"

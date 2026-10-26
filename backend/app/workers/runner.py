@@ -21,6 +21,8 @@ from app.core.ids import now_utc, ulid
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.db.maintenance import purge_legacy_dbscan_history
 from app.db.migrate import run_migrations
+from app.runtime_limits import MODEL_JOB_SLOTS
+from app.runtime_paths import ensure_current_dirs
 from app.workers.tasks import ProgressReporter, run_clustering, run_evaluation, run_experiment
 
 WORKER_ID = f"{socket.gethostname()}-{os.getpid()}-{ulid()[:6]}"
@@ -249,22 +251,20 @@ def execute_job(row) -> tuple[str, str | None]:
         return "Failed", detail
 
 
-def main() -> None:
-    global _stop
-    signal.signal(signal.SIGINT, _handle_signal)
-    if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, _handle_signal)
-    settings.ensure_dirs()
+def run_worker_loop(stop_event=None, *, identity: str = "standalone") -> None:
+    """Run the durable queue loop in either a process or a session thread."""
+    ensure_current_dirs()
     applied = run_migrations()
     purge_legacy_dbscan_history()
     recovered = recover_stale_jobs()
     print(
-        f"[worker] id={WORKER_ID} db={settings.db_path} migrations={applied or 'up-to-date'} "
+        f"[worker] id={WORKER_ID} scope={identity} db={get_connection().execute('PRAGMA database_list').fetchone()['file']} "
+        f"migrations={applied or 'up-to-date'} "
         f"recovered_stale_jobs={recovered}",
         flush=True,
     )
     idle_since = time.time()
-    while not _stop:
+    while not _stop and not (stop_event and stop_event.is_set()):
         skipped = skip_pending_jobs_of_cancelled_batches()
         if skipped:
             print(f"[worker] marked {skipped} queued jobs as Skipped after batch stop", flush=True)
@@ -278,13 +278,22 @@ def main() -> None:
         idle_since = time.time()
         print(f"[worker] start job {job['job_id']} type={job['job_type']}", flush=True)
         started = time.time()
-        state, error = execute_job(job)
+        with MODEL_JOB_SLOTS:
+            state, error = execute_job(job)
         print(
             f"[worker] job {job['job_id']} -> {state} in {time.time() - started:.1f}s"
             + (f" error={error}" if error else ""),
             flush=True,
         )
     print("[worker] stopped", flush=True)
+
+
+def main() -> None:
+    global _stop
+    signal.signal(signal.SIGINT, _handle_signal)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _handle_signal)
+    run_worker_loop()
 
 
 if __name__ == "__main__":

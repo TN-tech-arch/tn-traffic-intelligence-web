@@ -14,7 +14,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 
-from app.core.config import settings
+from app.runtime_paths import current_db_path
 
 
 _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -126,8 +126,9 @@ def _next_sequence(key: str, conn: sqlite3.Connection | None = None) -> int:
     """
     owns_connection = conn is None
     if conn is None:
-        settings.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(settings.db_path), timeout=30.0, isolation_level=None)
+        db_path = current_db_path()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path), timeout=30.0, isolation_level=None)
     try:
         conn.execute("PRAGMA busy_timeout=30000")
         _ensure_sequence_table(conn)
@@ -208,8 +209,9 @@ def readable_ids(prefix: str, parts_list: list[list[str]]) -> list[str]:
     """Allocate several readable IDs in one durable SQLite transaction."""
     if not parts_list:
         return []
-    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(settings.db_path), timeout=30.0, isolation_level=None)
+    db_path = current_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), timeout=30.0, isolation_level=None)
     try:
         conn.execute("PRAGMA busy_timeout=30000")
         _ensure_sequence_table(conn)
