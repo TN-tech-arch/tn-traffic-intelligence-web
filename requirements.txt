@@ -1,0 +1,7 @@
+streamlit>=1.41,<2
+numpy>=1.26,<3
+pandas>=2.0,<4
+scikit-learn>=1.5,<2
+xgboost>=2.1,<4
+lightgbm>=4.5,<5
+pyarrow>=17,<27
