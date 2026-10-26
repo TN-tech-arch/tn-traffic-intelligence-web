@@ -26,7 +26,7 @@
 
 | 交付物 | 位置 |
 |---|---|
-| Windows 安装包（正式交付路线 A） | `packaging/dist/TN-Traffic-Intelligence-Setup-3.2.0.exe`（约 1.1 GB，含便携 Python、WebView2 桌面外壳、全部依赖和基础模型缓存） |
+| Windows 安装包（正式交付路线 A） | `packaging/dist/TN-Traffic-Intelligence-Setup-3.2.0.exe`（约 255 MB，含便携 Python、WebView2 桌面外壳和全部运行依赖；TimesFM / Chronos 权重按需下载） |
 | 完整源代码 | `backend/`（FastAPI + 真实算法）、`frontend/`（React + TS + Vite）、`scripts/`、`packaging/` |
 | 文档 | `docs/`（USER_GUIDE、ARCHITECTURE、API、MODEL_REGISTRY、DEPLOYMENT、TEST_REPORT、IMPLEMENTATION_STATUS、ACCEPTANCE_REPORT、LICENSE_NOTICES） |
 | 测试证据 | `docs/TEST_REPORT.md`、`docs/ACCEPTANCE_REPORT.md`、`data/screenshots/`、`data/logs/` |

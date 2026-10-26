@@ -8,7 +8,7 @@
 # 依赖：Inno Setup 7（packaging/ 内已含下载与静默安装步骤）
 #       packaging/runtime/python-embed.zip（官方便携 Python 3.12.10）
 powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build_package.ps1
-# 产物：packaging\dist\TN-Traffic-Intelligence-Setup-3.1.0.exe
+# 产物：packaging\dist\TN-Traffic-Intelligence-Setup-3.2.0.exe
 ```
 
 构建脚本会：
@@ -17,7 +17,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build_package.ps1
    （加入 `Lib\site-packages` 与 `..\backend`，因为 `._pth` 存在时 Python 会忽略 `PYTHONPATH`）。
 2. 复制当前虚拟环境已安装的全部依赖（约 1.4 GB，torch/xgboost/prophet/timesfm/chronos 等）。
 3. 复制后端源码、前端生产构建、脚本、文档、六个原始数据文件。
-4. 用 Inno Setup 编译为单一 `.exe`（LZMA2 压缩，约 255 MB）。
+4. 默认不打包 TimesFM / Chronos 权重；用 Inno Setup 编译为单一 `.exe`（LZMA2 压缩，约 255 MB）。
+
+完全离线交付时，可额外传入 `-IncludeModelCache` 将本地 `models_cache` 一并封装；常规交付保持精简安装包，模型权重由安装向导或应用内预取。
 
 ### 安装包行为
 

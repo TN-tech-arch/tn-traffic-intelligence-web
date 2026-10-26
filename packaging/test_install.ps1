@@ -147,6 +147,17 @@ if ($transformerDefaults["d_model"] -ne 64 -or
 }
 Write-Host "[test] installed Prophet and Transformer defaults match the validated profiles"
 
+$foundationModels = @($modelRegistry.models | Where-Object { $_.category -eq "foundation" })
+$unavailableFoundationModels = @($foundationModels | Where-Object { -not $_.foundation_status.ready })
+$expectedBatchCompleted = 12 - $unavailableFoundationModels.Count
+if ($foundationModels.Count -ne 2) {
+    throw "installed model registry does not expose both foundation models"
+}
+if ($unavailableFoundationModels.Count -gt 0) {
+    $unavailableKeys = ($unavailableFoundationModels | ForEach-Object { $_.key }) -join ", "
+    Write-Host "[test] foundation checkpoints not bundled (expected for compact installer): $unavailableKeys"
+}
+
 $initialDashboard = Invoke-RestMethod -Uri "http://127.0.0.1:8077/api/dashboard" -TimeoutSec 30
 $initialHistory = @{
     clusters = [int]$initialDashboard.counts.cluster_runs
@@ -381,12 +392,25 @@ if ($batchState.scope -ne "single" -or $batchState.region_count -ne 1 -or
     throw "installed all-models batch contains an invalid region scope or member count"
 }
 $successfulBatchExperiments = @($batchState.experiments | Where-Object { $_.status -eq "Completed" })
-if ($successfulBatchExperiments.Count -ne 12) {
-    throw "installed all-models batch completed $($successfulBatchExperiments.Count) of 12 models"
+if ($successfulBatchExperiments.Count -ne $expectedBatchCompleted) {
+    throw "installed all-models batch completed $($successfulBatchExperiments.Count) models; expected $expectedBatchCompleted"
 }
-Write-Host ("[test] installed batch: {0}, status={1}, models={2}, completed={3}" -f `
+$unexpectedBatchResults = @(
+    $batchState.experiments |
+        Where-Object {
+            $modelKey = $_.algorithm_key
+            $_.status -ne "Completed" -and
+            $modelKey -notin @($unavailableFoundationModels | ForEach-Object { $_.key })
+        }
+)
+if ($unexpectedBatchResults.Count -gt 0) {
+    throw "installed all-models batch had unexpected non-completed local models: $(
+        ($unexpectedBatchResults | ForEach-Object { $_.algorithm_key }) -join ', '
+    )"
+}
+Write-Host ("[test] installed batch: {0}, status={1}, models={2}, completed={3}, awaiting_checkpoints={4}" -f `
         $batchState.display_id, $batchState.status, @($batchState.experiments).Count,
-        $successfulBatchExperiments.Count)
+        $successfulBatchExperiments.Count, $unavailableFoundationModels.Count)
 
 Write-Host "[test] deep verification: Module 5 single-region multi-model evaluation"
 $multiEvaluationBody = @{

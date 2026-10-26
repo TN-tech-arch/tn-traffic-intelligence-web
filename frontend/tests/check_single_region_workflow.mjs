@@ -106,8 +106,10 @@ check(
   ) &&
     (await page.locator('.tn-pane-info').count()) === 0 &&
     (await page.locator('.ant-tabs').count()) === 0 &&
-    !evaluationText.includes('导出') &&
-    !evaluationText.includes('下载'),
+    (await page
+      .locator('button, a')
+      .filter({ hasText: /导出|下载|Export|Download|CSV|Excel/i })
+      .count()) === 0,
 )
 
 check(

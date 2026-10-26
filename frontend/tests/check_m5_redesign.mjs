@@ -114,9 +114,10 @@ check(
 )
 check(
   '4 no export or download controls remain',
-  !(await page.locator('body').innerText()).includes('导出') &&
-    !(await page.locator('body').innerText()).includes('下载') &&
-    (await page.getByRole('link').filter({ hasText: /CSV|Excel/ }).count()) === 0,
+  (await page
+    .locator('button, a')
+    .filter({ hasText: /导出|下载|Export|Download|CSV|Excel/i })
+    .count()) === 0,
 )
 
 const checkedBefore = await page.locator('.tn-m5-experiment-list input[type="checkbox"]:checked').count()

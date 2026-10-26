@@ -1,11 +1,15 @@
 # Build the Windows installer payload: a portable Python runtime plus the app.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build_package.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build_package.ps1 -IncludeModelCache
 #
 # Produces: packaging\dist\TN-Traffic-Intelligence-Setup-<version>.exe
 param(
     [string]$Version = "3.2.0",
     [switch]$SkipSitePackages,
+    [switch]$IncludeModelCache,
+    # Kept as a compatibility alias for older build commands. The default is
+    # now the compact installer, so this switch no longer changes behaviour.
     [switch]$SkipModelCache
 )
 
@@ -66,7 +70,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $appDir "frontend") | Out-N
 Copy-Item -LiteralPath (Join-Path $root "frontend\dist") -Destination (Join-Path $appDir "frontend\dist") -Recurse -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $appDir "data") | Out-Null
 Copy-Item -LiteralPath (Join-Path $root "data\raw") -Destination (Join-Path $appDir "data\raw") -Recurse -Force
-if (-not $SkipModelCache) {
+if ($IncludeModelCache -and -not $SkipModelCache) {
     $modelCacheSource = Join-Path $root "models_cache"
     if (Test-Path $modelCacheSource) {
         Write-Host "[pack] bundling downloaded foundation-model checkpoints"
@@ -77,6 +81,8 @@ if (-not $SkipModelCache) {
     } else {
         Write-Host "[pack] model cache not found; installer will require prefetch_models.ps1"
     }
+} else {
+    Write-Host "[pack] foundation-model weights excluded; the installer offers an optional download"
 }
 foreach ($file in @("README.md", "PROJECT_SPEC.md", "CODEX_START.md", "ACCEPTANCE_CHECKLIST.md",
                     "CHANGES_v3_1.md", "DATA_MANIFEST_SHA256.txt", "requirements-core.txt",
