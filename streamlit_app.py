@@ -43,12 +43,12 @@ from sklearn.preprocessing import StandardScaler
 ROOT = Path(__file__).resolve().parent
 RAW_DIR = ROOT / "data" / "raw"
 MAX_DATASETS = 3
-MAX_TRAIN_WINDOWS = 1000
-MAX_TEST_WINDOWS = 180
-MAX_DEEP_TRAIN_WINDOWS = 300
-MAX_DEEP_TEST_WINDOWS = 90
-MAX_STATISTICAL_TEST_WINDOWS = 12
-MAX_STATISTICAL_TRAIN_POINTS = 1000
+MAX_TRAIN_WINDOWS = 720
+MAX_TEST_WINDOWS = 120
+MAX_DEEP_TRAIN_WINDOWS = 180
+MAX_DEEP_TEST_WINDOWS = 45
+MAX_STATISTICAL_TEST_WINDOWS = 8
+MAX_STATISTICAL_TRAIN_POINTS = 720
 SESSION_TTL_SECONDS = 7200
 SESSION_ROOT = Path(tempfile.gettempdir()) / "tn_streamlit_sessions"
 
@@ -149,6 +149,9 @@ SESSION_STATE_KEYS = (
     "evaluations",
     "clusters",
     "counters",
+    "training_queue",
+    "training_dataset",
+    "last_training_message",
 )
 
 
@@ -158,6 +161,9 @@ def _new_session_state() -> None:
     st.session_state.evaluations = []
     st.session_state.clusters = []
     st.session_state.counters = {}
+    st.session_state.training_queue = []
+    st.session_state.training_dataset = None
+    st.session_state.last_training_message = None
 
 
 def _session_file(token: str) -> Path:
@@ -210,7 +216,13 @@ def init_session() -> None:
     st.session_state.session_id = token
     if persisted:
         for key in SESSION_STATE_KEYS:
-            st.session_state[key] = persisted.get(key, {} if key in {"datasets", "counters"} else [])
+            if key in {"datasets", "counters"}:
+                default_value: Any = {}
+            elif key == "training_dataset" or key == "last_training_message":
+                default_value = None
+            else:
+                default_value = []
+            st.session_state[key] = persisted.get(key, default_value)
     else:
         _new_session_state()
     st.session_state._loaded_session = token
@@ -1120,19 +1132,49 @@ def training_tab() -> None:
     st.caption(
         "免费演示版限制训练窗口和网络规模；ARIMA、Prophet 与四种深度学习模型耗时更长。"
     )
-    if st.button("开始训练", type="primary", width="stretch", disabled=not algorithms):
-        progress = st.progress(0, text="准备训练")
-        for index, algorithm_key in enumerate(algorithms):
-            progress.progress(index / len(algorithms), text=f"正在训练 {ALGORITHMS[algorithm_key]}")
-            try:
-                experiment = train_experiment(dataset_id, algorithm_key)
-                st.session_state.experiments.insert(0, experiment)
-                persist_session()
-                st.success(f"{experiment['experiment_id']} 训练完成，用时 {experiment['duration_seconds']} 秒")
-            except Exception as exc:
-                st.error(f"{ALGORITHMS[algorithm_key]} 训练失败：{type(exc).__name__}: {exc}")
-            progress.progress((index + 1) / len(algorithms), text=f"{ALGORITHMS[algorithm_key]} 已处理")
-        progress.empty()
+    queue_active = bool(st.session_state.training_queue)
+    if st.button(
+        "开始训练",
+        type="primary",
+        width="stretch",
+        disabled=not algorithms or queue_active,
+    ):
+        st.session_state.training_queue = list(algorithms)
+        st.session_state.training_dataset = dataset_id
+        st.session_state.last_training_message = None
+        persist_session()
+        st.rerun()
+
+    if st.session_state.training_queue:
+        algorithm_key = st.session_state.training_queue[0]
+        st.info(
+            f"正在训练 {ALGORITHMS[algorithm_key]}，队列剩余 "
+            f"{len(st.session_state.training_queue)} 个模型。"
+        )
+        try:
+            experiment = train_experiment(
+                str(st.session_state.training_dataset or dataset_id),
+                algorithm_key,
+            )
+            st.session_state.experiments.insert(0, experiment)
+            st.session_state.last_training_message = (
+                f"{experiment['experiment_id']} 训练完成，用时 {experiment['duration_seconds']} 秒"
+            )
+        except Exception as exc:
+            st.session_state.last_training_message = (
+                f"{ALGORITHMS[algorithm_key]} 训练失败：{type(exc).__name__}: {exc}"
+            )
+        st.session_state.training_queue.pop(0)
+        persist_session()
+        if st.session_state.training_queue:
+            st.rerun()
+
+    if st.session_state.last_training_message:
+        message = str(st.session_state.last_training_message)
+        if "失败" in message:
+            st.error(message)
+        else:
+            st.success(message)
 
     if not st.session_state.experiments:
         st.info("当前会话还没有训练记录。")

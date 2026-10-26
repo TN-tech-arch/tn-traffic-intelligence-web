@@ -15,12 +15,19 @@ def test_streamlit_builds_real_dataset_and_trains_first_algorithm():
     assert not app.exception
     assert any("DS-MILANO-ADRIANO-0001" in item.value for item in app.success)
 
+    algorithm_selector = next(widget for widget in app.multiselect if widget.label == "算法")
+    algorithm_selector.set_value(["arima", "prophet", "random_forest", "xgboost", "lightgbm", "mlp", "rnn", "lstm", "gru", "transformer"]).run()
     train = next(button for button in app.button if button.label == "开始训练")
     train.click().run()
     assert not app.exception
-    assert any(
-        "EXP-MILANO-ADRIANO-RANDOM_FOREST-0001" in item.value
-        for item in app.success
+    assert len(app.session_state.experiments) == 10
+    assert {
+        item["algorithm_key"] for item in app.session_state.experiments
+    } == {"arima", "prophet", "random_forest", "xgboost", "lightgbm",
+          "mlp", "rnn", "lstm", "gru", "transformer"}
+    assert all(
+        item["experiment_id"].endswith("-0001")
+        for item in app.session_state.experiments
     )
 
     save_evaluation = next(button for button in app.button if button.label == "保存本次评估")
