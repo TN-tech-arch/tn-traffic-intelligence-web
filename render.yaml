@@ -18,9 +18,9 @@ services:
       - key: TN_PRELOAD_FOUNDATION
         value: "0"
       - key: TN_MAX_SESSIONS
-        value: "4"
+        value: "20"
       - key: TN_SESSION_TTL_SECONDS
-        value: "3600"
+        value: "1800"
       - key: TN_MAX_MODEL_JOBS
         value: "1"
       - key: TN_REQUESTS_PER_MINUTE
