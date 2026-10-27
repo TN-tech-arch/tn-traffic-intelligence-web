@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.config import settings
+
 CATEGORY_LABELS = {
     "statistical": "Statistical",
     "machine_learning": "Machine Learning",
@@ -595,6 +597,10 @@ MODELS: list[dict[str, Any]] = [
         ],
     },
 ]
+
+ALL_MODEL_DEFINITIONS = list(MODELS)
+if settings.local_models_only:
+    MODELS = [model for model in MODELS if model["category"] != "foundation"]
 
 MODEL_BY_KEY = {m["key"]: m for m in MODELS}
 ALGORITHM_KEYS = [m["key"] for m in MODELS]

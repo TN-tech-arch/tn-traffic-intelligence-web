@@ -19,13 +19,14 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 @router.get("/registry")
 def registry() -> dict:
     models = public_registry()
+    model_count = len(models)
     return {
-        "algorithm_count": len(models),
+        "algorithm_count": model_count,
         "all_models": {
             "key": "all_models",
-            "label": "All Models (12)",
+            "label": f"All Models ({model_count})",
             "is_algorithm": False,
-            "description_zh": "顶部批量编排入口：依次运行下方 12 个算法，不是第 13 种算法。",
+            "description_zh": f"顶部批量编排入口：依次运行下方 {model_count} 个算法，不是额外算法。",
         },
         "categories": [
             {"key": "statistical", "label": "Statistical", "label_zh": "统计模型"},

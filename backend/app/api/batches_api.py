@@ -52,10 +52,11 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
     }
     model_configs = payload.get("model_configs") or {}
     train_samples = int(bundle.valid_starts(region_ids[0], "train").size) if region_ids else 0
+    model_count = len(MODELS)
     context = {
         "train_samples": train_samples,
         "region_count": len(region_ids),
-        "planned_tasks": len(region_ids) * 12,
+        "planned_tasks": len(region_ids) * model_count,
     }
     summary = all_models_summary(model_configs, context=context)
     per_model = {entry["algorithm_key"]: entry for entry in summary["models"]}
@@ -81,7 +82,7 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
     source_key = bundle.dataset["source_key"]
     primary_region = region_ids[0] if scope == "single" else None
     new_batch = make_batch_id(source_key, scope, region_id=primary_region)
-    planned = len(region_ids) * 12
+    planned = len(region_ids) * model_count
     frozen: dict[str, Any] = {}
     for model in MODELS:
         config = model_configs.get(model["key"]) or {}
@@ -102,18 +103,19 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
             INSERT INTO batches (batch_id, display_id, dataset_id, scope, algorithm_count, region_count, planned_tasks,
                 policy_json, params_snapshot_json, task_summary_json, status, created_at, idempotency_key,
                 started_at)
-            VALUES (?,?,?,?,12,?,?,?,?,?, 'Running', ?, ?, ?)
+            VALUES (?,?,?,?,?,?,?,?,?,?, 'Running', ?, ?, ?)
             """,
             (
                 new_batch,
                 new_batch,
                 bundle.dataset["dataset_id"],
                 scope,
+                model_count,
                 len(region_ids),
                 planned,
                 json_dumps(policy),
                 json_dumps(frozen),
-                json_dumps({"total": 12}),
+                json_dumps({"total": model_count}),
                 now_utc(),
                 idempotency_key,
                 now_utc(),
@@ -233,7 +235,7 @@ def run_batch(payload: dict[str, Any] = Body(...)) -> dict:
         "dataset_id": bundle.dataset["dataset_id"],
         "scope": scope,
         "status": "Running",
-        "algorithm_count": 12,
+        "algorithm_count": model_count,
         "region_count": len(region_ids),
         "planned_region_model_tasks": planned,
         "queued_experiments": len(jobs),

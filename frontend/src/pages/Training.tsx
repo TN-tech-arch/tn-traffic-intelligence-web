@@ -273,7 +273,7 @@ export default function Training() {
   const runnable = Boolean(models.length && datasetId && activeErrors.length === 0)
 
   const algorithmOptions = [
-    { value: ALL_MODELS, label: '全部模型（All Models，12 种）' },
+    { value: ALL_MODELS, label: `全部模型（All Models，${models.length} 种）` },
     ...models.map((model) => ({
       value: model.key,
       label: `${model.label} · ${model.category_label_zh}`,
@@ -309,7 +309,7 @@ export default function Training() {
       enum: algorithmOptions.map((item) => item.value),
       enum_labels: algorithmOptions.map((item) => item.label),
       default: 'arima',
-      help_zh: '选择单个算法，或使用全部模型执行 12 种算法的批量编排。',
+      help_zh: `选择单个算法，或使用全部模型执行 ${models.length} 种算法的批量编排。`,
       suggestion_zh: '单模型调试优先选择 ARIMA；完整对比使用全部模型。',
     }),
     [models],
@@ -388,7 +388,7 @@ export default function Training() {
           ((batch?.task_summary?.completed ?? 0) +
             (batch?.task_summary?.failed ?? 0) +
             (batch?.task_summary?.skipped ?? 0))) /
-          Math.max(1, batch?.experiments?.length ?? 12),
+          Math.max(1, batch?.experiments?.length ?? models.length),
       )
     : Math.round(experiment?.progress?.percent ?? 0)
   const currentStartedAt = activeRun?.started_at ?? activeRun?.created_at
@@ -471,10 +471,10 @@ export default function Training() {
       return
     }
     const confirmed = window.confirm(
-      `将按顺序运行 12 种算法。\n` +
+      `将按顺序运行 ${models.length} 种算法。\n` +
         `数据集：${dataset?.display_id ?? datasetId}\n` +
         `区域：${dataset?.region_ids?.[0] ?? '—'}\n` +
-        `计划模型任务：12\n\n` +
+        `计划模型任务：${models.length}\n\n` +
         `运行期间可在页面停止。确定开始吗？`,
     )
     if (!confirmed) return
@@ -584,7 +584,7 @@ export default function Training() {
   const resetAllModels = () => {
     setAllParams(Object.fromEntries(models.map((model) => [model.key, defaultsFor(model.key)])))
     setCustomized({})
-    messageApi.success('已恢复 12 种算法的默认参数。')
+    messageApi.success(`已恢复 ${models.length} 种算法的默认参数。`)
   }
 
   if (schemaError) {
@@ -598,7 +598,7 @@ export default function Training() {
         module={MODULE_META.m4.index}
         titleZh={MODULE_META.m4.titleZh}
         titleEn={MODULE_META.m4.titleEn}
-        description="12 种真实预测算法、全部模型批量编排与区域独立训练"
+        description={`${models.length} 种真实预测算法、全部模型批量编排与区域独立训练`}
         datasetInfo={
           dataset
             ? `${dataset.display_id ?? dataset.dataset_id} · ${sourceDisplayName(
@@ -692,7 +692,7 @@ export default function Training() {
             />
             {isAllModels ? (
               <div className="tn-muted" style={{ marginTop: -6, marginBottom: 10 }}>
-                批量编排会在当前区域依次运行 12 种算法。
+                批量编排会在当前区域依次运行 {models.length} 种算法。
               </div>
             ) : activeModel ? (
               <div className="tn-inline" style={{ marginTop: -6, marginBottom: 10 }}>
@@ -824,7 +824,7 @@ export default function Training() {
                 <div className="tn-m4-preflight">
                   {isAllModels ? (
                     <>
-                      <span>可运行模型：{preflight.runnable_count ?? 0} / 12</span>
+                      <span>可运行模型：{preflight.runnable_count ?? 0} / {models.length}</span>
                       <span>阻断错误：{preflight.blocking_error_count ?? 0}</span>
                     </>
                   ) : (
@@ -962,7 +962,7 @@ export default function Training() {
                 </div>
                 <div className="tn-m4-detail-item">
                   <span>算法</span>
-                  <strong>{activeIsBatch ? '全部模型（12 种）' : activeRun.algorithm_label}</strong>
+                  <strong>{activeIsBatch ? `全部模型（${models.length} 种）` : activeRun.algorithm_label}</strong>
                 </div>
                 <div className="tn-m4-detail-item">
                   <span>当前状态</span>
@@ -1000,7 +1000,7 @@ export default function Training() {
                   <div>
                     <strong>
                       {activeIsBatch
-                        ? `${batch?.task_summary?.completed ?? 0} / ${batch?.experiments?.length ?? 12} 个模型实验完成`
+                        ? `${batch?.task_summary?.completed ?? 0} / ${batch?.experiments?.length ?? models.length} 个模型实验完成`
                         : `${currentRegionsDone} / ${activeRun.region_total ?? 0} 个区域完成`}
                     </strong>
                     <div className="tn-muted">

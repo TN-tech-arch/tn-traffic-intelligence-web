@@ -61,6 +61,10 @@ class Settings:
         default_factory=lambda: os.environ.get("TN_COOKIE_SECURE", "1").lower()
         in {"1", "true", "yes"}
     )
+    local_models_only: bool = field(
+        default_factory=lambda: os.environ.get("TN_LOCAL_MODELS_ONLY", "0").lower()
+        in {"1", "true", "yes"}
+    )
     max_upload_mb: int = 25
 
     @property

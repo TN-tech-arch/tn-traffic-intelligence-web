@@ -1,0 +1,52 @@
+FROM node:24-bookworm-slim AS frontend
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
+
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app/backend \
+    TN_WEB_MODE=1 \
+    TN_LOCAL_MODELS_ONLY=1 \
+    TN_HOST=0.0.0.0 \
+    TN_SESSIONS_DIR=/tmp/tn-sessions \
+    TN_DATA_DIR=/tmp/tn-sessions/base/data \
+    TN_DB_PATH=/tmp/tn-sessions/base/data/tn_traffic.db \
+    TN_RAW_DIR=/app/data/raw \
+    TN_MODEL_CACHE=/tmp/tn-model-cache \
+    TN_COOKIE_SECURE=1 \
+    TN_PRELOAD_FOUNDATION=0 \
+    TN_MAX_SESSIONS=4 \
+    TN_SESSION_TTL_SECONDS=3600 \
+    TN_MAX_MODEL_JOBS=1 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-render.txt ./
+RUN pip install -r requirements-render.txt
+
+COPY backend ./backend
+COPY scripts ./scripts
+COPY data/raw ./data/raw
+COPY --from=frontend /frontend/dist ./frontend/dist
+COPY start_hf.sh ./
+
+RUN chmod +x /app/start_hf.sh \
+    && mkdir -p /tmp/tn-sessions /tmp/tn-model-cache
+
+EXPOSE 10000
+CMD ["/app/start_hf.sh"]

@@ -192,7 +192,7 @@ def check_model_params(
     """Validate one algorithm parameter group (Basic + Advanced)."""
     if algorithm_key not in MODEL_BY_KEY:
         return [error(path_prefix or "algorithm", "UNKNOWN_ALGORITHM",
-                      f"未知算法 {algorithm_key}。", "请从 12 个算法中选择。", algorithm_key)], {}
+                      f"未知算法 {algorithm_key}。", f"请从 {len(MODELS)} 个算法中选择。", algorithm_key)], {}
     model = MODEL_BY_KEY[algorithm_key]
     context = context or {}
     prefix = path_prefix or f"model_configs.{algorithm_key}.params"
@@ -989,7 +989,7 @@ def all_models_summary(
     batch_issues = resource_warnings(
         algorithms=[m["key"] for m in MODELS],
         region_count=int(context.get("region_count") or 1),
-        planned_tasks=int(context.get("planned_tasks") or 12),
+        planned_tasks=int(context.get("planned_tasks") or len(MODELS)),
         deep_learning_tasked=True,
     )
     return {
