@@ -52,3 +52,20 @@ def test_anonymous_sessions_have_independent_databases_and_artifacts(tmp_path):
         assert not (second.paths.artifacts_dir / "only-first.txt").exists()
     finally:
         manager.shutdown()
+
+
+def test_full_session_pool_recycles_the_oldest_idle_workspace(tmp_path, monkeypatch):
+    import app.web_sessions as web_sessions
+
+    monkeypatch.setattr(web_sessions, "MAX_SESSIONS", 2)
+    manager = SessionManager(_bootstrap_fixture, root=tmp_path / "sessions")
+    manager.initialize()
+    try:
+        first = manager.create()
+        second = manager.create()
+        third = manager.create()
+        assert third.token not in {first.token, second.token}
+        assert len(manager._sessions) == 2
+        assert first.token not in manager._sessions
+    finally:
+        manager.shutdown()

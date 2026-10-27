@@ -133,7 +133,18 @@ class SessionManager:
     def create(self) -> SessionWorkspace:
         with self._lock:
             if len(self._sessions) >= MAX_SESSIONS:
-                raise RuntimeError("当前公开演示的匿名会话已满，请稍后重新打开。")
+                idle_candidates = sorted(
+                    (
+                        workspace
+                        for workspace in self._sessions.values()
+                        if not self._has_active_jobs(workspace)
+                    ),
+                    key=lambda workspace: workspace.last_seen,
+                )
+                if idle_candidates:
+                    self._remove(idle_candidates[0])
+            if len(self._sessions) >= MAX_SESSIONS:
+                raise RuntimeError("当前公开演示的模型任务已满，请稍后重新打开。")
             token = secrets.token_urlsafe(32)
             root = self.root / token
             paths = self._make_paths(token, root)
