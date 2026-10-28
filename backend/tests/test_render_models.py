@@ -82,6 +82,7 @@ def test_render_profile_uses_balanced_deep_defaults():
     for key in ("rnn", "lstm", "gru"):
         assert defaults[key]["hidden_size"] == 64
         assert defaults[key]["num_layers"] == 1
+        assert defaults[key]["dropout"] == 0
     assert defaults["transformer"]["d_model"] == 64
     assert defaults["transformer"]["n_heads"] == 4
     assert defaults["transformer"]["encoder_layers"] == 1

@@ -29,6 +29,7 @@ TimesFM 和 Chronos 不包含在 Render 免费配置中。
 - Patience：8
 - MLP：64 个隐藏单元，1 层
 - RNN/LSTM/GRU：64 维，1 层
+- RNN/LSTM/GRU 单层配置的 Dropout 默认值为 0
 - Transformer：`d_model=64`、4 个注意力头、1 个编码层、前馈维度 128
 - 训练窗口：使用模块三生成的完整训练集，不再额外截断
 - 测试窗口：不缩减

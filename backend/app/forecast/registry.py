@@ -688,6 +688,8 @@ def _apply_empirically_validated_defaults() -> None:
                     item["default"] = 64
                 elif item["key"] == "num_layers":
                     item["default"] = 1
+                elif item["key"] == "dropout":
+                    item["default"] = 0
         for item in MODEL_BY_KEY["mlp"]["params"]:
             if item["key"] == "hidden_units":
                 item["default"] = 64
