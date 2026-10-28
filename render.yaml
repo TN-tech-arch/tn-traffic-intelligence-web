@@ -23,6 +23,8 @@ services:
         value: "1800"
       - key: TN_MAX_MODEL_JOBS
         value: "1"
+      - key: TN_MAX_TRAIN_WINDOWS
+        value: "1200"
       - key: TN_REQUESTS_PER_MINUTE
         value: "180"
       - key: OMP_NUM_THREADS

@@ -19,6 +19,7 @@ pinned: false
 - 同一会话刷新会保留历史；新浏览器会话、Cookie 清除或 2 小时空闲后重新进入时，历史为空且编号从 `0001` 开始。
 - TimesFM 与 Chronos 权重由服务器后台预取并供所有匿名会话共享。
 - Docker 部署说明见 `docs/WEB_DEPLOYMENT.md`。
+- Render 免费版部署说明见 `docs/RENDER_DEPLOYMENT.md`。
 - 当前 Streamlit Community Cloud 最大功能版说明见 `docs/STREAMLIT_DEMO.md`。
 
 本地构建和运行：

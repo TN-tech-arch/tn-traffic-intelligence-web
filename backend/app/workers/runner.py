@@ -21,6 +21,7 @@ from app.core.ids import now_utc, ulid
 from app.db.connection import get_connection, json_dumps, json_loads, query_all, query_one
 from app.db.maintenance import purge_legacy_dbscan_history
 from app.db.migrate import run_migrations
+from app.memory_runtime import release_training_memory
 from app.runtime_limits import MODEL_JOB_SLOTS
 from app.runtime_paths import ensure_current_dirs
 from app.workers.tasks import ProgressReporter, run_clustering, run_evaluation, run_experiment
@@ -224,6 +225,7 @@ def execute_job(row) -> tuple[str, str | None]:
         )
         if row["parent_batch_id"]:
             finalise_batch(row["parent_batch_id"])
+        release_training_memory()
         return final_state, None
     except Exception as exc:
         detail = f"{type(exc).__name__}: {exc}"
@@ -248,6 +250,7 @@ def execute_job(row) -> tuple[str, str | None]:
             )
         if row["parent_batch_id"]:
             finalise_batch(row["parent_batch_id"])
+        release_training_memory()
         return "Failed", detail
 
 

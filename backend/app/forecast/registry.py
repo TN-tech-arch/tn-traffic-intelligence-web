@@ -666,6 +666,43 @@ def _apply_empirically_validated_defaults() -> None:
         if item["key"] == "dim_feedforward":
             item["suggestion_zh"] = "默认 128，与 64 维模型配合以降低 CPU 训练成本。"
 
+    if settings.local_models_only:
+        # Render Free CPU profile: retain enough capacity for useful results while
+        # avoiding the 100-epoch / 128-wide defaults intended for full products.
+        for model in MODELS:
+            if model["category"] != "deep_learning":
+                continue
+            for item in model["params"]:
+                if item["key"] == "epochs":
+                    item["default"] = 40
+                elif item["key"] == "patience":
+                    item["default"] = 8
+                elif item["key"] == "early_stopping":
+                    item["default"] = True
+                elif item["key"] == "batch_size":
+                    item["default"] = 64
+
+        for key in ("rnn", "lstm", "gru"):
+            for item in MODEL_BY_KEY[key]["params"]:
+                if item["key"] == "hidden_size":
+                    item["default"] = 64
+                elif item["key"] == "num_layers":
+                    item["default"] = 1
+        for item in MODEL_BY_KEY["mlp"]["params"]:
+            if item["key"] == "hidden_units":
+                item["default"] = 64
+            elif item["key"] == "hidden_layers":
+                item["default"] = 1
+        transformer_defaults = {
+            "d_model": 64,
+            "n_heads": 4,
+            "encoder_layers": 1,
+            "dim_feedforward": 128,
+        }
+        for item in MODEL_BY_KEY["transformer"]["params"]:
+            if item["key"] in transformer_defaults:
+                item["default"] = transformer_defaults[item["key"]]
+
 
 _apply_empirically_validated_defaults()
 
