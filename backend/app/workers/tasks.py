@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import platform
 import sys
 import time
@@ -25,26 +24,6 @@ from app.services.artifacts import ensure_dir
 from app.services.clustering import run_clustering  # re-exported for the worker loop
 from app.services.datasets import load_dataset
 from app.services.metrics import all_metrics, macro_average
-
-
-MAX_TRAIN_WINDOWS = int(os.environ.get("TN_MAX_TRAIN_WINDOWS", "0") or 0)
-
-
-def _limit_training_batch(batch: WindowBatch) -> WindowBatch:
-    """Evenly sample origins while preserving the whole chronological range."""
-    if MAX_TRAIN_WINDOWS <= 0 or batch.size <= MAX_TRAIN_WINDOWS:
-        return batch
-    indices = np.linspace(0, batch.size - 1, MAX_TRAIN_WINDOWS, dtype=np.int64)
-    indices = np.unique(indices)
-    return WindowBatch(
-        starts=batch.starts[indices],
-        X_scaled=batch.X_scaled[indices],
-        Y_scaled=batch.Y_scaled[indices],
-        X_raw=batch.X_raw[indices],
-        Y_raw=batch.Y_raw[indices],
-        target_index=batch.target_index[indices],
-        target_timestamps=batch.target_timestamps[indices],
-    )
 
 
 class ProgressReporter:
@@ -290,7 +269,7 @@ def run_experiment(
         )
         try:
             region = _region_context(bundle, region_id)
-            train_batch = _limit_training_batch(_region_batch(bundle, region_id, "train"))
+            train_batch = _region_batch(bundle, region_id, "train")
             validation_batch = _region_batch(bundle, region_id, "validation")
             if train_batch.size == 0:
                 raise ValueError("训练集没有可用窗口")

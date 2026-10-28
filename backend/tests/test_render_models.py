@@ -7,8 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import numpy as np
-
 
 def test_render_profile_registry_has_ten_local_models():
     project_root = Path(__file__).resolve().parents[2]
@@ -88,24 +86,3 @@ def test_render_profile_uses_balanced_deep_defaults():
     assert defaults["transformer"]["n_heads"] == 4
     assert defaults["transformer"]["encoder_layers"] == 1
     assert defaults["transformer"]["dim_feedforward"] == 128
-
-
-def test_render_training_windows_are_evenly_capped(monkeypatch):
-    from app.forecast.base import WindowBatch
-    from app.workers import tasks
-
-    size = 50
-    batch = WindowBatch(
-        starts=np.arange(size),
-        X_scaled=np.zeros((size, 4), dtype="float32"),
-        Y_scaled=np.zeros((size, 2), dtype="float32"),
-        X_raw=np.zeros((size, 4), dtype="float32"),
-        Y_raw=np.zeros((size, 2), dtype="float32"),
-        target_index=np.arange(size * 2).reshape(size, 2),
-        target_timestamps=np.zeros((size, 2), dtype="datetime64[s]"),
-    )
-    monkeypatch.setattr(tasks, "MAX_TRAIN_WINDOWS", 20)
-    limited = tasks._limit_training_batch(batch)
-    assert limited.size == 20
-    assert limited.starts[0] == 0
-    assert limited.starts[-1] == size - 1
