@@ -75,7 +75,7 @@ def dashboard() -> dict:
         {"step": 3, "module": "Module 3", "title": "Forecasting Dataset Construction", "route": "/dataset",
          "description_zh": "滑窗、无泄漏切分与 Dataset ID"},
         {"step": 4, "module": "Module 4", "title": "Model Training", "route": "/training",
-         "description_zh": "12 种算法与 All Models 批量执行"},
+         "description_zh": f"{len(MODELS)} 种算法与 All Models 批量执行"},
         {"step": 5, "module": "Module 5", "title": "Prediction & Evaluation", "route": "/evaluation",
          "description_zh": "held-out Test 公平评价"},
     ]

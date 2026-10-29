@@ -69,7 +69,7 @@ export default function BrandHeader() {
               <div style={{ maxWidth: 320, fontSize: 12, lineHeight: 1.6 }}>
                 <p style={{ margin: 0 }}>
                   本平台使用三组真实区域流量数据（Milano 88 区 / Trentino 223 区 / ZTE 148 个有时序区域），
-                  提供 12 种真实预测算法与“全部模型（All Models）”批量执行。
+                  提供当前可运行的真实预测算法与“全部模型（All Models）”批量执行。
                 </p>
                 <p style={{ margin: '6px 0 0' }}>
                   所有统计、训练与预测结果均由真实数据计算得出；单位未证实的来源不做量纲推断。

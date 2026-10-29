@@ -47,6 +47,8 @@ export default function Home() {
       </div>
     )
 
+  const algorithmCount = data.algorithms.length
+
   return (
     <div className="tn-stack">
       <Card
@@ -58,7 +60,7 @@ export default function Home() {
             <h2 style={{ margin: 0, fontSize: 22 }}>欢迎使用 TianNuo Traffic Intelligence</h2>
             <p className="tn-muted" style={{ maxWidth: 720, marginTop: 8 }}>
               智能流量分析与预测平台：从三组真实区域流量数据出发，完成
-              时空探索 → 功能区聚类 → 预测数据集构建 → 12 种算法训练（含全部模型批处理） → 留出测试集公平评价 的完整闭环。
+              时空探索 → 功能区聚类 → 预测数据集构建 → {algorithmCount} 种算法训练（含全部模型批处理） → 留出测试集公平评价 的完整闭环。
               所有统计、训练曲线与预测结果均由真实数据计算，不使用模拟结果。
             </p>
             <div className="tn-inline" style={{ marginTop: 10 }}>
@@ -176,14 +178,22 @@ export default function Home() {
         </Row>
       </Card>
 
-      <Card title={bilingual('12 种预测算法', '12 Forecasting Algorithms')} size="small">
+      <Card
+        title={bilingual(
+          `${algorithmCount} 种预测算法`,
+          `${algorithmCount} Forecasting Algorithms`,
+        )}
+        size="small"
+      >
         <div className="tn-inline">
           {data.algorithms.map((algo) => (
             <Tag key={algo.key} color={algo.category === 'foundation' ? 'purple' : 'blue'}>
               {algo.label} · {modeLabel(algo.default_mode)}
             </Tag>
           ))}
-          <Tag color="gold">全部模型（All Models，批量执行，不是第 13 种算法）</Tag>
+          <Tag color="gold">
+            全部模型（All Models，批量执行，不是第 {algorithmCount + 1} 种算法）
+          </Tag>
         </div>
       </Card>
     </div>
